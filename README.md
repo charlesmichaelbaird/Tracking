@@ -149,36 +149,45 @@ same bounding logic as generated presets. The timeline is immediately seekable.
 The replay is loaded at `t = 0` in a paused state, so **Resume**, **Pause**,
 **Reset**, and timeline scrubbing operate on it like a fresh pre-computation.
 
-The common **World-view layers** row is available in both modes. Ground truth
-and measurements can each be toggled independently. Their sliders select the
-newest fraction of history to draw: all the way left shows no history and all
-the way right shows the complete history through the selected time.
+The common **World-view layers** row is available in both modes. The map grid,
+ground truth, and measurements can each be toggled independently. The truth and
+measurement sliders select the newest fraction of history to draw: all the way
+left shows no history and all the way right shows the complete history through
+the selected time.
 
 ## Track stitching analysis
 
 After an Analysis Mode run loads successfully, **Track Stitching Analysis**
-opens a separate three-section window. Timestamp tabs are created only at sensor
-measurement times that contain at least one eligible coasting track and one
-recently formed distinct track. The configuration section supplies minimum and
+switches the main display into an embedded stitching view. Timestamp tabs are
+created only at sensor measurement times that contain at least one eligible
+coasting track and one recently formed distinct track. Selecting a tab seeks
+the normal replay timeline to that scenario time without changing the current
+map pan or zoom. Bright red timeline markers show all candidate stitch times,
+and the view control can show all tracks, muted non-candidates, or show only the
+candidate tracks/targets. Dead candidate tracks remain grey and labeled in the
+map. The configuration section supplies minimum and
 maximum coast/new-track windows, optional dead-track eligibility, and the
-prediction/retrodiction time-bank resolution.
+prediction/retrodiction time-bank resolution. Pressing **Run stitching
+analysis** also computes separate Hungarian assignments for NLL and
+Mahalanobis costs.
 
 For every old/new segment pair, the analysis reports simple and kinematic
 midpoints, a full-state Mahalanobis time-bank estimate, and a truth-reference
 time found by minimizing the RMS position error of both propagated segments.
-The old state is predicted forward from its last update. The new state starts
-at its most-future recorded state and is retrodicted through its earlier
-associated measurements before continuing past its spawn time. Backward state
-transitions use negative `dt`; process covariance growth uses positive
-`abs(dt)`.
+The old state is predicted forward from its last update. For each timestamp tab,
+the new state starts at that snapshot's most-future recorded state and is
+retrodicted through its earlier associated measurements before continuing past
+its spawn time. Backward state transitions use negative `dt`; process covariance
+growth uses positive `abs(dt)`.
 
 At each candidate time, the full 9D innovation is `x_old - x_new` and its
 covariance is `P_old + P_new`. The time bank uses the canonical Mahalanobis
-distance, while each timing variant receives the canonical multivariate
-Gaussian negative log likelihood. The scenario summary remains above two
-paired matrix columns: estimated join times on the left and their matching NLL
+distance, while each timing variant receives both the canonical multivariate
+Gaussian negative log likelihood and the corresponding Mahalanobis distance.
+The scenario summary remains above a combined metrics table with one row per
+old/new pair and timing estimate. Optimal NLL and Mahalanobis assignments show
 costs on the right. Each timestamp tab provides a locally focused Plate Carrée
-view of truth, measurements, and track history.
+view driven by the main map and replay timeline.
 
 ## Map imagery
 

@@ -55,6 +55,7 @@ public final class TrackerFrame extends JFrame {
     private final JPanel dataModePanel = new JPanel(dataModeLayout);
     private final PresetScenarioPanel presetScenarioPanel;
     private final ScenarioTimelinePanel timelinePanel;
+    private final JPanel mapArea = new JPanel(new BorderLayout());
 
     private final JLabel statusLabel = new JLabel("Ready");
     private final JLabel scenarioTimeLabel = new JLabel("t = 0.0 s");
@@ -69,6 +70,7 @@ public final class TrackerFrame extends JFrame {
     private boolean analysisMode;
     private String currentScenarioName = "User generated";
     private RecordedScenario loadedAnalysisScenario;
+    private TrackStitchingAnalysisPanel stitchingAnalysisPanel;
 
     public TrackerFrame() {
         super("ECEF Target Tracker");
@@ -140,7 +142,6 @@ public final class TrackerFrame extends JFrame {
 
         setLayout(new BorderLayout());
         add(createHeader(), BorderLayout.NORTH);
-        JPanel mapArea = new JPanel(new BorderLayout());
         mapArea.add(earthMapCanvas, BorderLayout.CENTER);
         mapArea.add(timelinePanel, BorderLayout.SOUTH);
         add(mapArea, BorderLayout.CENTER);
@@ -550,6 +551,7 @@ public final class TrackerFrame extends JFrame {
         if (analysisMode == enabled) {
             return;
         }
+        exitTrackStitchingAnalysis();
         playback.reset();
         analysisMode = enabled;
         if (enabled) {
@@ -592,6 +594,7 @@ public final class TrackerFrame extends JFrame {
         if (!analysisMode) {
             return;
         }
+        exitTrackStitchingAnalysis();
         loadedAnalysisScenario = null;
         analysisLoadPanel.setStitchingEnabled(false);
         setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
@@ -627,8 +630,40 @@ public final class TrackerFrame extends JFrame {
         if (!analysisMode || loadedAnalysisScenario == null) {
             return;
         }
-        TrackStitchingWindow window = new TrackStitchingWindow(this, loadedAnalysisScenario);
-        window.setVisible(true);
+        if (stitchingAnalysisPanel != null) {
+            return;
+        }
+        stitchingAnalysisPanel = new TrackStitchingAnalysisPanel(
+                loadedAnalysisScenario,
+                playback,
+                earthMapCanvas,
+                timelinePanel,
+                this::exitTrackStitchingAnalysis,
+                statusLabel::setText);
+        mapArea.add(stitchingAnalysisPanel.tabStrip(), BorderLayout.NORTH);
+        remove(controlSidebar);
+        add(stitchingAnalysisPanel, BorderLayout.EAST);
+        revalidate();
+        repaint();
+        statusLabel.setText("Track stitching analysis view");
+    }
+
+    private void exitTrackStitchingAnalysis() {
+        if (stitchingAnalysisPanel == null) {
+            return;
+        }
+        stitchingAnalysisPanel.deactivate();
+        mapArea.remove(stitchingAnalysisPanel.tabStrip());
+        remove(stitchingAnalysisPanel);
+        stitchingAnalysisPanel = null;
+        add(controlSidebar, BorderLayout.EAST);
+        timelinePanel.clearCandidateMarkers();
+        earthMapCanvas.clearStitchingFocus();
+        revalidate();
+        repaint();
+        if (analysisMode && loadedAnalysisScenario != null) {
+            statusLabel.setText("Returned to analysis replay view");
+        }
     }
 
     private static JSeparator verticalSeparator() {

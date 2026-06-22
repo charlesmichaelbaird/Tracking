@@ -32,6 +32,7 @@ public final class TrackStitchingAnalyzer {
 
         List<EventResult> events = new ArrayList<>();
         for (double eventTime : measurementTimes) {
+            List<Segment> allSegments = new ArrayList<>();
             List<Segment> oldSegments = new ArrayList<>();
             List<Segment> newSegments = new ArrayList<>();
             for (Map.Entry<String, List<TrackRecord>> entry : tracks.entrySet()) {
@@ -39,6 +40,7 @@ public final class TrackStitchingAnalyzer {
                 if (segment == null) {
                     continue;
                 }
+                allSegments.add(segment);
                 double coastAge = eventTime - segment.lastUpdateTimeSeconds();
                 if (coastAge > EPSILON
                         && inWindow(coastAge,
@@ -55,6 +57,7 @@ public final class TrackStitchingAnalyzer {
                     newSegments.add(segment);
                 }
             }
+            allSegments.sort(Comparator.comparing(Segment::trackId));
             oldSegments.sort(Comparator.comparing(Segment::trackId));
             newSegments.sort(Comparator.comparing(Segment::trackId));
             boolean hasDistinctPair = oldSegments.stream().anyMatch(oldSegment ->
@@ -79,9 +82,12 @@ public final class TrackStitchingAnalyzer {
             }
             events.add(new EventResult(
                     eventTime,
+                    List.copyOf(allSegments),
                     List.copyOf(oldSegments),
                     List.copyOf(newSegments),
-                    List.copyOf(pairs)));
+                    List.copyOf(pairs),
+                    optimalAssignments(oldSegments, newSegments, pairs, Metric.NLL),
+                    optimalAssignments(oldSegments, newSegments, pairs, Metric.MAHALANOBIS)));
         }
         return List.copyOf(events);
     }
@@ -93,7 +99,7 @@ public final class TrackStitchingAnalyzer {
             List<RecordedMeasurement> newTrackMeasurements,
             double resolutionSeconds) {
         TrackRecord oldAnchor = oldSegment.lastUpdateRecord();
-        TrackRecord newAnchor = newSegment.formationRecord();
+        TrackRecord newAnchor = newSegment.mostFutureRecord();
         double oldTime = oldAnchor.timeSeconds();
         double newTime = newAnchor.timeSeconds();
         double bankStart = Math.min(oldTime, newTime);
@@ -124,6 +130,16 @@ public final class TrackStitchingAnalyzer {
                 .map(TruthScore::targetId)
                 .orElse("");
 
+        JoinMetrics simpleMetrics = joinMetrics(
+                oldAnchor, newSegment, newTrackMeasurements, simpleTime);
+        JoinMetrics kinematicMetrics = joinMetrics(
+                oldAnchor, newSegment, newTrackMeasurements, kinematicTime);
+        JoinMetrics statisticalMetrics = joinMetrics(
+                oldAnchor, newSegment, newTrackMeasurements, statisticalTime);
+        JoinMetrics actualMetrics = Double.isFinite(actualTime)
+                ? joinMetrics(oldAnchor, newSegment, newTrackMeasurements, actualTime)
+                : JoinMetrics.nan();
+
         return new PairResult(
                 oldSegment.trackId(),
                 newSegment.trackId(),
@@ -132,13 +148,178 @@ public final class TrackStitchingAnalyzer {
                 kinematicTime,
                 statisticalTime,
                 actualTime,
-                negativeLogLikelihood(oldAnchor, newSegment, newTrackMeasurements, simpleTime),
-                negativeLogLikelihood(oldAnchor, newSegment, newTrackMeasurements, kinematicTime),
-                negativeLogLikelihood(oldAnchor, newSegment, newTrackMeasurements, statisticalTime),
-                Double.isFinite(actualTime)
-                        ? negativeLogLikelihood(
-                                oldAnchor, newSegment, newTrackMeasurements, actualTime)
-                        : Double.NaN);
+                simpleMetrics.negativeLogLikelihood(),
+                kinematicMetrics.negativeLogLikelihood(),
+                statisticalMetrics.negativeLogLikelihood(),
+                actualMetrics.negativeLogLikelihood(),
+                simpleMetrics.mahalanobisDistance(),
+                kinematicMetrics.mahalanobisDistance(),
+                statisticalMetrics.mahalanobisDistance(),
+                actualMetrics.mahalanobisDistance());
+    }
+
+    private static List<OptimalAssignment> optimalAssignments(
+            List<Segment> oldSegments,
+            List<Segment> newSegments,
+            List<PairResult> pairs,
+            Metric metric) {
+        if (oldSegments.isEmpty() || newSegments.isEmpty() || pairs.isEmpty()) {
+            return List.of();
+        }
+        Map<String, PairResult> pairByIds = new LinkedHashMap<>();
+        for (PairResult pair : pairs) {
+            pairByIds.put(key(pair.oldTrackId(), pair.newTrackId()), pair);
+        }
+        int size = Math.max(oldSegments.size(), newSegments.size());
+        double[][] costs = new double[size][size];
+        double missingCost = 1.0e12;
+        for (int row = 0; row < size; row++) {
+            for (int column = 0; column < size; column++) {
+                costs[row][column] = row < oldSegments.size() && column < newSegments.size()
+                        ? missingCost
+                        : 0.0;
+            }
+        }
+        VariantScore[][] scores = new VariantScore[oldSegments.size()][newSegments.size()];
+        for (int row = 0; row < oldSegments.size(); row++) {
+            for (int column = 0; column < newSegments.size(); column++) {
+                PairResult pair = pairByIds.get(key(
+                        oldSegments.get(row).trackId(),
+                        newSegments.get(column).trackId()));
+                if (pair == null) {
+                    continue;
+                }
+                VariantScore score = bestVariant(pair, metric);
+                if (score != null) {
+                    scores[row][column] = score;
+                    costs[row][column] = score.score();
+                }
+            }
+        }
+        int[] assignment = hungarian(costs);
+        List<OptimalAssignment> results = new ArrayList<>();
+        for (int row = 0; row < oldSegments.size(); row++) {
+            int column = assignment[row];
+            if (column < 0 || column >= newSegments.size()) {
+                continue;
+            }
+            VariantScore score = scores[row][column];
+            if (score == null || !Double.isFinite(score.score())) {
+                continue;
+            }
+            results.add(new OptimalAssignment(
+                    metric.displayName(),
+                    oldSegments.get(row).trackId(),
+                    newSegments.get(column).trackId(),
+                    score.variant(),
+                    score.joinTimeSeconds(),
+                    score.score()));
+        }
+        return List.copyOf(results);
+    }
+
+    private static VariantScore bestVariant(PairResult pair, Metric metric) {
+        List<VariantScore> variants = List.of(
+                variant(pair, "Simple midpoint",
+                        pair.simpleJoinTimeSeconds(),
+                        pair.simpleNegativeLogLikelihood(),
+                        pair.simpleMahalanobisDistance(),
+                        metric),
+                variant(pair, "Kinematic midpoint",
+                        pair.kinematicJoinTimeSeconds(),
+                        pair.kinematicNegativeLogLikelihood(),
+                        pair.kinematicMahalanobisDistance(),
+                        metric),
+                variant(pair, "Mahalanobis bank",
+                        pair.statisticalJoinTimeSeconds(),
+                        pair.statisticalNegativeLogLikelihood(),
+                        pair.statisticalMahalanobisDistance(),
+                        metric),
+                variant(pair, "Truth RMS",
+                        pair.actualJoinTimeSeconds(),
+                        pair.actualNegativeLogLikelihood(),
+                        pair.actualMahalanobisDistance(),
+                        metric));
+        return variants.stream()
+                .filter(score -> Double.isFinite(score.score()))
+                .min(Comparator.comparingDouble(VariantScore::score))
+                .orElse(null);
+    }
+
+    private static VariantScore variant(
+            PairResult pair,
+            String label,
+            double joinTimeSeconds,
+            double negativeLogLikelihood,
+            double mahalanobisDistance,
+            Metric metric) {
+        double score = metric == Metric.NLL ? negativeLogLikelihood : mahalanobisDistance;
+        return new VariantScore(label, joinTimeSeconds, score);
+    }
+
+    private static int[] hungarian(double[][] cost) {
+        int size = cost.length;
+        double[] rowPotential = new double[size + 1];
+        double[] columnPotential = new double[size + 1];
+        int[] matchingRowForColumn = new int[size + 1];
+        int[] previousColumn = new int[size + 1];
+        for (int row = 1; row <= size; row++) {
+            matchingRowForColumn[0] = row;
+            int column0 = 0;
+            double[] minimum = new double[size + 1];
+            boolean[] used = new boolean[size + 1];
+            for (int column = 1; column <= size; column++) {
+                minimum[column] = Double.POSITIVE_INFINITY;
+            }
+            do {
+                used[column0] = true;
+                int row0 = matchingRowForColumn[column0];
+                double delta = Double.POSITIVE_INFINITY;
+                int column1 = 0;
+                for (int column = 1; column <= size; column++) {
+                    if (used[column]) {
+                        continue;
+                    }
+                    double current = cost[row0 - 1][column - 1]
+                            - rowPotential[row0]
+                            - columnPotential[column];
+                    if (current < minimum[column]) {
+                        minimum[column] = current;
+                        previousColumn[column] = column0;
+                    }
+                    if (minimum[column] < delta) {
+                        delta = minimum[column];
+                        column1 = column;
+                    }
+                }
+                for (int column = 0; column <= size; column++) {
+                    if (used[column]) {
+                        rowPotential[matchingRowForColumn[column]] += delta;
+                        columnPotential[column] -= delta;
+                    } else {
+                        minimum[column] -= delta;
+                    }
+                }
+                column0 = column1;
+            } while (matchingRowForColumn[column0] != 0);
+            do {
+                int column1 = previousColumn[column0];
+                matchingRowForColumn[column0] = matchingRowForColumn[column1];
+                column0 = column1;
+            } while (column0 != 0);
+        }
+        int[] assignment = new int[size];
+        java.util.Arrays.fill(assignment, -1);
+        for (int column = 1; column <= size; column++) {
+            if (matchingRowForColumn[column] > 0) {
+                assignment[matchingRowForColumn[column] - 1] = column - 1;
+            }
+        }
+        return assignment;
+    }
+
+    private static String key(String oldTrackId, String newTrackId) {
+        return oldTrackId + "\u0000" + newTrackId;
     }
 
     private static Segment segmentAt(
@@ -176,7 +357,7 @@ public final class TrackStitchingAnalyzer {
                 formation,
                 lastUpdate,
                 lastObserved,
-                records.get(records.size() - 1),
+                lastObserved,
                 List.copyOf(history));
     }
 
@@ -213,7 +394,7 @@ public final class TrackStitchingAnalyzer {
         return bank;
     }
 
-    private static double negativeLogLikelihood(
+    private static JoinMetrics joinMetrics(
             TrackRecord oldAnchor,
             Segment newSegment,
             List<RecordedMeasurement> newTrackMeasurements,
@@ -221,7 +402,9 @@ public final class TrackStitchingAnalyzer {
         InnovationScore score = innovationScore(
                 predictOld(oldAnchor, timeSeconds),
                 retrodictNew(newSegment, newTrackMeasurements, timeSeconds));
-        return canonicalNegativeLogLikelihood(score);
+        return new JoinMetrics(
+                canonicalNegativeLogLikelihood(score),
+                score.mahalanobisDistance());
     }
 
     static double canonicalNegativeLogLikelihood(InnovationScore score) {
@@ -715,9 +898,12 @@ public final class TrackStitchingAnalyzer {
 
     public record EventResult(
             double timeSeconds,
+            List<Segment> allSegments,
             List<Segment> oldSegments,
             List<Segment> newSegments,
-            List<PairResult> pairs) {
+            List<PairResult> pairs,
+            List<OptimalAssignment> nllAssignments,
+            List<OptimalAssignment> mahalanobisAssignments) {
     }
 
     public record PairResult(
@@ -731,7 +917,20 @@ public final class TrackStitchingAnalyzer {
             double simpleNegativeLogLikelihood,
             double kinematicNegativeLogLikelihood,
             double statisticalNegativeLogLikelihood,
-            double actualNegativeLogLikelihood) {
+            double actualNegativeLogLikelihood,
+            double simpleMahalanobisDistance,
+            double kinematicMahalanobisDistance,
+            double statisticalMahalanobisDistance,
+            double actualMahalanobisDistance) {
+    }
+
+    public record OptimalAssignment(
+            String metric,
+            String oldTrackId,
+            String newTrackId,
+            String variant,
+            double joinTimeSeconds,
+            double score) {
     }
 
     record PropagatedState(double[] state, double[][] covariance) {
@@ -749,6 +948,35 @@ public final class TrackStitchingAnalyzer {
     }
 
     private record TruthScore(double timeSeconds, double score, String targetId) {
+    }
+
+    private enum Metric {
+        NLL("NLL"),
+        MAHALANOBIS("Mahalanobis");
+
+        private final String displayName;
+
+        Metric(String displayName) {
+            this.displayName = displayName;
+        }
+
+        String displayName() {
+            return displayName;
+        }
+    }
+
+    private record VariantScore(
+            String variant,
+            double joinTimeSeconds,
+            double score) {
+    }
+
+    private record JoinMetrics(
+            double negativeLogLikelihood,
+            double mahalanobisDistance) {
+        static JoinMetrics nan() {
+            return new JoinMetrics(Double.NaN, Double.NaN);
+        }
     }
 
     private record CholeskyResult(double[][] lower, double logDeterminant) {

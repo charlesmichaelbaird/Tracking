@@ -23,6 +23,14 @@ final class DisplayControlsPanel extends JPanel {
         title.setFont(title.getFont().deriveFont(Font.BOLD));
         add(title);
 
+        JToggleButton gridButton = new JToggleButton("Grid", true);
+        gridButton.setToolTipText("Show or hide the latitude/longitude grid lines");
+        gridButton.addActionListener(event -> {
+            settings.setGridVisible(gridButton.isSelected());
+            onChanged.run();
+        });
+        add(gridButton);
+
         JToggleButton truthButton = new JToggleButton("Ground truth", true);
         truthButton.setToolTipText("Show or hide ground-truth paths and target markers");
         truthButton.addActionListener(event -> {

@@ -2,10 +2,19 @@ package com.targettracker.ui;
 
 /** Shared world-view visibility and history-length settings. */
 final class DisplayHistorySettings {
+    private boolean gridVisible = true;
     private boolean groundTruthVisible = true;
     private boolean measurementsVisible = true;
     private double groundTruthHistoryFraction = 1.0;
     private double measurementHistoryFraction = 1.0;
+
+    boolean gridVisible() {
+        return gridVisible;
+    }
+
+    void setGridVisible(boolean visible) {
+        gridVisible = visible;
+    }
 
     boolean groundTruthVisible() {
         return groundTruthVisible;

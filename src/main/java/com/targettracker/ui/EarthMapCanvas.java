@@ -1,5 +1,6 @@
 package com.targettracker.ui;
 
+import com.targettracker.analysis.TrackStitchingAnalyzer;
 import com.targettracker.model.EcefPoint;
 import com.targettracker.model.GeodeticPoint;
 import com.targettracker.model.ScenarioModel;
@@ -7,6 +8,7 @@ import com.targettracker.model.TargetMeasurement;
 import com.targettracker.model.TargetTrajectory;
 import com.targettracker.model.Wgs84;
 import com.targettracker.model.Wgs84Geodesic;
+import com.targettracker.tracking.TrackRecord;
 import com.targettracker.tracking.TrackView;
 
 import javax.imageio.ImageIO;
@@ -36,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -44,6 +47,12 @@ final class EarthMapCanvas extends JPanel {
     enum DrawingMode {
         FREE_HAND,
         SEGMENTED
+    }
+
+    enum StitchingVisibilityMode {
+        ALL,
+        GREYED,
+        ONLY_STITCHED
     }
 
     private static final int HORIZONTAL_MARGIN = 66;
@@ -84,6 +93,10 @@ final class EarthMapCanvas extends JPanel {
     private double zoom = MIN_ZOOM;
     private boolean highResolutionMapEnabled = true;
     private boolean detailLayerActive;
+    private Set<String> stitchingTrackIds = Set.of();
+    private Set<String> stitchingTargetIds = Set.of();
+    private List<TrackStitchingAnalyzer.Segment> stitchingSegments = List.of();
+    private StitchingVisibilityMode stitchingVisibilityMode = StitchingVisibilityMode.ALL;
 
     EarthMapCanvas(
             ScenarioModel model,
@@ -281,6 +294,33 @@ final class EarthMapCanvas extends JPanel {
         repaint();
     }
 
+    void setStitchingFocus(
+            Set<String> trackIds,
+            Set<String> targetIds,
+            StitchingVisibilityMode mode) {
+        setStitchingFocus(trackIds, targetIds, mode, List.of());
+    }
+
+    void setStitchingFocus(
+            Set<String> trackIds,
+            Set<String> targetIds,
+            StitchingVisibilityMode mode,
+            List<TrackStitchingAnalyzer.Segment> segments) {
+        stitchingTrackIds = trackIds == null ? Set.of() : Set.copyOf(trackIds);
+        stitchingTargetIds = targetIds == null ? Set.of() : Set.copyOf(targetIds);
+        stitchingSegments = segments == null ? List.of() : List.copyOf(segments);
+        stitchingVisibilityMode = mode == null ? StitchingVisibilityMode.ALL : mode;
+        repaint();
+    }
+
+    void clearStitchingFocus() {
+        stitchingTrackIds = Set.of();
+        stitchingTargetIds = Set.of();
+        stitchingSegments = List.of();
+        stitchingVisibilityMode = StitchingVisibilityMode.ALL;
+        repaint();
+    }
+
     String viewDescription() {
         return zoom < 10.0 ? "%.1f×".formatted(zoom) : "%,.0f×".formatted(zoom);
     }
@@ -298,6 +338,7 @@ final class EarthMapCanvas extends JPanel {
             drawRecentHistory(g);
             drawMeasurements(g);
             drawTracks(g);
+            drawDeadStitchingSegments(g);
             drawCurrentTargets(g);
             drawSegmentPreview(g);
             drawViewBadge(g);
@@ -354,8 +395,10 @@ final class EarthMapCanvas extends JPanel {
              longitude <= maximumLongitude + 1.0e-9; longitude += longitudeStep) {
             int x = map.x + (int) Math.round(
                     (longitude - minimumLongitude) / longitudeSpan * map.width);
-            g.setColor(GRID_COLOR);
-            g.drawLine(x, map.y, x, map.y + map.height);
+            if (displaySettings.gridVisible()) {
+                g.setColor(GRID_COLOR);
+                g.drawLine(x, map.y, x, map.y + map.height);
+            }
             g.setColor(new Color(73, 86, 97));
             String label = longitudeLabel(
                     GeodeticPoint.normalizeLongitude(longitude), longitudeStep);
@@ -368,8 +411,10 @@ final class EarthMapCanvas extends JPanel {
             }
             int y = map.y + map.height - (int) Math.round(
                     (latitude - minimumLatitude) / latitudeSpan * map.height);
-            g.setColor(GRID_COLOR);
-            g.drawLine(map.x, y, map.x + map.width, y);
+            if (displaySettings.gridVisible()) {
+                g.setColor(GRID_COLOR);
+                g.drawLine(map.x, y, map.x + map.width, y);
+            }
             g.setColor(new Color(73, 86, 97));
             String label = latitudeLabel(latitude, latitudeStep);
             g.drawString(label, map.x - metrics.stringWidth(label) - 8, y + 4);
@@ -388,10 +433,15 @@ final class EarthMapCanvas extends JPanel {
         }
         if (playback.isImportedReplay()) {
             for (GroundTruthView truth : playback.currentGroundTruthViews()) {
+                if (hideTargetForStitching(truth.id())) {
+                    continue;
+                }
                 if (truth.plannedPath().size() < 2) {
                     continue;
                 }
-                g.setColor(withAlpha(truth.color(), 170));
+                boolean greyed = greyTargetForStitching(truth.id());
+                Color color = greyed ? mutedColor(truth.color()) : truth.color();
+                g.setColor(withAlpha(color, greyed ? 70 : 170));
                 g.setStroke(PLANNED_STROKE);
                 drawEcefPath(g, truth.plannedPath());
             }
@@ -399,10 +449,16 @@ final class EarthMapCanvas extends JPanel {
         }
         TargetTrajectory selected = selectedTarget.get();
         for (TargetTrajectory target : model.targets()) {
+            if (hideTargetForStitching(target.id())) {
+                continue;
+            }
             if (target.path().size() < 2) {
                 continue;
             }
-            g.setColor(withAlpha(target.color(), target == selected ? 215 : 130));
+            boolean greyed = greyTargetForStitching(target.id());
+            Color color = greyed ? mutedColor(target.color()) : target.color();
+            int alpha = greyed ? 70 : target == selected ? 215 : 130;
+            g.setColor(withAlpha(color, alpha));
             g.setStroke(target == selected ? SELECTED_PLANNED_STROKE : PLANNED_STROKE);
             drawEcefPath(g, sampledGeodesicPath(target.path()));
         }
@@ -416,23 +472,33 @@ final class EarthMapCanvas extends JPanel {
         g.setStroke(HISTORY_STROKE);
         if (playback.isImportedReplay()) {
             for (GroundTruthView truth : playback.currentGroundTruthViews()) {
+                if (hideTargetForStitching(truth.id())) {
+                    continue;
+                }
                 List<EcefPoint> history = historySlice(
                         truth.history(), displaySettings.groundTruthHistoryFraction());
                 if (history.size() >= 2) {
-                    g.setColor(truth.color());
+                    boolean greyed = greyTargetForStitching(truth.id());
+                    Color color = greyed ? mutedColor(truth.color()) : truth.color();
+                    g.setColor(withAlpha(color, greyed ? 95 : 255));
                     drawEcefPath(g, history);
                 }
             }
             return;
         }
         for (Map.Entry<TargetTrajectory, Deque<EcefPoint>> entry : playback.recentHistory().entrySet()) {
+            if (hideTargetForStitching(entry.getKey().id())) {
+                continue;
+            }
             List<EcefPoint> history = historySlice(
                     new ArrayList<>(entry.getValue()),
                     displaySettings.groundTruthHistoryFraction());
             if (history.size() < 2) {
                 continue;
             }
-            g.setColor(entry.getKey().color());
+            boolean greyed = greyTargetForStitching(entry.getKey().id());
+            Color color = greyed ? mutedColor(entry.getKey().color()) : entry.getKey().color();
+            g.setColor(withAlpha(color, greyed ? 95 : 255));
             drawEcefPath(g, history);
         }
     }
@@ -443,19 +509,29 @@ final class EarthMapCanvas extends JPanel {
         }
         if (playback.isImportedReplay()) {
             for (GroundTruthView truth : playback.currentGroundTruthViews()) {
-                drawTargetMarker(g, truth.id(), truth.currentPosition(), truth.color(), 4);
+                if (hideTargetForStitching(truth.id())) {
+                    continue;
+                }
+                boolean greyed = greyTargetForStitching(truth.id());
+                Color color = greyed ? mutedColor(truth.color()) : truth.color();
+                drawTargetMarker(g, truth.id(), truth.currentPosition(), color, 4);
             }
             return;
         }
         for (TargetTrajectory target : model.targets()) {
+            if (hideTargetForStitching(target.id())) {
+                continue;
+            }
             EcefPoint position = playback.currentPosition(target);
             if (position == null || (!playback.isRunning()
                     && !playback.isReplayDisplayActive()
                     && playback.elapsedSeconds() <= 0.0)) {
                 continue;
             }
+            boolean greyed = greyTargetForStitching(target.id());
+            Color color = greyed ? mutedColor(target.color()) : target.color();
             int radius = target == selectedTarget.get() ? 6 : 4;
-            drawTargetMarker(g, target.id(), position, target.color(), radius);
+            drawTargetMarker(g, target.id(), position, color, radius);
         }
     }
 
@@ -514,17 +590,23 @@ final class EarthMapCanvas extends JPanel {
 
     private void drawTracks(Graphics2D g) {
         for (TrackView track : playback.currentTrackViews()) {
-            Color color = track.dead() ? new Color(145, 150, 156) : track.color();
+            if (hideTrackForStitching(track.id())) {
+                continue;
+            }
+            boolean greyed = greyTrackForStitching(track.id());
+            Color color = track.dead()
+                    ? new Color(145, 150, 156)
+                    : greyed ? mutedColor(track.color()) : track.color();
             if (track.tail().size() >= 2) {
                 g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(),
-                        track.dead() ? 105 : 210));
+                        track.dead() ? 105 : greyed ? 135 : 210));
                 g.setStroke(new BasicStroke(
-                        track.dead() ? 2.0f : 3.2f,
+                        track.dead() || greyed ? 2.0f : 3.2f,
                         BasicStroke.CAP_ROUND,
                         BasicStroke.JOIN_ROUND));
                 drawEcefPath(g, track.tail());
             }
-            drawTrackCovariance(g, track, color);
+            drawTrackCovariance(g, track, color, greyed);
 
             Point point = toScreen(Wgs84.toGeodetic(track.meanPosition()));
             if (point == null) {
@@ -538,13 +620,56 @@ final class EarthMapCanvas extends JPanel {
             g.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
             g.setColor(Color.WHITE);
             g.drawRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
-            g.setColor(track.dead() ? new Color(105, 110, 116) : new Color(25, 31, 37));
+            g.setColor(track.dead() || greyed
+                    ? new Color(105, 110, 116)
+                    : new Color(25, 31, 37));
             String label = track.dead() ? track.id() + " (dead)" : track.id();
             g.drawString(label, point.x + radius + 5, point.y - radius - 2);
         }
     }
 
-    private void drawTrackCovariance(Graphics2D g, TrackView track, Color color) {
+    private void drawDeadStitchingSegments(Graphics2D g) {
+        if (stitchingSegments.isEmpty()) {
+            return;
+        }
+        Color deadColor = new Color(145, 150, 156);
+        for (TrackStitchingAnalyzer.Segment segment : stitchingSegments) {
+            if (!segment.deadAtEvent()) {
+                continue;
+            }
+            List<EcefPoint> tail = segment.history().stream()
+                    .map(TrackRecord::state)
+                    .map(EarthMapCanvas::pointFromState)
+                    .toList();
+            if (tail.size() >= 2) {
+                g.setColor(new Color(
+                        deadColor.getRed(), deadColor.getGreen(), deadColor.getBlue(), 175));
+                g.setStroke(new BasicStroke(3.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                drawEcefPath(g, tail);
+            }
+            TrackRecord last = segment.lastObservedRecord();
+            Point point = toScreen(Wgs84.toGeodetic(pointFromState(last.state())));
+            if (point == null) {
+                continue;
+            }
+            int radius = 7;
+            g.setColor(new Color(20, 25, 31, 210));
+            g.fillRect(point.x - radius - 2, point.y - radius - 2,
+                    radius * 2 + 4, radius * 2 + 4);
+            g.setColor(deadColor);
+            g.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
+            g.setColor(Color.WHITE);
+            g.drawRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
+            g.setColor(new Color(105, 110, 116));
+            g.drawString(segment.trackId() + " (dead)", point.x + radius + 5, point.y - radius - 2);
+        }
+    }
+
+    private void drawTrackCovariance(
+            Graphics2D g,
+            TrackView track,
+            Color color,
+            boolean greyed) {
         GeodeticPoint geodetic = Wgs84.toGeodetic(track.meanPosition());
         double latitude = Math.toRadians(geodetic.latitudeDegrees());
         double longitude = Math.toRadians(geodetic.longitudeDegrees());
@@ -576,8 +701,8 @@ final class EarthMapCanvas extends JPanel {
         Point previous = null;
         Point first = null;
         g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(),
-                track.dead() ? 90 : 190));
-        g.setStroke(new BasicStroke(track.dead() ? 1.2f : 1.8f));
+                track.dead() ? 75 : greyed ? 110 : 190));
+        g.setStroke(new BasicStroke(track.dead() || greyed ? 1.2f : 1.8f));
         for (int sample = 0; sample <= 48; sample++) {
             double phase = 2.0 * Math.PI * sample / 48.0;
             double major = majorSigma * Math.cos(phase);
@@ -887,6 +1012,46 @@ final class EarthMapCanvas extends JPanel {
 
     private static Color withAlpha(Color color, int alpha) {
         return new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha);
+    }
+
+    private static Color mutedColor(Color color) {
+        float[] hsb = Color.RGBtoHSB(color.getRed(), color.getGreen(), color.getBlue(), null);
+        return Color.getHSBColor(
+                hsb[0],
+                Math.max(0.08f, hsb[1] * 0.28f),
+                Math.min(0.92f, Math.max(0.45f, hsb[2] * 0.82f + 0.12f)));
+    }
+
+    private static EcefPoint pointFromState(double[] state) {
+        return new EcefPoint(state[0], state[1], state[2]);
+    }
+
+    private boolean stitchingFocusActive() {
+        return !stitchingTrackIds.isEmpty() || !stitchingTargetIds.isEmpty();
+    }
+
+    private boolean hideTrackForStitching(String trackId) {
+        return stitchingFocusActive()
+                && stitchingVisibilityMode == StitchingVisibilityMode.ONLY_STITCHED
+                && !stitchingTrackIds.contains(trackId);
+    }
+
+    private boolean greyTrackForStitching(String trackId) {
+        return stitchingFocusActive()
+                && stitchingVisibilityMode == StitchingVisibilityMode.GREYED
+                && !stitchingTrackIds.contains(trackId);
+    }
+
+    private boolean hideTargetForStitching(String targetId) {
+        return stitchingFocusActive()
+                && stitchingVisibilityMode == StitchingVisibilityMode.ONLY_STITCHED
+                && !stitchingTargetIds.contains(targetId);
+    }
+
+    private boolean greyTargetForStitching(String targetId) {
+        return stitchingFocusActive()
+                && stitchingVisibilityMode == StitchingVisibilityMode.GREYED
+                && !stitchingTargetIds.contains(targetId);
     }
 
     private void drawRasterViewport(Graphics2D g, Rectangle map) {

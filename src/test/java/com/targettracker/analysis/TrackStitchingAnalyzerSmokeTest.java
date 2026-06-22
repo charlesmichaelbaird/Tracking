@@ -63,6 +63,12 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 || !Double.isFinite(pair.statisticalNegativeLogLikelihood())) {
             throw new AssertionError("Truth identity and NLL cost should be available");
         }
+        if (events.get(0).nllAssignments().size() != 1
+                || events.get(0).mahalanobisAssignments().size() != 1
+                || !events.get(0).nllAssignments().get(0).oldTrackId().equals("TRK-001")
+                || !events.get(0).nllAssignments().get(0).newTrackId().equals("TRK-002")) {
+            throw new AssertionError("Expected Hungarian optimum for the single feasible pair");
+        }
 
         List<TrackRecord> deadTrackRecords = tracks.stream()
                 .filter(record -> !record.trackId().equals("TRK-001")
@@ -81,7 +87,61 @@ public final class TrackStitchingAnalyzerSmokeTest {
                         1.0, 10.0, 0.0, 1.0, true, 0.5)).size() != 1) {
             throw new AssertionError("Dead old tracks should be eligible when enabled");
         }
+        verifyEventLimitedJoinSeeds(analyzer);
         System.out.println("TrackStitchingAnalyzerSmokeTest passed");
+    }
+
+    private static void verifyEventLimitedJoinSeeds(TrackStitchingAnalyzer analyzer) {
+        List<TrackRecord> tracks = new ArrayList<>();
+        tracks.add(track("TRK-OLD", 0.0, 0.0, 10.0, true));
+        for (int second = 1; second <= 5; second++) {
+            tracks.add(track("TRK-OLD", second, 10.0 * second, 10.0, false));
+        }
+        tracks.add(track("TRK-NEW", 3.0, 30.0, 10.0, true));
+        tracks.add(track("TRK-NEW", 4.0, 40.0, 10.0, false));
+        tracks.add(track("TRK-NEW", 5.0, 50.0, 10.0, false));
+        List<GroundTruthRecord> truth = new ArrayList<>();
+        for (int second = 0; second <= 5; second++) {
+            truth.add(new GroundTruthRecord(
+                    "TGT-001", second,
+                    new double[]{10.0 * second, 0, 0, 10, 0, 0, 0, 0, 0}));
+        }
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("event_limited_stitching_test"),
+                "Event-limited stitching test",
+                5.0,
+                tracks,
+                truth,
+                List.of(
+                        measurement("TRK-NEW", 4.0, 40.0),
+                        measurement("TRK-NEW", 5.0, 50.0)));
+        List<TrackStitchingAnalyzer.EventResult> events = analyzer.analyze(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(1.0, 10.0, 0.0, 10.0, false, 0.5));
+        if (events.size() != 2) {
+            throw new AssertionError("Expected two candidate snapshots");
+        }
+        TrackStitchingAnalyzer.PairResult firstPair = pair(events.get(0), "TRK-OLD", "TRK-NEW");
+        TrackStitchingAnalyzer.PairResult secondPair = pair(events.get(1), "TRK-OLD", "TRK-NEW");
+        double firstSimple = firstPair.simpleJoinTimeSeconds();
+        double secondSimple = secondPair.simpleJoinTimeSeconds();
+        requireClose(2.0, firstSimple, "first event-limited midpoint");
+        requireClose(2.5, secondSimple, "second event-limited midpoint");
+        if (!Double.isFinite(secondPair.statisticalMahalanobisDistance())) {
+            throw new AssertionError("Mahalanobis distance should be reported for each timing row");
+        }
+    }
+
+    private static TrackStitchingAnalyzer.PairResult pair(
+            TrackStitchingAnalyzer.EventResult event,
+            String oldTrackId,
+            String newTrackId) {
+        return event.pairs().stream()
+                .filter(candidate -> candidate.oldTrackId().equals(oldTrackId)
+                        && candidate.newTrackId().equals(newTrackId))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "Missing pair " + oldTrackId + " -> " + newTrackId));
     }
 
     private static void verifyCanonicalInnovationMetrics() {
@@ -171,6 +231,19 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 "TGT-001",
                 time,
                 new double[]{50, 0, 0, 12, 0, 0},
+                covariance,
+                1.0,
+                1.0);
+    }
+
+    private static RecordedMeasurement measurement(String associatedTrackId, double time, double x) {
+        double[][] covariance = diagonal(6, 1.0);
+        return new RecordedMeasurement(
+                "GOD-SENSOR-001",
+                "TGT-001",
+                associatedTrackId,
+                time,
+                new double[]{x, 0, 0, 10, 0, 0},
                 covariance,
                 1.0,
                 1.0);

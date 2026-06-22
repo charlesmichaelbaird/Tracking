@@ -18,8 +18,10 @@ import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.Stroke;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.List;
 
 /** Video-style scenario ruler that becomes seekable when replay data exists. */
 final class ScenarioTimelinePanel extends JPanel {
@@ -28,6 +30,8 @@ final class ScenarioTimelinePanel extends JPanel {
     private final TrackCsvRecorder recorder;
     private final JLabel stateLabel = new JLabel();
     private final TimelineRuler ruler = new TimelineRuler();
+    private List<Double> candidateMarkerTimes = List.of();
+    private double selectedCandidateTime = Double.NaN;
 
     ScenarioTimelinePanel(
             ScenarioModel model,
@@ -72,6 +76,24 @@ final class ScenarioTimelinePanel extends JPanel {
         } else {
             stateLabel.setText("Create a runnable scenario first");
         }
+        ruler.repaint();
+    }
+
+    void setCandidateMarkers(List<Double> times, double selectedTime) {
+        candidateMarkerTimes = times == null
+                ? List.of()
+                : times.stream()
+                .filter(Double::isFinite)
+                .distinct()
+                .sorted()
+                .toList();
+        selectedCandidateTime = selectedTime;
+        ruler.repaint();
+    }
+
+    void clearCandidateMarkers() {
+        candidateMarkerTimes = List.of();
+        selectedCandidateTime = Double.NaN;
         ruler.repaint();
     }
 
@@ -148,6 +170,7 @@ final class ScenarioTimelinePanel extends JPanel {
                     String endLabel = formatTime(duration);
                     g.drawString(endLabel,
                             getWidth() - metrics.stringWidth(endLabel), baseline + 20);
+                    drawCandidateMarkers(g, width, baseline, duration);
                 }
 
                 double fraction = duration <= 0.0
@@ -171,6 +194,29 @@ final class ScenarioTimelinePanel extends JPanel {
             int width = Math.max(1, getWidth() - LEFT - RIGHT);
             double fraction = Math.max(0.0, Math.min(1.0, (double) (mouseX - LEFT) / width));
             playback.seekTo(fraction * playback.durationSeconds());
+        }
+
+        private void drawCandidateMarkers(
+                Graphics2D g,
+                int width,
+                int baseline,
+                double duration) {
+            if (candidateMarkerTimes.isEmpty()) {
+                return;
+            }
+            Stroke oldStroke = g.getStroke();
+            for (double time : candidateMarkerTimes) {
+                if (time < -1.0e-9 || time > duration + 1.0e-9) {
+                    continue;
+                }
+                boolean selected = Math.abs(time - selectedCandidateTime) <= 1.0e-6;
+                int x = LEFT + (int) Math.round(
+                        Math.max(0.0, Math.min(1.0, time / duration)) * width);
+                g.setColor(selected ? new Color(255, 0, 0) : new Color(255, 35, 35, 210));
+                g.setStroke(new BasicStroke(selected ? 3.2f : 2.1f));
+                g.drawLine(x, 0, x, baseline + 12);
+            }
+            g.setStroke(oldStroke);
         }
     }
 
