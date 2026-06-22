@@ -9,7 +9,6 @@ import com.targettracker.model.Wgs84;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
-import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -20,6 +19,7 @@ import java.awt.Font;
 import java.util.List;
 import java.util.function.Consumer;
 
+/** Compact target selector and live target telemetry for the motion card. */
 final class TargetInspectorPanel extends JPanel {
     private final JComboBox<TargetTrajectory> targetSelector = new JComboBox<>();
     private final JLabel idValue = valueLabel();
@@ -33,23 +33,17 @@ final class TargetInspectorPanel extends JPanel {
     private final JLabel durationValue = valueLabel();
     private boolean synchronizing;
 
-    TargetInspectorPanel(
-            ScenarioModel model,
-            Runnable onOpenSensorWindow,
-            Runnable onOpenImmWindow,
-            Consumer<TargetTrajectory> onSelectionChanged) {
+    TargetInspectorPanel(ScenarioModel model, Consumer<TargetTrajectory> onSelectionChanged) {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-        setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 1, 0, 0, new Color(214, 220, 227)),
-                BorderFactory.createEmptyBorder(18, 18, 18, 18)));
-        setPreferredSize(new Dimension(250, 0));
+        setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
         setBackground(Color.WHITE);
+        setAlignmentX(LEFT_ALIGNMENT);
 
         JLabel title = new JLabel("Target telemetry");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 16.0f));
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 17.0f));
         title.setAlignmentX(LEFT_ALIGNMENT);
         add(title);
-        add(Box.createVerticalStrut(12));
+        add(Box.createVerticalStrut(10));
 
         targetSelector.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
         targetSelector.setAlignmentX(LEFT_ALIGNMENT);
@@ -59,19 +53,7 @@ final class TargetInspectorPanel extends JPanel {
             }
         });
         add(targetSelector);
-        add(Box.createVerticalStrut(8));
-        JButton sensorButton = new JButton("Open sensor parameters…");
-        sensorButton.setAlignmentX(LEFT_ALIGNMENT);
-        sensorButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-        sensorButton.addActionListener(event -> onOpenSensorWindow.run());
-        add(sensorButton);
-        add(Box.createVerticalStrut(5));
-        JButton immButton = new JButton("Open IMM specifications…");
-        immButton.setAlignmentX(LEFT_ALIGNMENT);
-        immButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-        immButton.addActionListener(event -> onOpenImmWindow.run());
-        add(immButton);
-        add(Box.createVerticalStrut(18));
+        add(Box.createVerticalStrut(14));
         add(sectionSeparator());
         add(Box.createVerticalStrut(12));
 
@@ -84,39 +66,14 @@ final class TargetInspectorPanel extends JPanel {
         addRow("ECEF Y", ecefYValue);
         addRow("ECEF Z", ecefZValue);
         addRow("Duration", durationValue);
-        add(Box.createVerticalGlue());
+        add(Box.createVerticalStrut(4));
 
-        JLabel key = new JLabel("Planned path");
-        key.setForeground(new Color(87, 99, 111));
-        key.setAlignmentX(LEFT_ALIGNMENT);
-        add(key);
-        JLabel plannedNote = new JLabel("- - - thin outline");
-        plannedNote.setForeground(new Color(87, 99, 111));
-        plannedNote.setAlignmentX(LEFT_ALIGNMENT);
-        add(plannedNote);
-        add(Box.createVerticalStrut(6));
-        JLabel historyNote = new JLabel("━━ bold recent history");
-        historyNote.setForeground(new Color(87, 99, 111));
-        historyNote.setAlignmentX(LEFT_ALIGNMENT);
-        add(historyNote);
-        add(Box.createVerticalStrut(6));
-        JLabel measurementNote = new JLabel("× white measurement");
-        measurementNote.setForeground(new Color(87, 99, 111));
-        measurementNote.setAlignmentX(LEFT_ALIGNMENT);
-        add(measurementNote);
-        add(Box.createVerticalStrut(6));
-        JLabel trackNote = new JLabel("■ IMM track mean / tail");
-        trackNote.setForeground(new Color(87, 99, 111));
-        trackNote.setAlignmentX(LEFT_ALIGNMENT);
-        add(trackNote);
-        JLabel covarianceNote = new JLabel("○ one-sigma covariance");
-        covarianceNote.setForeground(new Color(87, 99, 111));
-        covarianceNote.setAlignmentX(LEFT_ALIGNMENT);
-        add(covarianceNote);
-        JLabel deadTrackNote = new JLabel("■ grey = dead track");
-        deadTrackNote.setForeground(new Color(145, 150, 156));
-        deadTrackNote.setAlignmentX(LEFT_ALIGNMENT);
-        add(deadTrackNote);
+        JLabel legend = new JLabel("<html><span style='color:#57636f'>"
+                + "Thin line: planned path<br>Bold line: target/track history<br>"
+                + "×: measurement &nbsp; ■: IMM mean &nbsp; ○: covariance<br>"
+                + "Grey track: dead track</span></html>");
+        legend.setAlignmentX(LEFT_ALIGNMENT);
+        add(legend);
 
         synchronizing = true;
         model.targets().forEach(targetSelector::addItem);
@@ -183,14 +140,14 @@ final class TargetInspectorPanel extends JPanel {
         label.setAlignmentX(LEFT_ALIGNMENT);
         value.setAlignmentX(LEFT_ALIGNMENT);
         add(label);
-        add(Box.createVerticalStrut(2));
+        add(Box.createVerticalStrut(1));
         add(value);
-        add(Box.createVerticalStrut(13));
+        add(Box.createVerticalStrut(9));
     }
 
     private static JLabel valueLabel() {
         JLabel label = new JLabel("—");
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 14.0f));
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 13.0f));
         return label;
     }
 

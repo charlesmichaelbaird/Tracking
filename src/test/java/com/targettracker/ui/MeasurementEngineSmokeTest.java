@@ -52,6 +52,9 @@ public final class MeasurementEngineSmokeTest {
         requireCount(2, engine.visibleMeasurements(), "before live-rescheduled look");
         engine.advanceTo(22.0);
         requireCount(3, engine.visibleMeasurements(), "at live-rescheduled look");
+        requireCount(3, engine.measurementHistoryAt(22.0, 1.0), "full slider history");
+        requireCount(1, engine.measurementHistoryAt(22.0, 0.33), "partial slider history");
+        requireCount(0, engine.measurementHistoryAt(22.0, 0.0), "zero slider history");
         requireClose(22.0, engine.visibleMeasurements().get(2).timeSeconds(),
                 "live-rescheduled look time");
 

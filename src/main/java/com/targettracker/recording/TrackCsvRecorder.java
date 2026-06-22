@@ -1,5 +1,6 @@
 package com.targettracker.recording;
 
+import com.targettracker.tracking.AssociatedMeasurement;
 import com.targettracker.tracking.TrackRecord;
 
 import java.io.BufferedWriter;
@@ -13,11 +14,19 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
-/** Writes one fixed-schema, MATLAB-friendly CSV per track and scenario run. */
+/** Writes separate MATLAB-friendly truth, track, and measurement datasets. */
 public final class TrackCsvRecorder implements AutoCloseable {
+    public static final String GROUND_TRUTH_DIRECTORY = "ground_truth_data";
+    public static final String TRACK_DIRECTORY = "track_data";
+    public static final String MEASUREMENT_DIRECTORY = "measurement_data";
+    public static final String MEASUREMENT_FILE = "measurements.csv";
+
+    private static final String SENSOR_ID = "GOD-SENSOR-001";
     private static final int STATE_SIZE = 9;
+    private static final int MEASUREMENT_SIZE = 6;
     private static final DateTimeFormatter RUN_FOLDER_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss_SSS");
     private static final String[] STATE_COLUMNS = {
@@ -27,9 +36,14 @@ public final class TrackCsvRecorder implements AutoCloseable {
     };
 
     private final Clock clock;
-    private final Map<String, BufferedWriter> writers = new LinkedHashMap<>();
+    private final Map<String, BufferedWriter> trackWriters = new LinkedHashMap<>();
+    private final Map<String, BufferedWriter> groundTruthWriters = new LinkedHashMap<>();
     private Path outputParent = Path.of("recordings").toAbsolutePath().normalize();
     private Path runDirectory;
+    private Path trackDirectory;
+    private Path groundTruthDirectory;
+    private Path measurementDirectory;
+    private BufferedWriter measurementWriter;
     private boolean armed;
     private boolean active;
     private String lastError;
@@ -80,17 +94,30 @@ public final class TrackCsvRecorder implements AutoCloseable {
         return lastError;
     }
 
-    /** Starts a fresh timestamped scenario folder when recording is armed. */
     public boolean beginRun() {
+        return beginRun("scenario", 0.0);
+    }
+
+    /** Starts a named run with three dedicated data subdirectories. */
+    public boolean beginRun(String scenarioName, double durationSeconds) {
         finishRun();
         if (!armed) {
             return true;
         }
+        if (!Double.isFinite(durationSeconds) || durationSeconds < 0.0) {
+            throw new IllegalArgumentException("Scenario duration must be finite and non-negative");
+        }
         try {
             Files.createDirectories(outputParent);
-            runDirectory = uniqueRunDirectory();
+            runDirectory = uniqueRunDirectory(scenarioName);
             Files.createDirectory(runDirectory);
-            writeReadme();
+            groundTruthDirectory = Files.createDirectory(
+                    runDirectory.resolve(GROUND_TRUTH_DIRECTORY));
+            trackDirectory = Files.createDirectory(runDirectory.resolve(TRACK_DIRECTORY));
+            measurementDirectory = Files.createDirectory(
+                    runDirectory.resolve(MEASUREMENT_DIRECTORY));
+            writeMetadata(scenarioName, durationSeconds);
+            writeReadme(scenarioName, durationSeconds);
             active = true;
             lastError = null;
             return true;
@@ -102,34 +129,52 @@ public final class TrackCsvRecorder implements AutoCloseable {
         }
     }
 
-    /** Writes one predicted or updated sample for each supplied live track. */
+    /** Writes predicted/updated track rows and any associated measurement rows. */
     public void recordSamples(List<TrackRecord> records) {
         if (!active || records.isEmpty()) {
             return;
         }
         try {
             for (TrackRecord record : records) {
-                writeRecord(record);
+                writeTrackRecord(record);
+                if (record.measurement() != null) {
+                    writeMeasurement(record.trackId(), record.timeSeconds(), record.measurement());
+                }
             }
-            for (BufferedWriter writer : writers.values()) {
-                writer.flush();
+            flushWriters();
+        } catch (IOException exception) {
+            recordingFailed(exception);
+        }
+    }
+
+    /** Writes dense target truth independently of tracker output. */
+    public void recordGroundTruth(List<GroundTruthRecord> records) {
+        if (!active || records.isEmpty()) {
+            return;
+        }
+        try {
+            for (GroundTruthRecord record : records) {
+                writeGroundTruthRecord(record);
             }
         } catch (IOException exception) {
-            lastError = "Recording stopped: " + exception.getMessage();
-            finishRun();
+            recordingFailed(exception);
         }
     }
 
     public void finishRun() {
-        IOException closeFailure = null;
-        for (BufferedWriter writer : writers.values()) {
+        IOException closeFailure = closeAll(trackWriters);
+        IOException truthFailure = closeAll(groundTruthWriters);
+        if (truthFailure != null) {
+            closeFailure = truthFailure;
+        }
+        if (measurementWriter != null) {
             try {
-                writer.close();
+                measurementWriter.close();
             } catch (IOException exception) {
                 closeFailure = exception;
             }
+            measurementWriter = null;
         }
-        writers.clear();
         active = false;
         if (closeFailure != null) {
             lastError = "Could not close recording files: " + closeFailure.getMessage();
@@ -141,8 +186,106 @@ public final class TrackCsvRecorder implements AutoCloseable {
         finishRun();
     }
 
-    private Path uniqueRunDirectory() throws IOException {
-        String baseName = "scenario_" + LocalDateTime.now(clock).format(RUN_FOLDER_FORMAT);
+    private void writeTrackRecord(TrackRecord record) throws IOException {
+        BufferedWriter writer = trackWriters.get(record.trackId());
+        if (writer == null) {
+            Path file = trackDirectory.resolve(safeFileName(record.trackId()) + ".csv");
+            writer = newWriter(file);
+            writer.write(trackHeader());
+            writer.newLine();
+            trackWriters.put(record.trackId(), writer);
+        }
+        writer.write(csv(record.trackId()));
+        writer.write(',');
+        writer.write(Double.toString(record.timeSeconds()));
+        writer.write(',');
+        writer.write(Boolean.toString(record.updated()));
+        writeVector(writer, record.state());
+        double[][] covariance = record.covariance();
+        for (int row = 0; row < STATE_SIZE; row++) {
+            writeVector(writer, covariance[row]);
+        }
+        writer.newLine();
+    }
+
+    private void writeGroundTruthRecord(GroundTruthRecord record) throws IOException {
+        BufferedWriter writer = groundTruthWriters.get(record.targetId());
+        if (writer == null) {
+            Path file = groundTruthDirectory.resolve(safeFileName(record.targetId()) + ".csv");
+            writer = newWriter(file);
+            writer.write("target_id,time_s," + String.join(",", STATE_COLUMNS));
+            writer.newLine();
+            groundTruthWriters.put(record.targetId(), writer);
+        }
+        writer.write(csv(record.targetId()));
+        writer.write(',');
+        writer.write(Double.toString(record.timeSeconds()));
+        writeVector(writer, record.state());
+        writer.newLine();
+    }
+
+    private void writeMeasurement(
+            String trackId,
+            double timeSeconds,
+            AssociatedMeasurement measurement)
+            throws IOException {
+        if (measurementWriter == null) {
+            measurementWriter = newWriter(measurementDirectory.resolve(MEASUREMENT_FILE));
+            measurementWriter.write(measurementHeader());
+            measurementWriter.newLine();
+        }
+        double[] mean = measurement.mean();
+        double[][] covariance = measurement.covariance();
+        double positionUncertainty = axisUncertainty(covariance, 0);
+        double velocityUncertainty = axisUncertainty(covariance, 3);
+        measurementWriter.write(SENSOR_ID);
+        measurementWriter.write(',');
+        measurementWriter.write(csv(measurement.targetId()));
+        measurementWriter.write(',');
+        measurementWriter.write(csv(trackId));
+        measurementWriter.write(',');
+        measurementWriter.write(Double.toString(timeSeconds));
+        writeVector(measurementWriter, mean);
+        for (int row = 0; row < MEASUREMENT_SIZE; row++) {
+            writeVector(measurementWriter, covariance[row]);
+        }
+        measurementWriter.write(',');
+        measurementWriter.write(Double.toString(positionUncertainty));
+        measurementWriter.write(',');
+        measurementWriter.write(Double.toString(velocityUncertainty));
+        measurementWriter.newLine();
+    }
+
+    private void flushWriters() throws IOException {
+        for (BufferedWriter writer : trackWriters.values()) {
+            writer.flush();
+        }
+        if (measurementWriter != null) {
+            measurementWriter.flush();
+        }
+    }
+
+    private void recordingFailed(IOException exception) {
+        lastError = "Recording stopped: " + exception.getMessage();
+        finishRun();
+    }
+
+    private static IOException closeAll(Map<String, BufferedWriter> writers) {
+        IOException failure = null;
+        for (BufferedWriter writer : writers.values()) {
+            try {
+                writer.close();
+            } catch (IOException exception) {
+                failure = exception;
+            }
+        }
+        writers.clear();
+        return failure;
+    }
+
+    private Path uniqueRunDirectory(String scenarioName) {
+        String baseName = safeScenarioName(scenarioName) + "_"
+                + LocalDateTime.now(clock).format(RUN_FOLDER_FORMAT);
         Path candidate = outputParent.resolve(baseName);
         int suffix = 2;
         while (Files.exists(candidate)) {
@@ -152,61 +295,62 @@ public final class TrackCsvRecorder implements AutoCloseable {
         return candidate;
     }
 
-    private void writeReadme() throws IOException {
+    private void writeMetadata(String scenarioName, double durationSeconds) throws IOException {
+        String text = "format_version=4\n"
+                + "scenario_name=" + scenarioName.replace("\n", " ").replace("\r", " ") + "\n"
+                + "duration_seconds=" + durationSeconds + "\n";
+        Files.writeString(
+                runDirectory.resolve("scenario_metadata.properties"), text, StandardCharsets.UTF_8);
+    }
+
+    private void writeReadme(String scenarioName, double durationSeconds) throws IOException {
         String text = """
                 ECEF Target Tracker recording
 
-                Each TRK-*.csv file contains one row per integer scenario second while the track is live.
-                State order: [x, y, z, vx, vy, vz, ax, ay, az] in SI units and ECEF axes.
-                Covariance columns p_00 through p_88 are written in row-major order.
-                updated=true means a measurement updated the track at that exact second.
-                updated=false means the row is the track prediction/coast at that second.
+                Scenario: %s
+                Duration: %s seconds
 
-                MATLAB example:
-                  T = readtable('TRK-001.csv');
-                  x = T{:, {'x_m','y_m','z_m','vx_mps','vy_mps','vz_mps', ...
-                            'ax_mps2','ay_mps2','az_mps2'}};
-                  p = T{1, startsWith(T.Properties.VariableNames, 'p_')};
+                ground_truth_data/TGT-*.csv
+                  Dense 9D ECEF target truth: [x y z vx vy vz ax ay az].
+
+                track_data/TRK-*.csv
+                  Integer-second live-track rows plus fractional-time update rows.
+                  Track covariance p_00 through p_88 is row-major. updated indicates
+                  whether the row is an exact measurement update or a coast prediction.
+
+                measurement_data/measurements.csv
+                  Sensor ID, source target ID, associated track ID, time, 6D ECEF
+                  mean, complete 6x6 covariance r_00 through r_55, and
+                  position/velocity uncertainty.
+
+                MATLAB examples:
+                  truth = readtable('ground_truth_data/TGT-001.csv');
+                  tracks = readtable('track_data/TRK-001.csv');
+                  measurements = readtable('measurement_data/measurements.csv');
+                  p = tracks{1, startsWith(tracks.Properties.VariableNames, 'p_')};
                   P = reshape(p, [9, 9]).';
-                """;
+                  r = measurements{1, startsWith(measurements.Properties.VariableNames, 'r_')};
+                  R = reshape(r, [6, 6]).';
+                """.formatted(scenarioName, Double.toString(durationSeconds));
         Files.writeString(runDirectory.resolve("README.txt"), text, StandardCharsets.UTF_8);
     }
 
-    private void writeRecord(TrackRecord record) throws IOException {
-        BufferedWriter writer = writers.get(record.trackId());
-        if (writer == null) {
-            Path file = runDirectory.resolve(safeFileName(record.trackId()) + ".csv");
-            writer = Files.newBufferedWriter(
-                    file,
-                    StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE_NEW,
-                    StandardOpenOption.WRITE);
-            writer.write(header());
-            writer.newLine();
-            writers.put(record.trackId(), writer);
-        }
+    private static BufferedWriter newWriter(Path file) throws IOException {
+        return Files.newBufferedWriter(
+                file,
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE);
+    }
 
-        writer.write(csv(record.trackId()));
-        writer.write(',');
-        writer.write(Double.toString(record.timeSeconds()));
-        writer.write(',');
-        writer.write(Boolean.toString(record.updated()));
-        double[] state = record.state();
-        for (double value : state) {
+    private static void writeVector(BufferedWriter writer, double[] values) throws IOException {
+        for (double value : values) {
             writer.write(',');
             writer.write(Double.toString(value));
         }
-        double[][] covariance = record.covariance();
-        for (int row = 0; row < STATE_SIZE; row++) {
-            for (int column = 0; column < STATE_SIZE; column++) {
-                writer.write(',');
-                writer.write(Double.toString(covariance[row][column]));
-            }
-        }
-        writer.newLine();
     }
 
-    private static String header() {
+    private static String trackHeader() {
         StringBuilder header = new StringBuilder("track_id,time_s,updated");
         for (String stateColumn : STATE_COLUMNS) {
             header.append(',').append(stateColumn);
@@ -219,8 +363,35 @@ public final class TrackCsvRecorder implements AutoCloseable {
         return header.toString();
     }
 
-    private static String safeFileName(String trackId) {
-        return trackId.replaceAll("[^A-Za-z0-9._-]", "_");
+    private static String measurementHeader() {
+        StringBuilder header = new StringBuilder(
+                "sensor_id,target_id,associated_track_id,time_s,meas_x_m,meas_y_m,meas_z_m,"
+                        + "meas_vx_mps,meas_vy_mps,meas_vz_mps");
+        for (int row = 0; row < MEASUREMENT_SIZE; row++) {
+            for (int column = 0; column < MEASUREMENT_SIZE; column++) {
+                header.append(",r_").append(row).append(column);
+            }
+        }
+        return header.append(",position_uncertainty_m,velocity_uncertainty_mps").toString();
+    }
+
+    private static double axisUncertainty(double[][] covariance, int offset) {
+        return Math.sqrt(Math.max(0.0,
+                (covariance[offset][offset]
+                        + covariance[offset + 1][offset + 1]
+                        + covariance[offset + 2][offset + 2]) / 3.0));
+    }
+
+    private static String safeScenarioName(String scenarioName) {
+        String safe = scenarioName == null ? "" : scenarioName
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        return safe.isBlank() ? "scenario" : safe;
+    }
+
+    private static String safeFileName(String id) {
+        return id.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     private static String csv(String value) {

@@ -49,6 +49,7 @@ public final class TrackCsvReaderSmokeTest {
             RecordedMeasurement measurement = loaded.measurements().get(0);
             if (!update.updated() || update.measurement() != null
                     || !measurement.targetId().equals("TGT-007")
+                    || !measurement.associatedTrackId().equals("TRK-001")
                     || measurement.mean()[2] != 102.0
                     || measurement.covariance()[5][5] != 6.0) {
                 throw new AssertionError("Separate measurement data did not round-trip");

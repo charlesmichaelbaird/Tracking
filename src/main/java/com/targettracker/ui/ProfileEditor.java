@@ -51,7 +51,8 @@ final class ProfileEditor extends JPanel {
         this.playback = playback;
         this.editingLocked = editingLocked;
         this.onProfileChanged = onProfileChanged;
-        setPreferredSize(new Dimension(540, 260));
+        setPreferredSize(new Dimension(390, 220));
+        setMinimumSize(new Dimension(300, 180));
         setBackground(Color.WHITE);
 
         MouseAdapter handler = new MouseAdapter() {

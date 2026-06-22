@@ -160,7 +160,7 @@ public final class ImmTracker {
                 Track track = activeTracks.get(candidate.trackIndex());
                 TargetMeasurement measurement = measurements.get(candidate.measurementIndex());
                 track.update(measurement, parameters);
-                updatedRecords.add(track.updatedRecord(measurement.timeSeconds()));
+                updatedRecords.add(track.updatedRecord(measurement.timeSeconds(), measurement));
             }
         }
 
@@ -173,7 +173,7 @@ public final class ImmTracker {
                         measurement,
                         parameters);
                 activeTracks.add(track);
-                updatedRecords.add(track.updatedRecord(measurement.timeSeconds()));
+                updatedRecords.add(track.updatedRecord(measurement.timeSeconds(), measurement));
                 nextTrackNumber++;
             }
         }
@@ -355,6 +355,7 @@ public final class ImmTracker {
         private ModelState[] states;
         private double[] probabilities;
         private double lastUpdateSeconds;
+        private TargetMeasurement lastMeasurement;
 
         Track(String id, Color color, TargetMeasurement measurement, ImmParameters parameters) {
             this.id = id;
@@ -379,6 +380,7 @@ public final class ImmTracker {
                 probabilities[i] = 1.0 / models.size();
             }
             lastUpdateSeconds = measurement.timeSeconds();
+            lastMeasurement = measurement;
             appendTail(measurement.measuredPosition());
         }
 
@@ -462,6 +464,7 @@ public final class ImmTracker {
             }
             states = updatedStates;
             lastUpdateSeconds = measurement.timeSeconds();
+            lastMeasurement = measurement;
         }
 
         FusedState fusedAt(double timeSeconds, ImmParameters parameters) {
@@ -481,9 +484,15 @@ public final class ImmTracker {
             return fuse(states, probabilities);
         }
 
-        TrackRecord updatedRecord(double timeSeconds) {
+        TrackRecord updatedRecord(double timeSeconds, TargetMeasurement measurement) {
             FusedState fused = fusedStoredState();
-            return new TrackRecord(id, timeSeconds, fused.mean(), fused.covariance(), true);
+            return new TrackRecord(
+                    id,
+                    timeSeconds,
+                    fused.mean(),
+                    fused.covariance(),
+                    true,
+                    AssociatedMeasurement.from(measurement));
         }
 
         TrackRecord recordAt(
@@ -493,7 +502,13 @@ public final class ImmTracker {
             FusedState fused = Math.abs(timeSeconds - lastUpdateSeconds) < 1.0e-9
                     ? fusedStoredState()
                     : fusedAt(timeSeconds, parameters);
-            return new TrackRecord(id, timeSeconds, fused.mean(), fused.covariance(), updated);
+            AssociatedMeasurement measurement = updated
+                    && lastMeasurement != null
+                    && Math.abs(timeSeconds - lastMeasurement.timeSeconds()) < 1.0e-9
+                    ? AssociatedMeasurement.from(lastMeasurement)
+                    : null;
+            return new TrackRecord(
+                    id, timeSeconds, fused.mean(), fused.covariance(), updated, measurement);
         }
 
         TrackView viewAt(double timeSeconds, ImmParameters parameters, boolean dead) {

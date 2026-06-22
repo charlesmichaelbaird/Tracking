@@ -56,7 +56,7 @@ final class RecordingPanel extends JPanel {
         add(new JLabel("Parent folder:"));
         folderField = new JTextField(recorder.outputParent().toString(), 38);
         folderField.setToolTipText(
-                "Each pre-compute creates a unique scenario_yyyy-MM-dd_HH-mm-ss_SSS subfolder here");
+                "Each pre-compute creates a unique <scenario-name>_yyyy-MM-dd_HH-mm-ss_SSS subfolder here");
         folderField.addActionListener(event -> commitParentFolder());
         add(folderField);
 

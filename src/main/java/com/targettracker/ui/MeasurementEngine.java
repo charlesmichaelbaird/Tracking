@@ -54,6 +54,16 @@ final class MeasurementEngine {
         nextLookSeconds = Double.POSITIVE_INFINITY;
     }
 
+    /** Replaces generated measurements with measurements restored from a recorded run. */
+    void loadRecordedMeasurements(List<TargetMeasurement> measurements) {
+        newlyGeneratedMeasurements.clear();
+        allMeasurements.clear();
+        allMeasurements.addAll(measurements);
+        allMeasurements.sort(Comparator.comparingDouble(TargetMeasurement::timeSeconds));
+        activeParameters = null;
+        nextLookSeconds = Double.POSITIVE_INFINITY;
+    }
+
     void parametersChanged(double elapsedSeconds) {
         if (activeParameters == null) {
             return;
@@ -106,6 +116,30 @@ final class MeasurementEngine {
         byTarget.values().forEach(visible::addAll);
         visible.sort(Comparator.comparingDouble(TargetMeasurement::timeSeconds));
         return visible;
+    }
+
+    /** Returns the newest requested fraction of all measurement history per target. */
+    List<TargetMeasurement> measurementHistoryAt(
+            double elapsedSeconds,
+            double historyFraction) {
+        double fraction = Math.max(0.0, Math.min(1.0, historyFraction));
+        if (fraction <= 0.0) {
+            return List.of();
+        }
+        Map<String, List<TargetMeasurement>> byTarget = new LinkedHashMap<>();
+        for (TargetMeasurement measurement : allMeasurements) {
+            if (measurement.timeSeconds() <= elapsedSeconds + TIME_EPSILON_SECONDS) {
+                byTarget.computeIfAbsent(measurement.targetId(), ignored -> new ArrayList<>())
+                        .add(measurement);
+            }
+        }
+        List<TargetMeasurement> visible = new ArrayList<>();
+        for (List<TargetMeasurement> history : byTarget.values()) {
+            int count = Math.max(1, (int) Math.ceil(history.size() * fraction));
+            visible.addAll(history.subList(Math.max(0, history.size() - count), history.size()));
+        }
+        visible.sort(Comparator.comparingDouble(TargetMeasurement::timeSeconds));
+        return List.copyOf(visible);
     }
 
     List<TargetMeasurement> drainNewMeasurements() {

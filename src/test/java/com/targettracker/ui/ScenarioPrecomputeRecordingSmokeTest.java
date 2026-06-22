@@ -54,7 +54,8 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
                 throw new AssertionError(
                         "Recorded pre-compute should finish files and leave replay seekable");
             }
-            List<String> lines = Files.readAllLines(recorder.runDirectory().resolve("TRK-001.csv"));
+            List<String> lines = Files.readAllLines(recorder.runDirectory()
+                    .resolve(TrackCsvRecorder.TRACK_DIRECTORY).resolve("TRK-001.csv"));
             if (lines.size() != 7) {
                 throw new AssertionError("Expected header plus samples at seconds 0 through 5");
             }
@@ -77,6 +78,17 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
             if (!(predictedVarianceAtOne > updatedVarianceAtTwo)) {
                 throw new AssertionError(
                         "Measurement update should reduce covariance below the prior coast prediction");
+            }
+            List<String> measurementLines = Files.readAllLines(recorder.runDirectory()
+                    .resolve(TrackCsvRecorder.MEASUREMENT_DIRECTORY)
+                    .resolve(TrackCsvRecorder.MEASUREMENT_FILE));
+            if (measurementLines.size() != 4) {
+                throw new AssertionError("Expected measurements at seconds 0, 2, and 4");
+            }
+            List<String> truthLines = Files.readAllLines(recorder.runDirectory()
+                    .resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY).resolve("TGT-001.csv"));
+            if (truthLines.size() != 57) {
+                throw new AssertionError("Ground truth should be saved at every 0.1-second step");
             }
             System.out.println("ScenarioPrecomputeRecordingSmokeTest passed");
         } finally {

@@ -1,9 +1,10 @@
 package com.targettracker.recording;
 
-/** One sensor measurement saved independently of track association output. */
+/** One sensor measurement plus its optional persisted track association. */
 public record RecordedMeasurement(
         String sensorId,
         String targetId,
+        String associatedTrackId,
         double timeSeconds,
         double[] mean,
         double[][] covariance,
@@ -18,6 +19,9 @@ public record RecordedMeasurement(
         if (targetId == null) {
             targetId = "";
         }
+        if (associatedTrackId == null) {
+            associatedTrackId = "";
+        }
         if (!Double.isFinite(timeSeconds) || timeSeconds < 0.0) {
             throw new IllegalArgumentException("Measurement time must be finite and non-negative");
         }
@@ -31,6 +35,18 @@ public record RecordedMeasurement(
                 || velocityUncertaintyMetersPerSecond < 0.0) {
             throw new IllegalArgumentException("Measurement uncertainty must be non-negative");
         }
+    }
+
+    public RecordedMeasurement(
+            String sensorId,
+            String targetId,
+            double timeSeconds,
+            double[] mean,
+            double[][] covariance,
+            double positionUncertaintyMeters,
+            double velocityUncertaintyMetersPerSecond) {
+        this(sensorId, targetId, "", timeSeconds, mean, covariance,
+                positionUncertaintyMeters, velocityUncertaintyMetersPerSecond);
     }
 
     @Override

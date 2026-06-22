@@ -25,16 +25,26 @@ public final class AnalysisLoadPanelSmokeTest {
                 AnalysisLoadPanel panel = new AnalysisLoadPanel(null, parent, selected::set);
                 JComboBox<?> selector = null;
                 JButton loadButton = null;
+                JButton stitchingButton = null;
                 for (Component component : panel.getComponents()) {
                     if (component instanceof JComboBox<?> comboBox) {
                         selector = comboBox;
                     } else if (component instanceof JButton button
                             && "Load scenario".equals(button.getText())) {
                         loadButton = button;
+                    } else if (component instanceof JButton button
+                            && "Track Stitching Analysis".equals(button.getText())) {
+                        stitchingButton = button;
                     }
                 }
-                if (selector == null || selector.getItemCount() != 1 || loadButton == null) {
+                if (selector == null || selector.getItemCount() != 1
+                        || loadButton == null || stitchingButton == null
+                        || stitchingButton.isEnabled()) {
                     throw new AssertionError("Recorded scenario dropdown was not populated");
+                }
+                panel.setStitchingEnabled(true);
+                if (!stitchingButton.isEnabled()) {
+                    throw new AssertionError("Stitching button should enable after a scenario load");
                 }
                 loadButton.doClick();
             });

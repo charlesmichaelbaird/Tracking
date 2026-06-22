@@ -32,8 +32,18 @@ final class AnalysisLoadPanel extends JPanel {
     private final JTextField parentFolderField;
     private final JComboBox<RunFolder> scenarioFolderSelector = new JComboBox<>();
     private final JLabel statusLabel = new JLabel();
+    private final JButton stitchingButton = new JButton("Track Stitching Analysis");
 
     AnalysisLoadPanel(Component dialogParent, Path initialParentFolder, Listener listener) {
+        this(dialogParent, initialParentFolder, listener, () -> {
+        });
+    }
+
+    AnalysisLoadPanel(
+            Component dialogParent,
+            Path initialParentFolder,
+            Listener listener,
+            Runnable onTrackStitching) {
         super(new FlowLayout(FlowLayout.LEFT, 8, 5));
         this.dialogParent = dialogParent;
         this.listener = listener;
@@ -47,7 +57,7 @@ final class AnalysisLoadPanel extends JPanel {
         add(title);
 
         add(new JLabel("Top-level directory:"));
-        parentFolderField = new JTextField(initialParentFolder.toString(), 30);
+        parentFolderField = new JTextField(initialParentFolder.toString(), 24);
         parentFolderField.setToolTipText("Folder containing recorded scenario subfolders");
         parentFolderField.addActionListener(event -> refreshFolders());
         add(parentFolderField);
@@ -57,7 +67,7 @@ final class AnalysisLoadPanel extends JPanel {
         add(browseButton);
 
         add(new JLabel("Scenario:"));
-        scenarioFolderSelector.setPreferredSize(new Dimension(285, 28));
+        scenarioFolderSelector.setPreferredSize(new Dimension(245, 28));
         scenarioFolderSelector.setToolTipText("Recorded scenario subfolder to replay");
         add(scenarioFolderSelector);
 
@@ -68,6 +78,10 @@ final class AnalysisLoadPanel extends JPanel {
         JButton loadButton = new JButton("Load scenario");
         loadButton.addActionListener(event -> loadSelectedScenario());
         add(loadButton);
+
+        stitchingButton.setEnabled(false);
+        stitchingButton.addActionListener(event -> onTrackStitching.run());
+        add(stitchingButton);
 
         statusLabel.setForeground(new Color(91, 103, 115));
         add(statusLabel);
@@ -115,6 +129,10 @@ final class AnalysisLoadPanel extends JPanel {
     void setParentFolder(Path parentFolder) {
         parentFolderField.setText(parentFolder.toAbsolutePath().normalize().toString());
         refreshFolders();
+    }
+
+    void setStitchingEnabled(boolean enabled) {
+        stitchingButton.setEnabled(enabled);
     }
 
     private Path parentFolder() {

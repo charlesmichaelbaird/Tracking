@@ -7,46 +7,52 @@ import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.ScenarioPreset;
 import com.targettracker.model.SensorSettings;
 import com.targettracker.model.TargetTrajectory;
+import com.targettracker.recording.RecordedScenario;
 import com.targettracker.recording.TrackCsvRecorder;
+import com.targettracker.recording.TrackCsvReader;
 import com.targettracker.tracking.ImmSettings;
 import com.targettracker.tracking.ImmTracker;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
 import javax.swing.JButton;
-import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSeparator;
-import javax.swing.SwingConstants;
 import javax.swing.JToggleButton;
+import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
-import java.awt.GraphicsConfiguration;
-import java.awt.Insets;
-import java.awt.Rectangle;
-import java.awt.Toolkit;
+import java.io.IOException;
+import java.nio.file.Path;
 
 public final class TrackerFrame extends JFrame {
     private final ScenarioModel model = new ScenarioModel();
     private final SensorSettings sensorSettings = new SensorSettings();
     private final ImmSettings immSettings = new ImmSettings();
+    private final DisplayHistorySettings displayHistorySettings = new DisplayHistorySettings();
     private final MeasurementEngine measurementEngine;
     private final ImmTracker immTracker;
     private final TrackCsvRecorder recorder = new TrackCsvRecorder();
     private final ScenarioPlayback playback;
     private final EarthMapCanvas earthMapCanvas;
-    private final TargetInspectorPanel inspectorPanel;
-    private final ProfileWindow profileWindow;
-    private final SensorWindow sensorWindow;
-    private final ImmWindow immWindow;
+    private final MotionTelemetryPanel motionTelemetryPanel;
+    private final SensorParametersPanel sensorParametersPanel;
+    private final ImmParametersPanel immParametersPanel;
+    private final TargetsPanel targetsPanel;
+    private final ControlSidebar controlSidebar;
     private final RecordingPanel recordingPanel;
+    private final AnalysisLoadPanel analysisLoadPanel;
+    private final DisplayControlsPanel displayControlsPanel;
+    private final CardLayout dataModeLayout = new CardLayout();
+    private final JPanel dataModePanel = new JPanel(dataModeLayout);
     private final PresetScenarioPanel presetScenarioPanel;
     private final ScenarioTimelinePanel timelinePanel;
 
@@ -55,16 +61,20 @@ public final class TrackerFrame extends JFrame {
     private final JButton pauseButton = new JButton("Pause");
     private final JButton precomputeButton = new JButton("Pre-compute scenario");
     private final JButton replayButton = new JButton("Replay scenario");
-    private final JButton newTargetButton = new JButton("New target");
-    private final JButton clearPathButton = new JButton("Clear path");
+    private final JToggleButton generationModeButton =
+            new JToggleButton("Scenario Generation", true);
+    private final JToggleButton analysisModeButton = new JToggleButton("Analysis Mode");
     private TargetTrajectory selectedTarget;
     private boolean presetScenarioActive;
+    private boolean analysisMode;
+    private String currentScenarioName = "User generated";
+    private RecordedScenario loadedAnalysisScenario;
 
     public TrackerFrame() {
         super("ECEF Target Tracker");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(900, 620));
-        setSize(1120, 760);
+        setMinimumSize(new Dimension(1_100, 680));
+        setSize(1_450, 860);
 
         selectedTarget = model.addTarget();
         measurementEngine = new MeasurementEngine(model, sensorSettings);
@@ -72,8 +82,15 @@ public final class TrackerFrame extends JFrame {
         playback = new ScenarioPlayback(
                 model, this::onPlaybackUpdated, measurementEngine, immTracker, recorder);
         timelinePanel = new ScenarioTimelinePanel(model, playback, recorder);
-        recordingPanel = new RecordingPanel(
-                this, recorder, this::onRecordingStateChanged);
+        recordingPanel = new RecordingPanel(this, recorder, this::onRecordingStateChanged);
+        analysisLoadPanel = new AnalysisLoadPanel(
+                this,
+                recorder.outputParent(),
+                this::loadRecordedScenarioFolder,
+                this::openTrackStitchingAnalysis);
+        dataModePanel.setOpaque(false);
+        dataModePanel.add(recordingPanel, "generation");
+        dataModePanel.add(analysisLoadPanel, "analysis");
         presetScenarioPanel = new PresetScenarioPanel(this, new PresetScenarioPanel.Listener() {
             @Override
             public void generatePreset(
@@ -91,20 +108,35 @@ public final class TrackerFrame extends JFrame {
                 model,
                 playback,
                 measurementEngine,
+                displayHistorySettings,
                 () -> selectedTarget,
                 this::isScenarioEditingLocked,
                 this::onPathChanged,
                 this::onCursorChanged);
-        inspectorPanel = new TargetInspectorPanel(
-                model, this::showSensorWindow, this::showImmWindow, this::selectTarget);
-        profileWindow = new ProfileWindow(
-                this,
+        displayControlsPanel = new DisplayControlsPanel(
+                displayHistorySettings, earthMapCanvas::repaint);
+        motionTelemetryPanel = new MotionTelemetryPanel(
+                model,
                 () -> selectedTarget,
                 playback,
                 this::isScenarioEditingLocked,
-                this::onProfileChanged);
-        sensorWindow = new SensorWindow(this, sensorSettings, this::onSensorParametersChanged);
-        immWindow = new ImmWindow(this, immSettings, this::onImmParametersChanged);
+                this::onProfileChanged,
+                this::selectTarget);
+        sensorParametersPanel = new SensorParametersPanel(
+                sensorSettings, this::onSensorParametersChanged);
+        immParametersPanel = new ImmParametersPanel(
+                immSettings, this::onImmParametersChanged);
+        targetsPanel = new TargetsPanel(
+                this::addTarget,
+                earthMapCanvas::setDrawingMode,
+                earthMapCanvas::finishPath,
+                this::clearSelectedPath);
+        controlSidebar = new ControlSidebar(
+                immParametersPanel,
+                sensorParametersPanel,
+                motionTelemetryPanel,
+                targetsPanel,
+                presetScenarioPanel);
 
         setLayout(new BorderLayout());
         add(createHeader(), BorderLayout.NORTH);
@@ -112,25 +144,21 @@ public final class TrackerFrame extends JFrame {
         mapArea.add(earthMapCanvas, BorderLayout.CENTER);
         mapArea.add(timelinePanel, BorderLayout.SOUTH);
         add(mapArea, BorderLayout.CENTER);
-        add(inspectorPanel, BorderLayout.EAST);
+        add(controlSidebar, BorderLayout.EAST);
         add(createStatusBar(), BorderLayout.SOUTH);
 
-        inspectorPanel.setSelectedTarget(selectedTarget);
+        motionTelemetryPanel.setSelectedTarget(selectedTarget);
+        updateStructuralEditingControls();
         refreshTelemetry();
         setLocationRelativeTo(null);
-    }
-
-    public void showProfileWindow() {
-        positionProfileWindow();
-        profileWindow.setVisible(true);
-        profileWindow.refresh(selectedTarget);
     }
 
     private JPanel createHeader() {
         JPanel container = new JPanel();
         container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
         container.setBackground(Color.WHITE);
-        container.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(214, 220, 227)));
+        container.setBorder(BorderFactory.createMatteBorder(
+                0, 0, 1, 0, new Color(214, 220, 227)));
 
         JPanel titleRow = new JPanel(new BorderLayout());
         titleRow.setOpaque(false);
@@ -138,7 +166,8 @@ public final class TrackerFrame extends JFrame {
         JLabel title = new JLabel("ECEF Target Tracker");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 19.0f));
         titleRow.add(title, BorderLayout.WEST);
-        JLabel frameLabel = new JLabel("WGS-84 ECEF • Plate Carrée view • Ellipsoidal altitude");
+        JLabel frameLabel = new JLabel(
+                "WGS-84 ECEF • Plate Carrée view • Ellipsoidal altitude");
         frameLabel.setForeground(new Color(91, 103, 115));
         titleRow.add(frameLabel, BorderLayout.EAST);
         container.add(titleRow);
@@ -146,36 +175,21 @@ public final class TrackerFrame extends JFrame {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 7));
         toolbar.setOpaque(false);
 
-        newTargetButton.addActionListener(event -> addTarget());
-        toolbar.add(newTargetButton);
-
+        JLabel modeLabel = new JLabel("Mode:");
+        modeLabel.setFont(modeLabel.getFont().deriveFont(Font.BOLD));
+        toolbar.add(modeLabel);
+        ButtonGroup modeGroup = new ButtonGroup();
+        modeGroup.add(generationModeButton);
+        modeGroup.add(analysisModeButton);
+        generationModeButton.addActionListener(event -> setAnalysisMode(false));
+        analysisModeButton.addActionListener(event -> setAnalysisMode(true));
+        toolbar.add(generationModeButton);
+        toolbar.add(analysisModeButton);
         toolbar.add(verticalSeparator());
-        toolbar.add(new JLabel("Drawing:"));
-        JComboBox<String> drawingMode = new JComboBox<>(new String[]{"Free-hand", "Segmented line"});
-        drawingMode.addActionListener(event -> earthMapCanvas.setDrawingMode(
-                drawingMode.getSelectedIndex() == 0
-                        ? EarthMapCanvas.DrawingMode.FREE_HAND
-                        : EarthMapCanvas.DrawingMode.SEGMENTED));
-        toolbar.add(drawingMode);
 
-        JButton finishButton = new JButton("Finish path");
-        finishButton.addActionListener(event -> earthMapCanvas.finishPath());
-        toolbar.add(finishButton);
-
-        clearPathButton.addActionListener(event -> clearSelectedPath());
-        toolbar.add(clearPathButton);
-
-        JButton profilesButton = new JButton("Profiles…");
-        profilesButton.addActionListener(event -> showProfileWindow());
-        toolbar.add(profilesButton);
-
-        JButton sensorButton = new JButton("Sensor…");
-        sensorButton.addActionListener(event -> showSensorWindow());
-        toolbar.add(sensorButton);
-
-        JButton immButton = new JButton("IMM…");
-        immButton.addActionListener(event -> showImmWindow());
-        toolbar.add(immButton);
+        JLabel mapControlsLabel = new JLabel("Map:");
+        mapControlsLabel.setFont(mapControlsLabel.getFont().deriveFont(Font.BOLD));
+        toolbar.add(mapControlsLabel);
 
         JButton zoomInButton = new JButton("+");
         zoomInButton.setToolTipText("Zoom in");
@@ -199,6 +213,10 @@ public final class TrackerFrame extends JFrame {
         toolbar.add(detailMapButton);
 
         toolbar.add(verticalSeparator());
+        JLabel scenarioControlsLabel = new JLabel("Scenario:");
+        scenarioControlsLabel.setFont(
+                scenarioControlsLabel.getFont().deriveFont(Font.BOLD));
+        toolbar.add(scenarioControlsLabel);
         precomputeButton.setToolTipText(
                 "Compute the complete sensor and tracker history without real-time waiting");
         precomputeButton.addActionListener(event -> precomputeScenario());
@@ -219,8 +237,8 @@ public final class TrackerFrame extends JFrame {
         toolbar.add(resetScenarioButton);
 
         container.add(toolbar);
-        container.add(presetScenarioPanel);
-        container.add(recordingPanel);
+        container.add(dataModePanel);
+        container.add(displayControlsPanel);
         return container;
     }
 
@@ -238,12 +256,12 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void addTarget() {
-        if (presetScenarioActive) {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
         }
         playback.reset();
         TargetTrajectory target = model.addTarget();
-        inspectorPanel.targetAdded(target);
+        motionTelemetryPanel.targetAdded(target);
         selectTarget(target);
         statusLabel.setText("Created %s — draw its trajectory".formatted(target.id()));
     }
@@ -253,26 +271,26 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         selectedTarget = target;
-        inspectorPanel.setSelectedTarget(target);
-        profileWindow.refresh(target);
+        motionTelemetryPanel.setSelectedTarget(target);
         refreshTelemetry();
         earthMapCanvas.repaint();
     }
 
     private void clearSelectedPath() {
-        if (presetScenarioActive) {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
         }
-        TargetTrajectory target = inspectorPanel.selectedTarget();
+        TargetTrajectory target = motionTelemetryPanel.selectedTarget();
         if (target == null) {
             return;
         }
         selectedTarget = target;
         clearPathForTarget(playback, target);
         earthMapCanvas.finishPath();
-        inspectorPanel.setSelectedTarget(target);
+        motionTelemetryPanel.setSelectedTarget(target);
         statusLabel.setText("Path cleared for %s".formatted(target.id()));
         refreshTelemetry();
+        timelinePanel.refresh();
         earthMapCanvas.repaint();
     }
 
@@ -284,13 +302,16 @@ public final class TrackerFrame extends JFrame {
     private void loadPresetScenario(
             ScenarioPreset preset,
             PresetScenarioParameters parameters) {
+        if (analysisMode) {
+            return;
+        }
         playback.reset();
         PresetScenarioGenerator.generate(model, preset, parameters);
         presetScenarioActive = true;
-        updateStructuralEditingControls();
+        currentScenarioName = preset.toString();
         selectedTarget = model.targets().get(0);
-        inspectorPanel.replaceTargets(model.targets(), selectedTarget);
-        profileWindow.refresh(selectedTarget);
+        motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
+        updateStructuralEditingControls();
         earthMapCanvas.focusOnTargets();
         refreshTelemetry();
         timelinePanel.refresh();
@@ -299,15 +320,18 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void activateUserGeneratedMode() {
+        if (analysisMode) {
+            return;
+        }
         if (!presetScenarioActive) {
             return;
         }
         playback.reset();
         presetScenarioActive = false;
-        updateStructuralEditingControls();
+        currentScenarioName = "User generated";
         selectedTarget = model.replaceTargets(1).get(0);
-        inspectorPanel.replaceTargets(model.targets(), selectedTarget);
-        profileWindow.refresh(selectedTarget);
+        motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
+        updateStructuralEditingControls();
         earthMapCanvas.resetView();
         refreshTelemetry();
         timelinePanel.refresh();
@@ -316,15 +340,20 @@ public final class TrackerFrame extends JFrame {
     }
 
     private boolean isScenarioEditingLocked() {
-        return playback.isRunning() || playback.isComputing() || presetScenarioActive;
+        return analysisMode
+                || playback.isRunning()
+                || playback.isComputing()
+                || presetScenarioActive;
     }
 
     private void updateStructuralEditingControls() {
-        newTargetButton.setEnabled(!presetScenarioActive);
-        clearPathButton.setEnabled(!presetScenarioActive);
+        targetsPanel.setEditingState(isScenarioEditingLocked(), presetScenarioActive);
     }
 
     private void precomputeScenario() {
+        if (analysisMode) {
+            return;
+        }
         if (!validateSensorParameters()
                 || !validateImmParameters()
                 || !recordingPanel.commitParentFolder()) {
@@ -337,7 +366,7 @@ public final class TrackerFrame extends JFrame {
                 : "Pre-computing sensor and tracker history…");
         statusLabel.paintImmediately(statusLabel.getBounds());
         try {
-            if (!playback.precompute()) {
+            if (!playback.precompute(currentScenarioName)) {
                 String message = recorder.lastError() == null
                         ? "Draw or load at least one runnable target trajectory first."
                         : recorder.lastError();
@@ -362,10 +391,14 @@ public final class TrackerFrame extends JFrame {
             setCursor(java.awt.Cursor.getDefaultCursor());
             recordingPanel.refresh();
             timelinePanel.refresh();
+            updateStructuralEditingControls();
         }
     }
 
     private void replayScenario() {
+        if (analysisMode) {
+            return;
+        }
         if (!playback.startReplay()) {
             JOptionPane.showMessageDialog(
                     this,
@@ -413,21 +446,24 @@ public final class TrackerFrame extends JFrame {
     private void onCursorChanged(GeodeticPoint point) {
         if (!playback.isRunning()) {
             statusLabel.setText("Cursor  Lat %.5f°   Lon %.5f°   View %s".formatted(
-                    point.latitudeDegrees(), point.longitudeDegrees(), earthMapCanvas.viewDescription()));
+                    point.latitudeDegrees(),
+                    point.longitudeDegrees(),
+                    earthMapCanvas.viewDescription()));
         }
     }
 
     private void onPlaybackUpdated() {
         earthMapCanvas.repaint();
-        profileWindow.refresh(selectedTarget);
         refreshTelemetry();
         scenarioTimeLabel.setText("t = %.1f / %.1f s".formatted(
-                playback.elapsedSeconds(), model.durationSeconds()));
+                playback.elapsedSeconds(), playback.durationSeconds()));
         pauseButton.setEnabled(playback.isRunning());
         pauseButton.setText(playback.isPaused() ? "Resume" : "Pause");
-        precomputeButton.setEnabled(!playback.isComputing() && !playback.isRunning());
-        replayButton.setEnabled(playback.isReplayReady()
+        precomputeButton.setEnabled(!analysisMode
                 && !playback.isComputing() && !playback.isRunning());
+        replayButton.setEnabled(!analysisMode && playback.isReplayReady()
+                && !playback.isComputing() && !playback.isRunning());
+        updateStructuralEditingControls();
         recordingPanel.refresh();
         timelinePanel.refresh();
         if (playback.isComputing()) {
@@ -440,63 +476,13 @@ public final class TrackerFrame extends JFrame {
             statusLabel.setText("Replay at %.1f s — drag the timeline to seek"
                     .formatted(playback.elapsedSeconds()));
         } else if (playback.elapsedSeconds() > 0.0
-                && playback.elapsedSeconds() >= model.durationSeconds()) {
+                && playback.elapsedSeconds() >= playback.durationSeconds()) {
             statusLabel.setText("Scenario complete");
         }
     }
 
     private void refreshTelemetry() {
-        inspectorPanel.refresh(selectedTarget, playback);
-        profileWindow.refresh(selectedTarget);
-    }
-
-    private void positionProfileWindow() {
-        GraphicsConfiguration configuration = getGraphicsConfiguration();
-        Rectangle deviceScreen = configuration.getBounds();
-        Insets deviceInsets = Toolkit.getDefaultToolkit().getScreenInsets(configuration);
-        double scaleX = configuration.getDefaultTransform().getScaleX();
-        double scaleY = configuration.getDefaultTransform().getScaleY();
-        Rectangle screen = new Rectangle(
-                (int) Math.round(deviceScreen.x / scaleX),
-                (int) Math.round(deviceScreen.y / scaleY),
-                (int) Math.round(deviceScreen.width / scaleX),
-                (int) Math.round(deviceScreen.height / scaleY));
-        Insets insets = new Insets(
-                (int) Math.round(deviceInsets.top / scaleY),
-                (int) Math.round(deviceInsets.left / scaleX),
-                (int) Math.round(deviceInsets.bottom / scaleY),
-                (int) Math.round(deviceInsets.right / scaleX));
-        Rectangle usable = new Rectangle(
-                screen.x + insets.left,
-                screen.y + insets.top,
-                screen.width - insets.left - insets.right,
-                screen.height - insets.top - insets.bottom);
-
-        int gap = 8;
-        int maximumMainWidth = usable.width - profileWindow.getWidth() - gap;
-        if (getWidth() + profileWindow.getWidth() + gap > usable.width
-                && maximumMainWidth >= getMinimumSize().width) {
-            setSize(maximumMainWidth, Math.min(getHeight(), usable.height));
-        }
-
-        int combinedWidth = getWidth() + gap + profileWindow.getWidth();
-        if (combinedWidth <= usable.width) {
-            int mainX = usable.x + (usable.width - combinedWidth) / 2;
-            int mainY = Math.max(usable.y, Math.min(getY(), usable.y + usable.height - getHeight()));
-            setLocation(mainX, mainY);
-            int profileY = Math.max(
-                    usable.y,
-                    Math.min(mainY, usable.y + usable.height - profileWindow.getHeight()));
-            profileWindow.setLocation(mainX + getWidth() + gap, profileY);
-            return;
-        }
-
-        int x = Math.max(usable.x,
-                Math.min(getX() + getWidth() - profileWindow.getWidth(),
-                        usable.x + usable.width - profileWindow.getWidth()));
-        int y = Math.max(usable.y,
-                Math.min(getY(), usable.y + usable.height - profileWindow.getHeight()));
-        profileWindow.setLocation(x, y);
+        motionTelemetryPanel.refresh(selectedTarget, playback);
     }
 
     private void resetCompletedPlayback() {
@@ -507,10 +493,10 @@ public final class TrackerFrame extends JFrame {
     }
 
     private boolean validateSensorParameters() {
-        if (sensorWindow.commitSensorParameters()) {
+        if (sensorParametersPanel.commitSensorParameters()) {
             return true;
         }
-        showSensorWindow();
+        controlSidebar.showCard(ControlSidebar.SENSOR);
         JOptionPane.showMessageDialog(
                 this,
                 "Correct the highlighted God sensor parameters before pre-computing the scenario.",
@@ -519,14 +505,10 @@ public final class TrackerFrame extends JFrame {
         return false;
     }
 
-    public void showSensorWindow() {
-        sensorWindow.setLocation(getX() + 20, getY() + 40);
-        sensorWindow.setVisible(true);
-        sensorWindow.toFront();
-        sensorWindow.requestFocus();
-    }
-
     private void onSensorParametersChanged() {
+        if (analysisMode) {
+            return;
+        }
         if (playback.isReplayReady()) {
             playback.reset();
             return;
@@ -535,16 +517,10 @@ public final class TrackerFrame extends JFrame {
         earthMapCanvas.repaint();
     }
 
-    public void showImmWindow() {
-        int rightAlignedX = getX() + Math.max(
-                20, getWidth() - immWindow.getWidth() - 20);
-        immWindow.setLocation(rightAlignedX, getY() + 30);
-        immWindow.setVisible(true);
-        immWindow.toFront();
-        immWindow.requestFocus();
-    }
-
     private void onImmParametersChanged() {
+        if (analysisMode) {
+            return;
+        }
         if (playback.isReplayReady()) {
             playback.reset();
             return;
@@ -558,16 +534,101 @@ public final class TrackerFrame extends JFrame {
     }
 
     private boolean validateImmParameters() {
-        if (immWindow.commitParameters()) {
+        if (immParametersPanel.commitParameters()) {
             return true;
         }
-        showImmWindow();
+        controlSidebar.showCard(ControlSidebar.IMM);
         JOptionPane.showMessageDialog(
                 this,
                 "Correct the highlighted IMM tracker parameters before pre-computing the scenario.",
                 "Invalid IMM parameters",
                 JOptionPane.WARNING_MESSAGE);
         return false;
+    }
+
+    private void setAnalysisMode(boolean enabled) {
+        if (analysisMode == enabled) {
+            return;
+        }
+        playback.reset();
+        analysisMode = enabled;
+        if (enabled) {
+            recorder.setArmed(false);
+            recordingPanel.refresh();
+            presetScenarioActive = false;
+            currentScenarioName = "User generated";
+            selectedTarget = model.replaceTargets(1).get(0);
+            motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
+            dataModeLayout.show(dataModePanel, "analysis");
+            analysisLoadPanel.setParentFolder(recorder.outputParent());
+            analysisLoadPanel.setStitchingEnabled(false);
+            loadedAnalysisScenario = null;
+            statusLabel.setText("Analysis mode — select a recorded scenario folder to load");
+        } else {
+            analysisLoadPanel.setStitchingEnabled(false);
+            loadedAnalysisScenario = null;
+            dataModeLayout.show(dataModePanel, "generation");
+            statusLabel.setText("Scenario Generation mode");
+        }
+        updateModeControls();
+        refreshTelemetry();
+        timelinePanel.refresh();
+        earthMapCanvas.resetView();
+        earthMapCanvas.repaint();
+    }
+
+    private void updateModeControls() {
+        generationModeButton.setSelected(!analysisMode);
+        analysisModeButton.setSelected(analysisMode);
+        precomputeButton.setEnabled(!analysisMode
+                && !playback.isComputing() && !playback.isRunning());
+        replayButton.setEnabled(!analysisMode && playback.isReplayReady()
+                && !playback.isComputing() && !playback.isRunning());
+        presetScenarioPanel.setGenerationEnabled(!analysisMode);
+        updateStructuralEditingControls();
+    }
+
+    private void loadRecordedScenarioFolder(Path scenarioFolder) {
+        if (!analysisMode) {
+            return;
+        }
+        loadedAnalysisScenario = null;
+        analysisLoadPanel.setStitchingEnabled(false);
+        setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
+        try {
+            RecordedScenario scenario = TrackCsvReader.read(scenarioFolder);
+            loadedAnalysisScenario = scenario;
+            playback.loadRecordedScenario(scenario);
+            playback.rewindReplayPaused();
+            earthMapCanvas.focusOnPoints(playback.scenarioExtentPoints());
+            timelinePanel.refresh();
+            scenarioTimeLabel.setText("t = 0.0 / %.1f s".formatted(
+                    scenario.durationSeconds()));
+            long trackCount = scenario.records().stream()
+                    .map(record -> record.trackId())
+                    .distinct()
+                    .count();
+            statusLabel.setText("Loaded %s — %d track(s), %.1f seconds"
+                    .formatted(scenario.scenarioName(), trackCount, scenario.durationSeconds()));
+            analysisLoadPanel.setStitchingEnabled(true);
+        } catch (IOException | IllegalArgumentException exception) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Could not load the recorded scenario.\n" + exception.getMessage(),
+                    "Scenario load failed",
+                    JOptionPane.WARNING_MESSAGE);
+        } finally {
+            setCursor(java.awt.Cursor.getDefaultCursor());
+            updateModeControls();
+        }
+    }
+
+    private void openTrackStitchingAnalysis() {
+        if (!analysisMode || loadedAnalysisScenario == null) {
+            return;
+        }
+        TrackStitchingWindow window = new TrackStitchingWindow(this, loadedAnalysisScenario);
+        window.setVisible(true);
     }
 
     private static JSeparator verticalSeparator() {

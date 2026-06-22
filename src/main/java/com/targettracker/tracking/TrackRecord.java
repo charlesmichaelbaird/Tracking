@@ -4,13 +4,15 @@ package com.targettracker.tracking;
  * Immutable snapshot of a fused 9D track state at one scenario time.
  * State order is ECEF [x, y, z, vx, vy, vz, ax, ay, az].
  * {@code updated=false} denotes a prediction/coast rather than a measurement update.
+ * Updated records may include the associated 6D measurement used by the filter.
  */
 public record TrackRecord(
         String trackId,
         double timeSeconds,
         double[] state,
         double[][] covariance,
-        boolean updated) {
+        boolean updated,
+        AssociatedMeasurement measurement) {
     private static final int STATE_SIZE = 9;
 
     public TrackRecord {
@@ -28,6 +30,18 @@ public record TrackRecord(
         }
         state = state.clone();
         covariance = copyCovariance(covariance);
+        if (!updated && measurement != null) {
+            throw new IllegalArgumentException("A coast record cannot contain a measurement");
+        }
+    }
+
+    public TrackRecord(
+            String trackId,
+            double timeSeconds,
+            double[] state,
+            double[][] covariance,
+            boolean updated) {
+        this(trackId, timeSeconds, state, covariance, updated, null);
     }
 
     @Override

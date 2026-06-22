@@ -160,9 +160,11 @@ public final class TrackCsvReader {
             double velocityUncertainty = optionalDouble(
                     values, columns.get("velocity_uncertainty_mps"), axisUncertainty(covariance, 3));
             Integer targetColumn = columns.get("target_id");
+            Integer trackColumn = columns.get("associated_track_id");
             measurements.add(new RecordedMeasurement(
                     value(values, columns.get("sensor_id")),
                     targetColumn == null ? "" : value(values, targetColumn),
+                    trackColumn == null ? "" : value(values, trackColumn),
                     parseDouble(values, columns.get("time_s")),
                     mean,
                     covariance,
@@ -184,6 +186,7 @@ public final class TrackCsvReader {
             measurements.add(new RecordedMeasurement(
                     "GOD-SENSOR-001",
                     measurement.targetId(),
+                    record.trackId(),
                     record.timeSeconds(),
                     measurement.mean(),
                     covariance,

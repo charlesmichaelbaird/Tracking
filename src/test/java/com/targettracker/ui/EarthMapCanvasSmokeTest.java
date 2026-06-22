@@ -39,6 +39,7 @@ public final class EarthMapCanvasSmokeTest {
                 model,
                 playback,
                 measurementEngine,
+                new DisplayHistorySettings(),
                 () -> target,
                 playback::isRunning,
                 () -> {
@@ -63,6 +64,11 @@ public final class EarthMapCanvasSmokeTest {
         if (!"1.0×".equals(canvas.viewDescription())) {
             throw new AssertionError("World-view reset should restore 1.0× zoom");
         }
+        canvas.focusOnPoints(target.path());
+        if ("1.0×".equals(canvas.viewDescription())) {
+            throw new AssertionError("Scenario extent focus should zoom into its local region");
+        }
+        canvas.resetView();
 
         sensorSettings.setParameters(new SensorParameters(15.0, 0.0, 0.0, 0.0, 1.0, 5));
         if (!playback.precompute() || !playback.rewindReplayPaused()) {

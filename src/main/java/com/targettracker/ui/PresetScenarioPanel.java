@@ -12,6 +12,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.JButton;
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
@@ -36,43 +37,63 @@ final class PresetScenarioPanel extends JPanel {
     private final JTextField durationField = field("05:00", 5);
     private final JButton applyButton = new JButton("Apply preset");
     private final JLabel modeLabel = new JLabel("Manual editing");
+    private boolean generationEnabled = true;
 
     PresetScenarioPanel(Component dialogParent, Listener listener) {
         this.dialogParent = dialogParent;
         this.listener = listener;
-        setLayout(new BoxLayout(this, BoxLayout.X_AXIS));
-        setOpaque(false);
-        setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(232, 235, 239)),
-                BorderFactory.createEmptyBorder(5, 14, 5, 14)));
+        setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+        setBackground(new Color(246, 248, 251));
+        setBorder(BorderFactory.createEmptyBorder(18, 18, 18, 18));
 
-        JLabel title = new JLabel("Scenario:");
-        title.setFont(title.getFont().deriveFont(Font.BOLD));
+        JLabel title = new JLabel("Scenario");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 18.0f));
+        title.setAlignmentX(LEFT_ALIGNMENT);
         add(title);
-        add(Box.createHorizontalStrut(7));
+        add(Box.createVerticalStrut(4));
+        JLabel note = new JLabel("<html>Load a generated maneuver scenario, or select "
+                + "User generated to unlock target editing.</html>");
+        note.setForeground(new Color(80, 92, 104));
+        note.setAlignmentX(LEFT_ALIGNMENT);
+        add(note);
+        add(Box.createVerticalStrut(16));
 
-        presetSelector.setMaximumSize(new Dimension(285, 28));
-        presetSelector.setPreferredSize(new Dimension(285, 28));
+        JLabel presetLabel = new JLabel("Scenario type");
+        presetLabel.setForeground(new Color(61, 73, 84));
+        presetLabel.setAlignmentX(LEFT_ALIGNMENT);
+        add(presetLabel);
+        add(Box.createVerticalStrut(4));
+
+        presetSelector.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        presetSelector.setAlignmentX(LEFT_ALIGNMENT);
         presetSelector.setToolTipText("Choose User generated to unlock manual target editing");
         add(presetSelector);
-        add(Box.createHorizontalStrut(10));
+        add(Box.createVerticalStrut(14));
 
-        add(labeled("Lat", latitudeField, "Scenario center latitude in degrees"));
-        add(Box.createHorizontalStrut(7));
-        add(labeled("Lon", longitudeField, "Scenario center longitude in degrees"));
-        add(Box.createHorizontalStrut(7));
-        add(labeled("Avg m/s", speedField, "Center of the target speed spread"));
-        add(Box.createHorizontalStrut(7));
-        add(labeled("Alt m", altitudeField, "WGS-84 ellipsoidal altitude"));
-        add(Box.createHorizontalStrut(7));
-        add(labeled("Time", durationField, "Duration in mm:ss; minimum 05:00"));
-        add(Box.createHorizontalStrut(8));
+        add(labeled("Center latitude (degrees)", latitudeField,
+                "Scenario center latitude in degrees"));
+        add(Box.createVerticalStrut(9));
+        add(labeled("Center longitude (degrees)", longitudeField,
+                "Scenario center longitude in degrees"));
+        add(Box.createVerticalStrut(9));
+        add(labeled("Average speed (m/s)", speedField,
+                "Center of the target speed spread"));
+        add(Box.createVerticalStrut(9));
+        add(labeled("Altitude (m)", altitudeField,
+                "WGS-84 ellipsoidal altitude"));
+        add(Box.createVerticalStrut(9));
+        add(labeled("Scenario time (mm:ss)", durationField,
+                "Duration in mm:ss; minimum 05:00"));
+        add(Box.createVerticalStrut(16));
 
         applyButton.setEnabled(false);
         applyButton.addActionListener(event -> applySelectedPreset());
+        applyButton.setAlignmentX(LEFT_ALIGNMENT);
+        applyButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
         add(applyButton);
-        add(Box.createHorizontalStrut(8));
+        add(Box.createVerticalStrut(10));
         modeLabel.setForeground(new Color(91, 103, 115));
+        modeLabel.setAlignmentX(LEFT_ALIGNMENT);
         add(modeLabel);
 
         presetSelector.addActionListener(event -> presetSelectionChanged());
@@ -92,11 +113,14 @@ final class PresetScenarioPanel extends JPanel {
             listener.selectUserGeneratedMode();
             return;
         }
-        applyButton.setEnabled(true);
+        applyButton.setEnabled(generationEnabled);
         applySelectedPreset();
     }
 
     private void applySelectedPreset() {
+        if (!generationEnabled) {
+            return;
+        }
         ScenarioPreset preset = (ScenarioPreset) presetSelector.getSelectedItem();
         if (preset == null || preset.isUserGenerated()) {
             return;
@@ -120,16 +144,40 @@ final class PresetScenarioPanel extends JPanel {
         }
     }
 
+    void setGenerationEnabled(boolean enabled) {
+        generationEnabled = enabled;
+        presetSelector.setEnabled(enabled);
+        latitudeField.setEnabled(enabled);
+        longitudeField.setEnabled(enabled);
+        speedField.setEnabled(enabled);
+        altitudeField.setEnabled(enabled);
+        durationField.setEnabled(enabled);
+        ScenarioPreset preset = (ScenarioPreset) presetSelector.getSelectedItem();
+        applyButton.setEnabled(enabled && preset != null && !preset.isUserGenerated());
+        if (!enabled) {
+            modeLabel.setText("Disabled in Analysis Mode");
+            modeLabel.setForeground(new Color(132, 74, 17));
+        } else if (preset == null || preset.isUserGenerated()) {
+            modeLabel.setText("Manual editing");
+            modeLabel.setForeground(new Color(91, 103, 115));
+        } else {
+            modeLabel.setText("Preset selected — press Apply");
+            modeLabel.setForeground(new Color(132, 74, 17));
+        }
+    }
+
     private static JPanel labeled(String label, JTextField field, String tooltip) {
-        JPanel panel = new JPanel();
+        JPanel panel = new JPanel(new BorderLayout(8, 0));
         panel.setOpaque(false);
-        panel.setLayout(new BoxLayout(panel, BoxLayout.X_AXIS));
-        JLabel text = new JLabel(label + ":");
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        JLabel text = new JLabel(label);
         text.setToolTipText(tooltip);
         field.setToolTipText(tooltip);
-        panel.add(text);
-        panel.add(Box.createHorizontalStrut(3));
-        panel.add(field);
+        field.setPreferredSize(new Dimension(105, 28));
+        field.setMaximumSize(new Dimension(105, 28));
+        panel.add(text, BorderLayout.CENTER);
+        panel.add(field, BorderLayout.EAST);
         return panel;
     }
 

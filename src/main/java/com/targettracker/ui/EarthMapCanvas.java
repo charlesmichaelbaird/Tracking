@@ -64,6 +64,7 @@ final class EarthMapCanvas extends JPanel {
     private final ScenarioModel model;
     private final ScenarioPlayback playback;
     private final MeasurementEngine measurementEngine;
+    private final DisplayHistorySettings displaySettings;
     private final Supplier<TargetTrajectory> selectedTarget;
     private final BooleanSupplier editingLocked;
     private final Runnable onPathChanged;
@@ -88,6 +89,7 @@ final class EarthMapCanvas extends JPanel {
             ScenarioModel model,
             ScenarioPlayback playback,
             MeasurementEngine measurementEngine,
+            DisplayHistorySettings displaySettings,
             Supplier<TargetTrajectory> selectedTarget,
             BooleanSupplier editingLocked,
             Runnable onPathChanged,
@@ -95,6 +97,7 @@ final class EarthMapCanvas extends JPanel {
         this.model = model;
         this.playback = playback;
         this.measurementEngine = measurementEngine;
+        this.displaySettings = displaySettings;
         this.selectedTarget = selectedTarget;
         this.editingLocked = editingLocked;
         this.onPathChanged = onPathChanged;
@@ -230,13 +233,20 @@ final class EarthMapCanvas extends JPanel {
     }
 
     void focusOnTargets() {
+        List<EcefPoint> points = new ArrayList<>();
+        for (TargetTrajectory target : model.targets()) {
+            points.addAll(target.path());
+        }
+        focusOnPoints(points);
+    }
+
+    void focusOnPoints(List<EcefPoint> points) {
         Double referenceLongitude = null;
         double minimumLongitude = Double.POSITIVE_INFINITY;
         double maximumLongitude = Double.NEGATIVE_INFINITY;
         double minimumLatitude = Double.POSITIVE_INFINITY;
         double maximumLatitude = Double.NEGATIVE_INFINITY;
-        for (TargetTrajectory target : model.targets()) {
-            for (EcefPoint point : target.path()) {
+        for (EcefPoint point : points) {
                 GeodeticPoint geodetic = Wgs84.toGeodetic(point);
                 if (referenceLongitude == null) {
                     referenceLongitude = geodetic.longitudeDegrees();
@@ -248,7 +258,6 @@ final class EarthMapCanvas extends JPanel {
                 maximumLongitude = Math.max(maximumLongitude, unwrappedLongitude);
                 minimumLatitude = Math.min(minimumLatitude, geodetic.latitudeDegrees());
                 maximumLatitude = Math.max(maximumLatitude, geodetic.latitudeDegrees());
-            }
         }
         if (referenceLongitude == null) {
             resetView();
@@ -374,6 +383,20 @@ final class EarthMapCanvas extends JPanel {
     }
 
     private void drawPlannedTrajectories(Graphics2D g) {
+        if (!displaySettings.groundTruthVisible()) {
+            return;
+        }
+        if (playback.isImportedReplay()) {
+            for (GroundTruthView truth : playback.currentGroundTruthViews()) {
+                if (truth.plannedPath().size() < 2) {
+                    continue;
+                }
+                g.setColor(withAlpha(truth.color(), 170));
+                g.setStroke(PLANNED_STROKE);
+                drawEcefPath(g, truth.plannedPath());
+            }
+            return;
+        }
         TargetTrajectory selected = selectedTarget.get();
         for (TargetTrajectory target : model.targets()) {
             if (target.path().size() < 2) {
@@ -386,17 +409,44 @@ final class EarthMapCanvas extends JPanel {
     }
 
     private void drawRecentHistory(Graphics2D g) {
+        if (!displaySettings.groundTruthVisible()
+                || displaySettings.groundTruthHistoryFraction() <= 0.0) {
+            return;
+        }
         g.setStroke(HISTORY_STROKE);
+        if (playback.isImportedReplay()) {
+            for (GroundTruthView truth : playback.currentGroundTruthViews()) {
+                List<EcefPoint> history = historySlice(
+                        truth.history(), displaySettings.groundTruthHistoryFraction());
+                if (history.size() >= 2) {
+                    g.setColor(truth.color());
+                    drawEcefPath(g, history);
+                }
+            }
+            return;
+        }
         for (Map.Entry<TargetTrajectory, Deque<EcefPoint>> entry : playback.recentHistory().entrySet()) {
-            if (entry.getValue().size() < 2) {
+            List<EcefPoint> history = historySlice(
+                    new ArrayList<>(entry.getValue()),
+                    displaySettings.groundTruthHistoryFraction());
+            if (history.size() < 2) {
                 continue;
             }
             g.setColor(entry.getKey().color());
-            drawEcefPath(g, new ArrayList<>(entry.getValue()));
+            drawEcefPath(g, history);
         }
     }
 
     private void drawCurrentTargets(Graphics2D g) {
+        if (!displaySettings.groundTruthVisible()) {
+            return;
+        }
+        if (playback.isImportedReplay()) {
+            for (GroundTruthView truth : playback.currentGroundTruthViews()) {
+                drawTargetMarker(g, truth.id(), truth.currentPosition(), truth.color(), 4);
+            }
+            return;
+        }
         for (TargetTrajectory target : model.targets()) {
             EcefPoint position = playback.currentPosition(target);
             if (position == null || (!playback.isRunning()
@@ -404,23 +454,19 @@ final class EarthMapCanvas extends JPanel {
                     && playback.elapsedSeconds() <= 0.0)) {
                 continue;
             }
-            Point point = toScreen(Wgs84.toGeodetic(position));
-            if (point == null) {
-                continue;
-            }
             int radius = target == selectedTarget.get() ? 6 : 4;
-            g.setColor(Color.WHITE);
-            g.fillOval(point.x - radius - 2, point.y - radius - 2, radius * 2 + 4, radius * 2 + 4);
-            g.setColor(target.color());
-            g.fillOval(point.x - radius, point.y - radius, radius * 2, radius * 2);
-            g.setColor(new Color(31, 38, 45));
-            g.drawString(target.id(), point.x + radius + 5, point.y - radius - 2);
+            drawTargetMarker(g, target.id(), position, target.color(), radius);
         }
     }
 
     private void drawMeasurements(Graphics2D g) {
+        if (!displaySettings.measurementsVisible()) {
+            return;
+        }
         for (TargetMeasurement measurement
-                : measurementEngine.visibleMeasurementsAt(playback.elapsedSeconds())) {
+                : measurementEngine.measurementHistoryAt(
+                        playback.elapsedSeconds(),
+                        displaySettings.measurementHistoryFraction())) {
             Point point = toScreen(Wgs84.toGeodetic(measurement.measuredPosition()));
             if (point == null) {
                 continue;
@@ -435,6 +481,35 @@ final class EarthMapCanvas extends JPanel {
             g.drawLine(point.x - radius, point.y - radius, point.x + radius, point.y + radius);
             g.drawLine(point.x - radius, point.y + radius, point.x + radius, point.y - radius);
         }
+    }
+
+    private void drawTargetMarker(
+            Graphics2D g,
+            String id,
+            EcefPoint position,
+            Color color,
+            int radius) {
+        Point point = toScreen(Wgs84.toGeodetic(position));
+        if (point == null) {
+            return;
+        }
+        g.setColor(Color.WHITE);
+        g.fillOval(point.x - radius - 2, point.y - radius - 2,
+                radius * 2 + 4, radius * 2 + 4);
+        g.setColor(color);
+        g.fillOval(point.x - radius, point.y - radius, radius * 2, radius * 2);
+        g.setColor(new Color(31, 38, 45));
+        g.drawString(id, point.x + radius + 5, point.y - radius - 2);
+    }
+
+    private static List<EcefPoint> historySlice(
+            List<EcefPoint> history,
+            double fraction) {
+        if (history.isEmpty() || fraction <= 0.0) {
+            return List.of();
+        }
+        int count = Math.max(1, (int) Math.ceil(history.size() * fraction));
+        return history.subList(Math.max(0, history.size() - count), history.size());
     }
 
     private void drawTracks(Graphics2D g) {
@@ -575,7 +650,7 @@ final class EarthMapCanvas extends JPanel {
     private void drawScenarioTimer(Graphics2D g) {
         Rectangle map = mapBounds();
         String text = "%.1f s / %.1f s".formatted(
-                playback.elapsedSeconds(), model.durationSeconds());
+                playback.elapsedSeconds(), playback.durationSeconds());
         g.setFont(g.getFont().deriveFont(Font.BOLD, 14.0f));
         FontMetrics metrics = g.getFontMetrics();
         int width = metrics.stringWidth(text) + 20;

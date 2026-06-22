@@ -56,7 +56,7 @@ final class ScenarioTimelinePanel extends JPanel {
     }
 
     void refresh() {
-        boolean hasScenario = model.durationSeconds() > 0.0;
+        boolean hasScenario = playback.durationSeconds() > 0.0;
         ruler.setEnabled(playback.canSeek());
 
         if (recorder.isActive()) {
@@ -115,7 +115,7 @@ final class ScenarioTimelinePanel extends JPanel {
                         RenderingHints.VALUE_ANTIALIAS_ON);
                 int width = Math.max(1, getWidth() - LEFT - RIGHT);
                 int baseline = 19;
-                double duration = model.durationSeconds();
+                double duration = playback.durationSeconds();
 
                 g.setColor(isEnabled() ? new Color(68, 77, 86) : new Color(143, 150, 157));
                 g.setStroke(new BasicStroke(1.4f));
@@ -170,7 +170,7 @@ final class ScenarioTimelinePanel extends JPanel {
             }
             int width = Math.max(1, getWidth() - LEFT - RIGHT);
             double fraction = Math.max(0.0, Math.min(1.0, (double) (mouseX - LEFT) / width));
-            playback.seekTo(fraction * model.durationSeconds());
+            playback.seekTo(fraction * playback.durationSeconds());
         }
     }
 

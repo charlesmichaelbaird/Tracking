@@ -1,6 +1,7 @@
 package com.targettracker.recording;
 
 import com.targettracker.tracking.TrackRecord;
+import com.targettracker.tracking.AssociatedMeasurement;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,25 +37,40 @@ public final class TrackCsvRecorderSmokeTest {
             if (!firstRun.getFileName().toString().equals("scenario_2026-06-22_15-04-05_123")) {
                 throw new AssertionError("Run directory should use the run date and time");
             }
-            Path trackFile = firstRun.resolve("TRK-001.csv");
+            Path trackFile = firstRun.resolve(TrackCsvRecorder.TRACK_DIRECTORY)
+                    .resolve("TRK-001.csv");
             List<String> lines = Files.readAllLines(trackFile);
             if (lines.size() != 3) {
                 throw new AssertionError("Expected a header and two update rows");
             }
             if (lines.get(0).split(",", -1).length != 93
                     || lines.get(1).split(",", -1).length != 93) {
-                throw new AssertionError("CSV must contain ID, time, updated, 9 state, and 81 covariance fields");
+                throw new AssertionError("Track CSV must contain only track fields");
             }
             if (!lines.get(0).startsWith("track_id,time_s,updated,x_m,y_m,z_m")
                     || !lines.get(1).startsWith("TRK-001,5.0,true,")) {
                 throw new AssertionError("CSV schema or values are incorrect");
             }
-            List<String> coastLines = Files.readAllLines(firstRun.resolve("TRK-002.csv"));
+            List<String> coastLines = Files.readAllLines(
+                    firstRun.resolve(TrackCsvRecorder.TRACK_DIRECTORY).resolve("TRK-002.csv"));
             if (coastLines.size() != 2 || !coastLines.get(1).startsWith("TRK-002,20.0,false,")) {
                 throw new AssertionError("Predicted/coasted rows must be exported with updated=false");
             }
             if (!Files.exists(firstRun.resolve("README.txt"))) {
                 throw new AssertionError("Each run should include MATLAB import guidance");
+            }
+            if (!Files.exists(firstRun.resolve("scenario_metadata.properties"))) {
+                throw new AssertionError("Each run should include replay metadata");
+            }
+            Path measurementFile = firstRun.resolve(TrackCsvRecorder.MEASUREMENT_DIRECTORY)
+                    .resolve(TrackCsvRecorder.MEASUREMENT_FILE);
+            List<String> measurementLines = Files.readAllLines(measurementFile);
+            if (measurementLines.size() != 3
+                    || measurementLines.get(0).split(",", -1).length != 48) {
+                throw new AssertionError("Measurements should be stored in their own fixed schema");
+            }
+            if (!Files.isDirectory(firstRun.resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY))) {
+                throw new AssertionError("Ground-truth output directory is missing");
             }
 
             if (!recorder.beginRun()) {
@@ -85,6 +101,16 @@ public final class TrackCsvRecorderSmokeTest {
             state[index] = index + time;
             covariance[index][index] = index + 1.0;
         }
-        return new TrackRecord(id, time, state, covariance, updated);
+        AssociatedMeasurement measurement = null;
+        if (updated) {
+            double[] mean = new double[6];
+            double[][] measurementCovariance = new double[6][6];
+            for (int index = 0; index < 6; index++) {
+                mean[index] = 100.0 + index;
+                measurementCovariance[index][index] = index + 0.5;
+            }
+            measurement = new AssociatedMeasurement("TGT-001", mean, measurementCovariance);
+        }
+        return new TrackRecord(id, time, state, covariance, updated, measurement);
     }
 }
