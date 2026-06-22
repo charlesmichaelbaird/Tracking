@@ -17,6 +17,7 @@ import javax.swing.JSeparator;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.util.List;
 import java.util.function.Consumer;
 
 final class TargetInspectorPanel extends JPanel {
@@ -126,10 +127,22 @@ final class TargetInspectorPanel extends JPanel {
         targetSelector.addItem(target);
     }
 
+    void replaceTargets(List<TargetTrajectory> targets, TargetTrajectory selected) {
+        synchronizing = true;
+        targetSelector.removeAllItems();
+        targets.forEach(targetSelector::addItem);
+        targetSelector.setSelectedItem(selected);
+        synchronizing = false;
+    }
+
     void setSelectedTarget(TargetTrajectory target) {
         synchronizing = true;
         targetSelector.setSelectedItem(target);
         synchronizing = false;
+    }
+
+    TargetTrajectory selectedTarget() {
+        return (TargetTrajectory) targetSelector.getSelectedItem();
     }
 
     void refresh(TargetTrajectory target, ScenarioPlayback playback) {

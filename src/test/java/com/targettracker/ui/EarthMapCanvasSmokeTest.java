@@ -83,6 +83,10 @@ public final class EarthMapCanvasSmokeTest {
         if (playback.isPaused()) {
             throw new AssertionError("Pause toggle should resume after rewind");
         }
-        playback.reset();
+        TrackerFrame.clearPathForTarget(playback, target);
+        if (playback.isRunning() || !target.path().isEmpty()) {
+            throw new AssertionError(
+                    "Clear Path should reset active playback and erase the selected trajectory");
+        }
     }
 }

@@ -18,6 +18,7 @@ public final class ImmTrackerSmokeTest {
         verifyCaProcessNoise();
         verifyAssociationCoastingAndTimeout();
         verifyGreedyOneToOneAssociation();
+        verifyUpdateRecordsExcludeCoasts();
         verifyUncertaintyBreak();
         verifySquareTransitionValidation();
         System.out.println("ImmTrackerSmokeTest passed");
@@ -121,6 +122,29 @@ public final class ImmTrackerSmokeTest {
         tracker.advanceTo(1.0);
         if (tracker.currentViews().size() != 1 || !tracker.currentViews().get(0).dead()) {
             throw new AssertionError("Uncertainty threshold should retire an expanding track");
+        }
+    }
+
+    private static void verifyUpdateRecordsExcludeCoasts() {
+        ImmSettings settings = new ImmSettings();
+        settings.setParameters(parameters(List.of(ImmModel.CV), 0.1, 0.1, 1_000.0));
+        ImmTracker tracker = new ImmTracker(settings);
+        tracker.processMeasurements(List.of(measurement(0.0, 0.0, 10.0)));
+        List<TrackRecord> initial = tracker.drainUpdatedRecords();
+        if (initial.size() != 1 || initial.get(0).state().length != 9
+                || initial.get(0).covariance().length != 9 || !initial.get(0).updated()) {
+            throw new AssertionError("Track initialization should publish one complete update record");
+        }
+
+        tracker.advanceTo(5.0);
+        if (!tracker.drainUpdatedRecords().isEmpty()) {
+            throw new AssertionError("Coasting must not publish recording rows");
+        }
+
+        tracker.processMeasurements(List.of(measurement(5.0, 50.0, 10.0)));
+        List<TrackRecord> update = tracker.drainUpdatedRecords();
+        if (update.size() != 1 || update.get(0).timeSeconds() != 5.0) {
+            throw new AssertionError("Each associated measurement should publish one update record");
         }
     }
 

@@ -33,6 +33,18 @@ public final class ScenarioModel {
         return target;
     }
 
+    /** Replaces the scenario target set and returns the newly numbered targets. */
+    public List<TargetTrajectory> replaceTargets(int targetCount) {
+        if (targetCount < 1) {
+            throw new IllegalArgumentException("A scenario requires at least one target");
+        }
+        targets.clear();
+        for (int index = 0; index < targetCount; index++) {
+            addTarget();
+        }
+        return targets();
+    }
+
     public double durationSeconds() {
         return targets.stream()
                 .filter(TargetTrajectory::isRunnable)

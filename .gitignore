@@ -3,5 +3,6 @@
 target/
 out/
 out-test/
+recordings/
 *.class
 hs_err_pid*

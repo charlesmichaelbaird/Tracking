@@ -20,6 +20,7 @@ final class ProfileWindow extends JDialog {
     private final JLabel targetLabel = new JLabel();
     private final ProfileEditor velocityEditor;
     private final ProfileEditor altitudeEditor;
+    private final BooleanSupplier editingLocked;
 
     ProfileWindow(
             Frame owner,
@@ -28,6 +29,7 @@ final class ProfileWindow extends JDialog {
             BooleanSupplier editingLocked,
             Runnable onProfileChanged) {
         super(owner, "Target velocity and altitude profiles", false);
+        this.editingLocked = editingLocked;
         setDefaultCloseOperation(HIDE_ON_CLOSE);
         setMinimumSize(new Dimension(560, 600));
         setSize(610, 660);
@@ -64,6 +66,8 @@ final class ProfileWindow extends JDialog {
     void refresh(TargetTrajectory target) {
         targetLabel.setText(target == null
                 ? "No target selected"
+                : editingLocked.getAsBoolean()
+                ? "%s • profile locked by scenario mode".formatted(target.id())
                 : "Editing %s • drag directly on either chart".formatted(target.id()));
         velocityEditor.repaint();
         altitudeEditor.repaint();

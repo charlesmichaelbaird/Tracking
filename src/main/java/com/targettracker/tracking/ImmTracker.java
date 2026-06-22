@@ -31,6 +31,7 @@ public final class ImmTracker {
     private final ImmSettings settings;
     private final List<Track> activeTracks = new ArrayList<>();
     private final List<TrackView> deadTrackViews = new ArrayList<>();
+    private final List<TrackRecord> updatedRecords = new ArrayList<>();
     private List<TrackView> currentViews = List.of();
     private int nextTrackNumber = 1;
 
@@ -41,6 +42,7 @@ public final class ImmTracker {
     public void reset() {
         activeTracks.clear();
         deadTrackViews.clear();
+        updatedRecords.clear();
         currentViews = List.of();
         nextTrackNumber = 1;
     }
@@ -80,6 +82,13 @@ public final class ImmTracker {
         return currentViews;
     }
 
+    /** Returns and clears track snapshots produced by measurement updates. */
+    public List<TrackRecord> drainUpdatedRecords() {
+        List<TrackRecord> drained = List.copyOf(updatedRecords);
+        updatedRecords.clear();
+        return drained;
+    }
+
     private void processMeasurementBatch(double timeSeconds, List<TargetMeasurement> measurements) {
         ImmParameters parameters = settings.parameters();
         activeTracks.forEach(track -> track.reconcileModels(parameters));
@@ -107,18 +116,23 @@ public final class ImmTracker {
                     && !assignedMeasurements.contains(candidate.measurementIndex())) {
                 assignedTracks.add(candidate.trackIndex());
                 assignedMeasurements.add(candidate.measurementIndex());
-                activeTracks.get(candidate.trackIndex()).update(
-                        measurements.get(candidate.measurementIndex()), parameters);
+                Track track = activeTracks.get(candidate.trackIndex());
+                TargetMeasurement measurement = measurements.get(candidate.measurementIndex());
+                track.update(measurement, parameters);
+                updatedRecords.add(track.updatedRecord(measurement.timeSeconds()));
             }
         }
 
         for (int measurementIndex = 0; measurementIndex < measurements.size(); measurementIndex++) {
             if (!assignedMeasurements.contains(measurementIndex)) {
-                activeTracks.add(new Track(
+                TargetMeasurement measurement = measurements.get(measurementIndex);
+                Track track = new Track(
                         "TRK-%03d".formatted(nextTrackNumber),
                         TRACK_COLORS[(nextTrackNumber - 1) % TRACK_COLORS.length],
-                        measurements.get(measurementIndex),
-                        parameters));
+                        measurement,
+                        parameters);
+                activeTracks.add(track);
+                updatedRecords.add(track.updatedRecord(measurement.timeSeconds()));
                 nextTrackNumber++;
             }
         }
@@ -423,6 +437,11 @@ public final class ImmTracker {
 
         FusedState fusedStoredState() {
             return fuse(states, probabilities);
+        }
+
+        TrackRecord updatedRecord(double timeSeconds) {
+            FusedState fused = fusedStoredState();
+            return new TrackRecord(id, timeSeconds, fused.mean(), fused.covariance(), true);
         }
 
         TrackView viewAt(double timeSeconds, ImmParameters parameters, boolean dead) {

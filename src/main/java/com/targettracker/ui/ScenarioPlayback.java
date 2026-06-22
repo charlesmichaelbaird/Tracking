@@ -3,6 +3,7 @@ package com.targettracker.ui;
 import com.targettracker.model.EcefPoint;
 import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.TargetTrajectory;
+import com.targettracker.recording.TrackCsvRecorder;
 import com.targettracker.tracking.ImmTracker;
 
 import javax.swing.Timer;
@@ -20,6 +21,7 @@ final class ScenarioPlayback {
     private final Runnable onUpdate;
     private final MeasurementEngine measurementEngine;
     private final ImmTracker immTracker;
+    private final TrackCsvRecorder recorder;
     private final Timer timer;
     private final Map<TargetTrajectory, Deque<EcefPoint>> recentHistory = new LinkedHashMap<>();
 
@@ -33,10 +35,20 @@ final class ScenarioPlayback {
             Runnable onUpdate,
             MeasurementEngine measurementEngine,
             ImmTracker immTracker) {
+        this(model, onUpdate, measurementEngine, immTracker, new TrackCsvRecorder());
+    }
+
+    ScenarioPlayback(
+            ScenarioModel model,
+            Runnable onUpdate,
+            MeasurementEngine measurementEngine,
+            ImmTracker immTracker,
+            TrackCsvRecorder recorder) {
         this.model = model;
         this.onUpdate = onUpdate;
         this.measurementEngine = measurementEngine;
         this.immTracker = immTracker;
+        this.recorder = recorder;
         this.timer = new Timer(TIMER_DELAY_MILLIS, event -> tick());
         this.timer.setCoalesce(true);
     }
@@ -49,6 +61,7 @@ final class ScenarioPlayback {
         elapsedSeconds = 0.0;
         running = true;
         paused = false;
+        recorder.beginRun();
         initializeHistory();
         immTracker.reset();
         measurementEngine.beginScenario();
@@ -69,6 +82,7 @@ final class ScenarioPlayback {
         elapsedSeconds = 0.0;
         running = true;
         paused = true;
+        recorder.beginRun();
         initializeHistory();
         immTracker.reset();
         measurementEngine.beginScenario();
@@ -94,6 +108,7 @@ final class ScenarioPlayback {
         timer.stop();
         running = false;
         paused = false;
+        recorder.finishRun();
         onUpdate.run();
     }
 
@@ -105,6 +120,7 @@ final class ScenarioPlayback {
         recentHistory.clear();
         measurementEngine.reset();
         immTracker.reset();
+        recorder.finishRun();
         onUpdate.run();
     }
 
@@ -173,11 +189,13 @@ final class ScenarioPlayback {
             timer.stop();
             running = false;
             paused = false;
+            recorder.finishRun();
         }
         onUpdate.run();
     }
 
     private void processNewMeasurements() {
         immTracker.processMeasurements(measurementEngine.drainNewMeasurements());
+        recorder.recordUpdates(immTracker.drainUpdatedRecords());
     }
 }

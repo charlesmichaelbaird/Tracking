@@ -1,9 +1,13 @@
 package com.targettracker.ui;
 
 import com.targettracker.model.GeodeticPoint;
+import com.targettracker.model.PresetScenarioGenerator;
+import com.targettracker.model.PresetScenarioParameters;
 import com.targettracker.model.ScenarioModel;
+import com.targettracker.model.ScenarioPreset;
 import com.targettracker.model.SensorSettings;
 import com.targettracker.model.TargetTrajectory;
+import com.targettracker.recording.TrackCsvRecorder;
 import com.targettracker.tracking.ImmSettings;
 import com.targettracker.tracking.ImmTracker;
 
@@ -18,6 +22,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSeparator;
 import javax.swing.SwingConstants;
+import javax.swing.JToggleButton;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -34,17 +39,23 @@ public final class TrackerFrame extends JFrame {
     private final ImmSettings immSettings = new ImmSettings();
     private final MeasurementEngine measurementEngine;
     private final ImmTracker immTracker;
+    private final TrackCsvRecorder recorder = new TrackCsvRecorder();
     private final ScenarioPlayback playback;
     private final EarthMapCanvas earthMapCanvas;
     private final TargetInspectorPanel inspectorPanel;
     private final ProfileWindow profileWindow;
     private final SensorWindow sensorWindow;
     private final ImmWindow immWindow;
+    private final RecordingPanel recordingPanel;
+    private final PresetScenarioPanel presetScenarioPanel;
 
     private final JLabel statusLabel = new JLabel("Ready");
     private final JLabel scenarioTimeLabel = new JLabel("t = 0.0 s");
     private final JButton pauseButton = new JButton("Pause");
+    private final JButton newTargetButton = new JButton("New target");
+    private final JButton clearPathButton = new JButton("Clear path");
     private TargetTrajectory selectedTarget;
+    private boolean presetScenarioActive;
 
     public TrackerFrame() {
         super("ECEF Target Tracker");
@@ -56,14 +67,28 @@ public final class TrackerFrame extends JFrame {
         measurementEngine = new MeasurementEngine(model, sensorSettings);
         immTracker = new ImmTracker(immSettings);
         playback = new ScenarioPlayback(
-                model, this::onPlaybackUpdated, measurementEngine, immTracker);
+                model, this::onPlaybackUpdated, measurementEngine, immTracker, recorder);
+        recordingPanel = new RecordingPanel(this, recorder, playback);
+        presetScenarioPanel = new PresetScenarioPanel(this, new PresetScenarioPanel.Listener() {
+            @Override
+            public void generatePreset(
+                    ScenarioPreset preset,
+                    PresetScenarioParameters parameters) {
+                loadPresetScenario(preset, parameters);
+            }
+
+            @Override
+            public void selectUserGeneratedMode() {
+                activateUserGeneratedMode();
+            }
+        });
         earthMapCanvas = new EarthMapCanvas(
                 model,
                 playback,
                 measurementEngine,
                 immTracker,
                 () -> selectedTarget,
-                playback::isRunning,
+                this::isScenarioEditingLocked,
                 this::onPathChanged,
                 this::onCursorChanged);
         inspectorPanel = new TargetInspectorPanel(
@@ -72,7 +97,7 @@ public final class TrackerFrame extends JFrame {
                 this,
                 () -> selectedTarget,
                 playback,
-                playback::isRunning,
+                this::isScenarioEditingLocked,
                 this::onProfileChanged);
         sensorWindow = new SensorWindow(this, sensorSettings, this::onSensorParametersChanged);
         immWindow = new ImmWindow(this, immSettings, this::onImmParametersChanged);
@@ -114,7 +139,6 @@ public final class TrackerFrame extends JFrame {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 7));
         toolbar.setOpaque(false);
 
-        JButton newTargetButton = new JButton("New target");
         newTargetButton.addActionListener(event -> addTarget());
         toolbar.add(newTargetButton);
 
@@ -131,9 +155,8 @@ public final class TrackerFrame extends JFrame {
         finishButton.addActionListener(event -> earthMapCanvas.finishPath());
         toolbar.add(finishButton);
 
-        JButton clearButton = new JButton("Clear path");
-        clearButton.addActionListener(event -> clearSelectedPath());
-        toolbar.add(clearButton);
+        clearPathButton.addActionListener(event -> clearSelectedPath());
+        toolbar.add(clearPathButton);
 
         JButton profilesButton = new JButton("Profiles…");
         profilesButton.addActionListener(event -> showProfileWindow());
@@ -161,6 +184,13 @@ public final class TrackerFrame extends JFrame {
         resetViewButton.addActionListener(event -> earthMapCanvas.resetView());
         toolbar.add(resetViewButton);
 
+        JToggleButton detailMapButton = new JToggleButton("Geography detail", true);
+        detailMapButton.setToolTipText(
+                "Show bundled Natural Earth coastlines, borders, and rivers while zoomed in");
+        detailMapButton.addActionListener(event -> earthMapCanvas.setHighResolutionMapEnabled(
+                detailMapButton.isSelected()));
+        toolbar.add(detailMapButton);
+
         toolbar.add(verticalSeparator());
         JButton runButton = new JButton("Run scenario");
         runButton.addActionListener(event -> runScenario());
@@ -176,6 +206,8 @@ public final class TrackerFrame extends JFrame {
         toolbar.add(resetScenarioButton);
 
         container.add(toolbar);
+        container.add(presetScenarioPanel);
+        container.add(recordingPanel);
         return container;
     }
 
@@ -193,6 +225,9 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void addTarget() {
+        if (presetScenarioActive) {
+            return;
+        }
         playback.reset();
         TargetTrajectory target = model.addTarget();
         inspectorPanel.targetAdded(target);
@@ -212,18 +247,72 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void clearSelectedPath() {
-        if (playback.isRunning() || selectedTarget == null) {
+        if (presetScenarioActive) {
+            return;
+        }
+        TargetTrajectory target = inspectorPanel.selectedTarget();
+        if (target == null) {
+            return;
+        }
+        selectedTarget = target;
+        clearPathForTarget(playback, target);
+        earthMapCanvas.finishPath();
+        inspectorPanel.setSelectedTarget(target);
+        statusLabel.setText("Path cleared for %s".formatted(target.id()));
+        refreshTelemetry();
+        earthMapCanvas.repaint();
+    }
+
+    static void clearPathForTarget(ScenarioPlayback playback, TargetTrajectory target) {
+        playback.reset();
+        target.clearPath();
+    }
+
+    private void loadPresetScenario(
+            ScenarioPreset preset,
+            PresetScenarioParameters parameters) {
+        playback.reset();
+        PresetScenarioGenerator.generate(model, preset, parameters);
+        presetScenarioActive = true;
+        updateStructuralEditingControls();
+        selectedTarget = model.targets().get(0);
+        inspectorPanel.replaceTargets(model.targets(), selectedTarget);
+        profileWindow.refresh(selectedTarget);
+        earthMapCanvas.focusOnTargets();
+        refreshTelemetry();
+        scenarioTimeLabel.setText("t = 0.0 / %.1f s".formatted(model.durationSeconds()));
+        statusLabel.setText("Loaded %s — preset target structure is locked".formatted(preset));
+    }
+
+    private void activateUserGeneratedMode() {
+        if (!presetScenarioActive) {
             return;
         }
         playback.reset();
-        selectedTarget.clearPath();
-        earthMapCanvas.finishPath();
-        statusLabel.setText("Path cleared for %s".formatted(selectedTarget.id()));
+        presetScenarioActive = false;
+        updateStructuralEditingControls();
+        selectedTarget = model.replaceTargets(1).get(0);
+        inspectorPanel.replaceTargets(model.targets(), selectedTarget);
+        profileWindow.refresh(selectedTarget);
+        earthMapCanvas.resetView();
         refreshTelemetry();
+        scenarioTimeLabel.setText("t = 0.0 s");
+        statusLabel.setText("User-generated mode — draw a target trajectory");
+    }
+
+    private boolean isScenarioEditingLocked() {
+        return playback.isRunning() || presetScenarioActive;
+    }
+
+    private void updateStructuralEditingControls() {
+        newTargetButton.setEnabled(!presetScenarioActive);
+        clearPathButton.setEnabled(!presetScenarioActive);
     }
 
     private void runScenario() {
-        if (!validateSensorParameters() || !validateImmParameters()) {
+        if (!validateSensorParameters()
+                || !validateImmParameters()
+                || !recordingPanel.commitParentFolder()) {
             return;
         }
         earthMapCanvas.finishPath();
@@ -239,7 +328,9 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void resetScenario() {
-        if (!validateSensorParameters() || !validateImmParameters()) {
+        if (!validateSensorParameters()
+                || !validateImmParameters()
+                || !recordingPanel.commitParentFolder()) {
             return;
         }
         earthMapCanvas.finishPath();
@@ -290,6 +381,7 @@ public final class TrackerFrame extends JFrame {
                 playback.elapsedSeconds(), model.durationSeconds()));
         pauseButton.setEnabled(playback.isRunning());
         pauseButton.setText(playback.isPaused() ? "Resume" : "Pause");
+        recordingPanel.refresh();
         if (playback.isPaused()) {
             statusLabel.setText("Scenario paused");
         } else if (playback.isRunning()) {

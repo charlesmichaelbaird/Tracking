@@ -21,6 +21,7 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
@@ -70,6 +71,7 @@ final class EarthMapCanvas extends JPanel {
     private final Runnable onPathChanged;
     private final Consumer<GeodeticPoint> onCursorChanged;
     private final BufferedImage earthImage;
+    private final NaturalEarthDetailLayer detailLayer;
 
     private DrawingMode drawingMode = DrawingMode.FREE_HAND;
     private boolean freeHandDrawing;
@@ -81,6 +83,8 @@ final class EarthMapCanvas extends JPanel {
     private double centerLongitude;
     private double centerLatitude;
     private double zoom = MIN_ZOOM;
+    private boolean highResolutionMapEnabled = true;
+    private boolean detailLayerActive;
 
     EarthMapCanvas(
             ScenarioModel model,
@@ -100,6 +104,8 @@ final class EarthMapCanvas extends JPanel {
         this.onPathChanged = onPathChanged;
         this.onCursorChanged = onCursorChanged;
         this.earthImage = loadEarthImage();
+        this.detailLayer = new NaturalEarthDetailLayer(
+                this::repaint, !GraphicsEnvironment.isHeadless());
         setBackground(new Color(246, 248, 251));
         setPreferredSize(new Dimension(820, 620));
         setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
@@ -227,6 +233,49 @@ final class EarthMapCanvas extends JPanel {
         repaint();
     }
 
+    void focusOnTargets() {
+        Double referenceLongitude = null;
+        double minimumLongitude = Double.POSITIVE_INFINITY;
+        double maximumLongitude = Double.NEGATIVE_INFINITY;
+        double minimumLatitude = Double.POSITIVE_INFINITY;
+        double maximumLatitude = Double.NEGATIVE_INFINITY;
+        for (TargetTrajectory target : model.targets()) {
+            for (EcefPoint point : target.path()) {
+                GeodeticPoint geodetic = Wgs84.toGeodetic(point);
+                if (referenceLongitude == null) {
+                    referenceLongitude = geodetic.longitudeDegrees();
+                }
+                double unwrappedLongitude = referenceLongitude
+                        + GeodeticPoint.normalizeLongitude(
+                        geodetic.longitudeDegrees() - referenceLongitude);
+                minimumLongitude = Math.min(minimumLongitude, unwrappedLongitude);
+                maximumLongitude = Math.max(maximumLongitude, unwrappedLongitude);
+                minimumLatitude = Math.min(minimumLatitude, geodetic.latitudeDegrees());
+                maximumLatitude = Math.max(maximumLatitude, geodetic.latitudeDegrees());
+            }
+        }
+        if (referenceLongitude == null) {
+            resetView();
+            return;
+        }
+
+        centerLongitude = GeodeticPoint.normalizeLongitude(
+                (minimumLongitude + maximumLongitude) / 2.0);
+        double longitudeRange = Math.max(0.002, maximumLongitude - minimumLongitude);
+        double latitudeRange = Math.max(0.001, maximumLatitude - minimumLatitude);
+        double wantedLongitudeSpan = longitudeRange * 1.35;
+        double wantedLatitudeSpan = latitudeRange * 1.35;
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM,
+                Math.min(360.0 / wantedLongitudeSpan, 180.0 / wantedLatitudeSpan)));
+        centerLatitude = clampCenterLatitude((minimumLatitude + maximumLatitude) / 2.0);
+        repaint();
+    }
+
+    void setHighResolutionMapEnabled(boolean enabled) {
+        highResolutionMapEnabled = enabled;
+        repaint();
+    }
+
     String viewDescription() {
         return zoom < 10.0 ? "%.1f×".formatted(zoom) : "%,.0f×".formatted(zoom);
     }
@@ -264,6 +313,18 @@ final class EarthMapCanvas extends JPanel {
                     RenderingHints.KEY_INTERPOLATION,
                     RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             drawRasterViewport(clipped, map);
+            detailLayerActive = highResolutionMapEnabled
+                    && zoom >= NaturalEarthDetailLayer.MINIMUM_CANVAS_ZOOM;
+            if (detailLayerActive) {
+                detailLayer.draw(
+                        clipped,
+                        map,
+                        centerLongitude,
+                        centerLatitude,
+                        visibleLongitudeSpan(),
+                        visibleLatitudeSpan(),
+                        zoom);
+            }
         } finally {
             clipped.dispose();
         }
@@ -499,8 +560,11 @@ final class EarthMapCanvas extends JPanel {
 
     private void drawViewBadge(Graphics2D g) {
         Rectangle map = mapBounds();
-        String text = "NASA Blue Marble • %s • %s"
-                .formatted(viewDescription(), viewSizeDescription());
+        String source = detailLayerActive
+                ? "NASA Blue Marble + " + detailLayer.statusText()
+                : "NASA Blue Marble";
+        String text = "%s • %s • %s"
+                .formatted(source, viewDescription(), viewSizeDescription());
         g.setFont(g.getFont().deriveFont(Font.PLAIN, 11.0f));
         int width = g.getFontMetrics().stringWidth(text) + 16;
         g.setColor(new Color(255, 255, 255, 210));
