@@ -51,7 +51,7 @@ final class ProfileWindow extends JDialog {
                 "Velocity magnitude", "m/s", selectedTarget,
                 TargetTrajectory::velocityProfile, playback, editingLocked, onProfileChanged);
         altitudeEditor = new ProfileEditor(
-                "Altitude (Up)", "m", selectedTarget,
+                "WGS-84 ellipsoidal altitude", "m", selectedTarget,
                 TargetTrajectory::altitudeProfile, playback, editingLocked, onProfileChanged);
 
         JPanel charts = new JPanel(new GridLayout(2, 1, 0, 12));

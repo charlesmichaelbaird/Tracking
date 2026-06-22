@@ -1,8 +1,9 @@
 package com.targettracker.ui;
 
-import com.targettracker.model.EnuPoint;
+import com.targettracker.model.EcefPoint;
 import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.TargetTrajectory;
+import com.targettracker.tracking.ImmTracker;
 
 import javax.swing.Timer;
 import java.util.ArrayDeque;
@@ -17,17 +18,25 @@ final class ScenarioPlayback {
 
     private final ScenarioModel model;
     private final Runnable onUpdate;
+    private final MeasurementEngine measurementEngine;
+    private final ImmTracker immTracker;
     private final Timer timer;
-    private final Map<TargetTrajectory, Deque<EnuPoint>> recentHistory = new LinkedHashMap<>();
+    private final Map<TargetTrajectory, Deque<EcefPoint>> recentHistory = new LinkedHashMap<>();
 
     private double elapsedSeconds;
     private long lastTickNanos;
     private boolean running;
     private boolean paused;
 
-    ScenarioPlayback(ScenarioModel model, Runnable onUpdate) {
+    ScenarioPlayback(
+            ScenarioModel model,
+            Runnable onUpdate,
+            MeasurementEngine measurementEngine,
+            ImmTracker immTracker) {
         this.model = model;
         this.onUpdate = onUpdate;
+        this.measurementEngine = measurementEngine;
+        this.immTracker = immTracker;
         this.timer = new Timer(TIMER_DELAY_MILLIS, event -> tick());
         this.timer.setCoalesce(true);
     }
@@ -40,14 +49,32 @@ final class ScenarioPlayback {
         elapsedSeconds = 0.0;
         running = true;
         paused = false;
-        recentHistory.clear();
-        for (TargetTrajectory target : model.targets()) {
-            if (target.isRunnable()) {
-                Deque<EnuPoint> history = new ArrayDeque<>();
-                history.add(target.positionAt(0.0));
-                recentHistory.put(target, history);
-            }
+        initializeHistory();
+        immTracker.reset();
+        measurementEngine.beginScenario();
+        measurementEngine.advanceTo(0.0);
+        processNewMeasurements();
+        immTracker.advanceTo(0.0);
+        lastTickNanos = System.nanoTime();
+        timer.start();
+        onUpdate.run();
+        return true;
+    }
+
+    boolean rewindPaused() {
+        if (model.durationSeconds() <= 0.0) {
+            return false;
         }
+
+        elapsedSeconds = 0.0;
+        running = true;
+        paused = true;
+        initializeHistory();
+        immTracker.reset();
+        measurementEngine.beginScenario();
+        measurementEngine.advanceTo(0.0);
+        processNewMeasurements();
+        immTracker.advanceTo(0.0);
         lastTickNanos = System.nanoTime();
         timer.start();
         onUpdate.run();
@@ -76,6 +103,8 @@ final class ScenarioPlayback {
         paused = false;
         elapsedSeconds = 0.0;
         recentHistory.clear();
+        measurementEngine.reset();
+        immTracker.reset();
         onUpdate.run();
     }
 
@@ -91,12 +120,23 @@ final class ScenarioPlayback {
         return elapsedSeconds;
     }
 
-    EnuPoint currentPosition(TargetTrajectory target) {
+    EcefPoint currentPosition(TargetTrajectory target) {
         return target.isRunnable() ? target.positionAt(elapsedSeconds) : null;
     }
 
-    Map<TargetTrajectory, Deque<EnuPoint>> recentHistory() {
+    Map<TargetTrajectory, Deque<EcefPoint>> recentHistory() {
         return Collections.unmodifiableMap(recentHistory);
+    }
+
+    private void initializeHistory() {
+        recentHistory.clear();
+        for (TargetTrajectory target : model.targets()) {
+            if (target.isRunnable()) {
+                Deque<EcefPoint> history = new ArrayDeque<>();
+                history.add(target.positionAt(0.0));
+                recentHistory.put(target, history);
+            }
+        }
     }
 
     private void tick() {
@@ -110,15 +150,18 @@ final class ScenarioPlayback {
         lastTickNanos = now;
         double scenarioDuration = model.durationSeconds();
         elapsedSeconds = Math.min(elapsedSeconds, scenarioDuration);
+        measurementEngine.advanceTo(elapsedSeconds);
+        processNewMeasurements();
+        immTracker.advanceTo(elapsedSeconds);
 
         for (TargetTrajectory target : model.targets()) {
             if (!target.isRunnable()) {
                 continue;
             }
-            Deque<EnuPoint> history = recentHistory.computeIfAbsent(target, ignored -> new ArrayDeque<>());
-            EnuPoint position = target.positionAt(elapsedSeconds);
-            EnuPoint last = history.peekLast();
-            if (last == null || last.horizontalDistanceTo(position) >= 1.0) {
+            Deque<EcefPoint> history = recentHistory.computeIfAbsent(target, ignored -> new ArrayDeque<>());
+            EcefPoint position = target.positionAt(elapsedSeconds);
+            EcefPoint last = history.peekLast();
+            if (last == null || last.distanceTo(position) >= 1.0) {
                 history.addLast(position);
             }
             while (history.size() > RECENT_HISTORY_POINTS) {
@@ -132,5 +175,9 @@ final class ScenarioPlayback {
             paused = false;
         }
         onUpdate.run();
+    }
+
+    private void processNewMeasurements() {
+        immTracker.processMeasurements(measurementEngine.drainNewMeasurements());
     }
 }

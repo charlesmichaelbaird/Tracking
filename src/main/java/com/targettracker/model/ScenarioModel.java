@@ -15,15 +15,9 @@ public final class ScenarioModel {
             new Color(229, 57, 53)
     };
 
-    private final EnuFrame frame;
     private final List<TargetTrajectory> targets = new ArrayList<>();
 
-    public ScenarioModel(EnuFrame frame) {
-        this.frame = frame;
-    }
-
-    public EnuFrame frame() {
-        return frame;
+    public ScenarioModel() {
     }
 
     public List<TargetTrajectory> targets() {

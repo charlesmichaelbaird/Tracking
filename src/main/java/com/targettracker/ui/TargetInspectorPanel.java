@@ -1,12 +1,15 @@
 package com.targettracker.ui;
 
-import com.targettracker.model.EnuPoint;
+import com.targettracker.model.EcefPoint;
+import com.targettracker.model.GeodeticPoint;
 import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.TargetTrajectory;
+import com.targettracker.model.Wgs84;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -19,14 +22,21 @@ import java.util.function.Consumer;
 final class TargetInspectorPanel extends JPanel {
     private final JComboBox<TargetTrajectory> targetSelector = new JComboBox<>();
     private final JLabel idValue = valueLabel();
-    private final JLabel eastValue = valueLabel();
-    private final JLabel northValue = valueLabel();
+    private final JLabel latitudeValue = valueLabel();
+    private final JLabel longitudeValue = valueLabel();
     private final JLabel altitudeValue = valueLabel();
     private final JLabel velocityValue = valueLabel();
+    private final JLabel ecefXValue = valueLabel();
+    private final JLabel ecefYValue = valueLabel();
+    private final JLabel ecefZValue = valueLabel();
     private final JLabel durationValue = valueLabel();
     private boolean synchronizing;
 
-    TargetInspectorPanel(ScenarioModel model, Consumer<TargetTrajectory> onSelectionChanged) {
+    TargetInspectorPanel(
+            ScenarioModel model,
+            Runnable onOpenSensorWindow,
+            Runnable onOpenImmWindow,
+            Consumer<TargetTrajectory> onSelectionChanged) {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 1, 0, 0, new Color(214, 220, 227)),
@@ -48,15 +58,30 @@ final class TargetInspectorPanel extends JPanel {
             }
         });
         add(targetSelector);
+        add(Box.createVerticalStrut(8));
+        JButton sensorButton = new JButton("Open sensor parameters…");
+        sensorButton.setAlignmentX(LEFT_ALIGNMENT);
+        sensorButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        sensorButton.addActionListener(event -> onOpenSensorWindow.run());
+        add(sensorButton);
+        add(Box.createVerticalStrut(5));
+        JButton immButton = new JButton("Open IMM specifications…");
+        immButton.setAlignmentX(LEFT_ALIGNMENT);
+        immButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        immButton.addActionListener(event -> onOpenImmWindow.run());
+        add(immButton);
         add(Box.createVerticalStrut(18));
         add(sectionSeparator());
         add(Box.createVerticalStrut(12));
 
         addRow("Target ID", idValue);
-        addRow("East", eastValue);
-        addRow("North", northValue);
+        addRow("Latitude", latitudeValue);
+        addRow("Longitude", longitudeValue);
         addRow("Altitude", altitudeValue);
         addRow("Velocity", velocityValue);
+        addRow("ECEF X", ecefXValue);
+        addRow("ECEF Y", ecefYValue);
+        addRow("ECEF Z", ecefZValue);
         addRow("Duration", durationValue);
         add(Box.createVerticalGlue());
 
@@ -73,6 +98,24 @@ final class TargetInspectorPanel extends JPanel {
         historyNote.setForeground(new Color(87, 99, 111));
         historyNote.setAlignmentX(LEFT_ALIGNMENT);
         add(historyNote);
+        add(Box.createVerticalStrut(6));
+        JLabel measurementNote = new JLabel("× white measurement");
+        measurementNote.setForeground(new Color(87, 99, 111));
+        measurementNote.setAlignmentX(LEFT_ALIGNMENT);
+        add(measurementNote);
+        add(Box.createVerticalStrut(6));
+        JLabel trackNote = new JLabel("■ IMM track mean / tail");
+        trackNote.setForeground(new Color(87, 99, 111));
+        trackNote.setAlignmentX(LEFT_ALIGNMENT);
+        add(trackNote);
+        JLabel covarianceNote = new JLabel("○ one-sigma covariance");
+        covarianceNote.setForeground(new Color(87, 99, 111));
+        covarianceNote.setAlignmentX(LEFT_ALIGNMENT);
+        add(covarianceNote);
+        JLabel deadTrackNote = new JLabel("■ grey = dead track");
+        deadTrackNote.setForeground(new Color(145, 150, 156));
+        deadTrackNote.setAlignmentX(LEFT_ALIGNMENT);
+        add(deadTrackNote);
 
         synchronizing = true;
         model.targets().forEach(targetSelector::addItem);
@@ -92,21 +135,30 @@ final class TargetInspectorPanel extends JPanel {
     void refresh(TargetTrajectory target, ScenarioPlayback playback) {
         if (target == null) {
             idValue.setText("—");
-            eastValue.setText("—");
-            northValue.setText("—");
+            latitudeValue.setText("—");
+            longitudeValue.setText("—");
             altitudeValue.setText("—");
             velocityValue.setText("—");
+            ecefXValue.setText("—");
+            ecefYValue.setText("—");
+            ecefZValue.setText("—");
             durationValue.setText("—");
             return;
         }
 
         double time = playback.elapsedSeconds();
-        EnuPoint position = playback.currentPosition(target);
+        EcefPoint position = playback.currentPosition(target);
+        GeodeticPoint geodetic = position == null ? null : Wgs84.toGeodetic(position);
         idValue.setText(target.id());
-        eastValue.setText(position == null ? "—" : "%,.0f m".formatted(position.east()));
-        northValue.setText(position == null ? "—" : "%,.0f m".formatted(position.north()));
-        altitudeValue.setText("%,.0f m".formatted(target.altitudeAt(time)));
+        latitudeValue.setText(geodetic == null ? "—" : formatLatitude(geodetic.latitudeDegrees()));
+        longitudeValue.setText(geodetic == null ? "—" : formatLongitude(geodetic.longitudeDegrees()));
+        altitudeValue.setText(geodetic == null
+                ? "%,.0f m".formatted(target.altitudeAt(time))
+                : "%,.1f m".formatted(geodetic.altitudeMeters()));
         velocityValue.setText("%,.1f m/s".formatted(target.velocityAt(time)));
+        ecefXValue.setText(position == null ? "—" : "%,.0f m".formatted(position.x()));
+        ecefYValue.setText(position == null ? "—" : "%,.0f m".formatted(position.y()));
+        ecefZValue.setText(position == null ? "—" : "%,.0f m".formatted(position.z()));
         durationValue.setText(target.isRunnable()
                 ? "%.1f s".formatted(target.durationSeconds())
                 : "Add a path");
@@ -134,5 +186,13 @@ final class TargetInspectorPanel extends JPanel {
         separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
         separator.setAlignmentX(LEFT_ALIGNMENT);
         return separator;
+    }
+
+    private static String formatLatitude(double latitude) {
+        return "%.5f° %s".formatted(Math.abs(latitude), latitude >= 0.0 ? "N" : "S");
+    }
+
+    private static String formatLongitude(double longitude) {
+        return "%.5f° %s".formatted(Math.abs(longitude), longitude >= 0.0 ? "E" : "W");
     }
 }

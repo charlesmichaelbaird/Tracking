@@ -20,6 +20,8 @@ public final class Main {
             TrackerFrame frame = new TrackerFrame();
             frame.setVisible(true);
             frame.showProfileWindow();
+            frame.showSensorWindow();
+            frame.showImmWindow();
         });
     }
 }

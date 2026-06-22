@@ -150,7 +150,8 @@ final class ProfileEditor extends JPanel {
             previousY = y;
         }
 
-        if (target.isRunnable() && playback.elapsedSeconds() > 0.0) {
+        if (target.isRunnable()
+                && (playback.isRunning() || playback.elapsedSeconds() > 0.0)) {
             double normalizedTime = target.normalizedTimeAt(playback.elapsedSeconds());
             int x = LEFT + (int) Math.round(normalizedTime * width);
             g.setColor(new Color(37, 44, 51, 175));
