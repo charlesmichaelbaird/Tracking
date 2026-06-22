@@ -19,15 +19,13 @@ import java.util.Random;
 
 /** Generates scheduled, noisy detections from an omniscient scenario sensor. */
 final class MeasurementEngine {
-    private static final int MAX_STORED_MEASUREMENTS_PER_TARGET = 10;
     private static final double TIME_EPSILON_SECONDS = 1.0e-9;
 
     private final ScenarioModel model;
     private final SensorSettings settings;
     private final Random random;
-    private final Map<TargetTrajectory, Deque<TargetMeasurement>> measurements =
-            new LinkedHashMap<>();
     private final List<TargetMeasurement> newlyGeneratedMeasurements = new ArrayList<>();
+    private final List<TargetMeasurement> allMeasurements = new ArrayList<>();
 
     private SensorParameters activeParameters;
     private double nextLookSeconds = Double.POSITIVE_INFINITY;
@@ -43,15 +41,15 @@ final class MeasurementEngine {
     }
 
     void beginScenario() {
-        measurements.clear();
         newlyGeneratedMeasurements.clear();
+        allMeasurements.clear();
         activeParameters = settings.parameters();
         nextLookSeconds = activeParameters.lookOffsetSeconds();
     }
 
     void reset() {
-        measurements.clear();
         newlyGeneratedMeasurements.clear();
+        allMeasurements.clear();
         activeParameters = null;
         nextLookSeconds = Double.POSITIVE_INFINITY;
     }
@@ -83,21 +81,29 @@ final class MeasurementEngine {
     }
 
     List<TargetMeasurement> visibleMeasurements() {
+        return visibleMeasurementsAt(Double.POSITIVE_INFINITY);
+    }
+
+    List<TargetMeasurement> visibleMeasurementsAt(double elapsedSeconds) {
         int requestedCount = settings.parameters().previousMeasurementsToShow();
         if (requestedCount == 0) {
             return List.of();
         }
 
-        List<TargetMeasurement> visible = new ArrayList<>();
-        for (Deque<TargetMeasurement> targetMeasurements : measurements.values()) {
-            int toSkip = Math.max(0, targetMeasurements.size() - requestedCount);
-            int index = 0;
-            for (TargetMeasurement measurement : targetMeasurements) {
-                if (index++ >= toSkip) {
-                    visible.add(measurement);
-                }
+        Map<String, Deque<TargetMeasurement>> byTarget = new LinkedHashMap<>();
+        for (TargetMeasurement measurement : allMeasurements) {
+            if (measurement.timeSeconds() > elapsedSeconds + TIME_EPSILON_SECONDS) {
+                continue;
+            }
+            Deque<TargetMeasurement> history = byTarget.computeIfAbsent(
+                    measurement.targetId(), ignored -> new ArrayDeque<>());
+            history.addLast(measurement);
+            while (history.size() > requestedCount) {
+                history.removeFirst();
             }
         }
+        List<TargetMeasurement> visible = new ArrayList<>();
+        byTarget.values().forEach(visible::addAll);
         visible.sort(Comparator.comparingDouble(TargetMeasurement::timeSeconds));
         return visible;
     }
@@ -131,13 +137,8 @@ final class MeasurementEngine {
                     positionSigma * positionSigma,
                     velocitySigma * velocitySigma);
             newlyGeneratedMeasurements.add(measurement);
+            allMeasurements.add(measurement);
 
-            Deque<TargetMeasurement> history = measurements.computeIfAbsent(
-                    target, ignored -> new ArrayDeque<>());
-            history.addLast(measurement);
-            while (history.size() > MAX_STORED_MEASUREMENTS_PER_TARGET) {
-                history.removeFirst();
-            }
         }
     }
 

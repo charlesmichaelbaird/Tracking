@@ -26,10 +26,25 @@ The project also includes a small no-dependency model smoke test in `src/test/ja
 - **Geography detail** overlays bundled Natural Earth 1:10m coastlines, land
   borders, and rivers once the map is zoomed in.
 - Draw directly in the companion profile window to set velocity and altitude over normalized scenario time.
-- **Run scenario** starts from time zero. **Pause** freezes or resumes it.
-- **Reset** rewinds the scenario to `t = 0` and leaves it paused; press **Resume** to continue from the start.
+- **Pre-compute scenario** runs the complete sensor and tracker calculation as
+  fast as possible, without waiting for scenario wall-clock time.
+- **Replay scenario** visually plays the cached result. **Pause** freezes or
+  resumes replay, and **Reset** rewinds it to `t = 0` in a paused state.
+- The ruler below the world map shows replay progress and can be dragged backward
+  or forward as soon as pre-computation finishes, including during playback.
 
 The thin dashed line is the complete planned trajectory. The bold solid line is the target's recent history.
+
+## Pre-computation and timeline replay
+
+**Pre-compute scenario** advances the sensor and IMM at 0.1-second steps, then
+rewinds to `00:00` with the replay ruler enabled. Seeking restores ground-truth targets, recent truth history,
+time-filtered measurements, track means/covariances/dead state, and track tails
+at the selected time.
+
+Visual replay only reads these cached frames; it never reruns the tracker or
+appends recording data. Seeking is temporarily disabled only while the fast
+pre-computation is actively writing files.
 
 ## Pre-generated maneuver scenarios
 
@@ -86,24 +101,26 @@ the lowest-cost non-conflicting pairs.
 Tracks are filtered only at measurement times. Between measurements the UI
 predicts directly from each track's last updated state and time; it never feeds
 coast predictions back into the filter. Active tracks show a colored square,
-tail, and one-sigma East/North covariance ellipse. Tracks exceeding either
+full-lifetime untruncated tail, and one-sigma East/North covariance ellipse. Tracks exceeding either
 break threshold leave association and remain visible in grey as dead tracks.
 
 ## MATLAB track recording
 
 The **Track recording** strip in the main window accepts a parent output folder.
-Arm **Record** before starting a scenario; its dot glows bright red while data is
-being written. Every recorded run creates its own unique
+Arm **Record** before pressing **Pre-compute scenario**; its dot glows bright red
+while data is being written. Every recorded computation creates its own unique
 `scenario_yyyy-MM-dd_HH-mm-ss_SSS` subfolder under that parent.
 
 Each track is stored as one `TRK-*.csv` table with a fixed 93-column schema:
 track ID, scenario time, an `updated` Boolean, the fused ECEF 9D state
 `[x y z vx vy vz ax ay az]`, and the complete 9x9 covariance in row-major
-columns `p_00` through `p_88`. Only measurement initialization/update events are
-written, so every exported row has `updated=true`; coast-only UI predictions are
-not recorded. Files are UTF-8 CSV with decimal points and can be loaded directly
-with MATLAB `readtable`. Each run folder also contains a `README.txt` with a
-state/covariance import example.
+columns `p_00` through `p_88`. Every live track is written at each integer
+scenario second. `updated=true`
+means a measurement update occurred for that track at that exact second;
+`updated=false` contains its predicted/coasted state and propagated covariance.
+Files are UTF-8 CSV with decimal points and can be loaded directly with MATLAB
+`readtable`. Each run folder also contains a `README.txt` with a state/covariance
+import example.
 
 ## Map imagery
 

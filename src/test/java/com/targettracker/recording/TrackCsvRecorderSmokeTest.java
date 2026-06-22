@@ -10,7 +10,7 @@ import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
 
-/** Verifies the fixed CSV schema, update-only policy, and unique run folders. */
+/** Verifies the fixed CSV schema, predicted/update rows, and unique run folders. */
 public final class TrackCsvRecorderSmokeTest {
     private TrackCsvRecorderSmokeTest() {
     }
@@ -27,7 +27,7 @@ public final class TrackCsvRecorderSmokeTest {
                 throw new AssertionError("Armed recorder should begin a run");
             }
             Path firstRun = recorder.runDirectory();
-            recorder.recordUpdates(List.of(
+            recorder.recordSamples(List.of(
                     record("TRK-001", 5.0, true),
                     record("TRK-001", 20.0, true),
                     record("TRK-002", 20.0, false)));
@@ -49,8 +49,9 @@ public final class TrackCsvRecorderSmokeTest {
                     || !lines.get(1).startsWith("TRK-001,5.0,true,")) {
                 throw new AssertionError("CSV schema or values are incorrect");
             }
-            if (Files.exists(firstRun.resolve("TRK-002.csv"))) {
-                throw new AssertionError("Coast-only records must not create files");
+            List<String> coastLines = Files.readAllLines(firstRun.resolve("TRK-002.csv"));
+            if (coastLines.size() != 2 || !coastLines.get(1).startsWith("TRK-002,20.0,false,")) {
+                throw new AssertionError("Predicted/coasted rows must be exported with updated=false");
             }
             if (!Files.exists(firstRun.resolve("README.txt"))) {
                 throw new AssertionError("Each run should include MATLAB import guidance");

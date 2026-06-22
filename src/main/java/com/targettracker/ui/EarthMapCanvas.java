@@ -7,7 +7,6 @@ import com.targettracker.model.TargetMeasurement;
 import com.targettracker.model.TargetTrajectory;
 import com.targettracker.model.Wgs84;
 import com.targettracker.model.Wgs84Geodesic;
-import com.targettracker.tracking.ImmTracker;
 import com.targettracker.tracking.TrackView;
 
 import javax.imageio.ImageIO;
@@ -65,7 +64,6 @@ final class EarthMapCanvas extends JPanel {
     private final ScenarioModel model;
     private final ScenarioPlayback playback;
     private final MeasurementEngine measurementEngine;
-    private final ImmTracker immTracker;
     private final Supplier<TargetTrajectory> selectedTarget;
     private final BooleanSupplier editingLocked;
     private final Runnable onPathChanged;
@@ -90,7 +88,6 @@ final class EarthMapCanvas extends JPanel {
             ScenarioModel model,
             ScenarioPlayback playback,
             MeasurementEngine measurementEngine,
-            ImmTracker immTracker,
             Supplier<TargetTrajectory> selectedTarget,
             BooleanSupplier editingLocked,
             Runnable onPathChanged,
@@ -98,7 +95,6 @@ final class EarthMapCanvas extends JPanel {
         this.model = model;
         this.playback = playback;
         this.measurementEngine = measurementEngine;
-        this.immTracker = immTracker;
         this.selectedTarget = selectedTarget;
         this.editingLocked = editingLocked;
         this.onPathChanged = onPathChanged;
@@ -403,7 +399,9 @@ final class EarthMapCanvas extends JPanel {
     private void drawCurrentTargets(Graphics2D g) {
         for (TargetTrajectory target : model.targets()) {
             EcefPoint position = playback.currentPosition(target);
-            if (position == null || (!playback.isRunning() && playback.elapsedSeconds() <= 0.0)) {
+            if (position == null || (!playback.isRunning()
+                    && !playback.isReplayDisplayActive()
+                    && playback.elapsedSeconds() <= 0.0)) {
                 continue;
             }
             Point point = toScreen(Wgs84.toGeodetic(position));
@@ -421,7 +419,8 @@ final class EarthMapCanvas extends JPanel {
     }
 
     private void drawMeasurements(Graphics2D g) {
-        for (TargetMeasurement measurement : measurementEngine.visibleMeasurements()) {
+        for (TargetMeasurement measurement
+                : measurementEngine.visibleMeasurementsAt(playback.elapsedSeconds())) {
             Point point = toScreen(Wgs84.toGeodetic(measurement.measuredPosition()));
             if (point == null) {
                 continue;
@@ -439,7 +438,7 @@ final class EarthMapCanvas extends JPanel {
     }
 
     private void drawTracks(Graphics2D g) {
-        for (TrackView track : immTracker.currentViews()) {
+        for (TrackView track : playback.currentTrackViews()) {
             Color color = track.dead() ? new Color(145, 150, 156) : track.color();
             if (track.tail().size() >= 2) {
                 g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(),

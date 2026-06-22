@@ -48,10 +48,13 @@ public final class TrackerFrame extends JFrame {
     private final ImmWindow immWindow;
     private final RecordingPanel recordingPanel;
     private final PresetScenarioPanel presetScenarioPanel;
+    private final ScenarioTimelinePanel timelinePanel;
 
     private final JLabel statusLabel = new JLabel("Ready");
     private final JLabel scenarioTimeLabel = new JLabel("t = 0.0 s");
     private final JButton pauseButton = new JButton("Pause");
+    private final JButton precomputeButton = new JButton("Pre-compute scenario");
+    private final JButton replayButton = new JButton("Replay scenario");
     private final JButton newTargetButton = new JButton("New target");
     private final JButton clearPathButton = new JButton("Clear path");
     private TargetTrajectory selectedTarget;
@@ -68,7 +71,9 @@ public final class TrackerFrame extends JFrame {
         immTracker = new ImmTracker(immSettings);
         playback = new ScenarioPlayback(
                 model, this::onPlaybackUpdated, measurementEngine, immTracker, recorder);
-        recordingPanel = new RecordingPanel(this, recorder, playback);
+        timelinePanel = new ScenarioTimelinePanel(model, playback, recorder);
+        recordingPanel = new RecordingPanel(
+                this, recorder, this::onRecordingStateChanged);
         presetScenarioPanel = new PresetScenarioPanel(this, new PresetScenarioPanel.Listener() {
             @Override
             public void generatePreset(
@@ -86,7 +91,6 @@ public final class TrackerFrame extends JFrame {
                 model,
                 playback,
                 measurementEngine,
-                immTracker,
                 () -> selectedTarget,
                 this::isScenarioEditingLocked,
                 this::onPathChanged,
@@ -104,7 +108,10 @@ public final class TrackerFrame extends JFrame {
 
         setLayout(new BorderLayout());
         add(createHeader(), BorderLayout.NORTH);
-        add(earthMapCanvas, BorderLayout.CENTER);
+        JPanel mapArea = new JPanel(new BorderLayout());
+        mapArea.add(earthMapCanvas, BorderLayout.CENTER);
+        mapArea.add(timelinePanel, BorderLayout.SOUTH);
+        add(mapArea, BorderLayout.CENTER);
         add(inspectorPanel, BorderLayout.EAST);
         add(createStatusBar(), BorderLayout.SOUTH);
 
@@ -192,9 +199,15 @@ public final class TrackerFrame extends JFrame {
         toolbar.add(detailMapButton);
 
         toolbar.add(verticalSeparator());
-        JButton runButton = new JButton("Run scenario");
-        runButton.addActionListener(event -> runScenario());
-        toolbar.add(runButton);
+        precomputeButton.setToolTipText(
+                "Compute the complete sensor and tracker history without real-time waiting");
+        precomputeButton.addActionListener(event -> precomputeScenario());
+        toolbar.add(precomputeButton);
+
+        replayButton.setEnabled(false);
+        replayButton.setToolTipText("Play the most recently pre-computed scenario");
+        replayButton.addActionListener(event -> replayScenario());
+        toolbar.add(replayButton);
 
         pauseButton.setEnabled(false);
         pauseButton.addActionListener(event -> playback.togglePause());
@@ -280,6 +293,7 @@ public final class TrackerFrame extends JFrame {
         profileWindow.refresh(selectedTarget);
         earthMapCanvas.focusOnTargets();
         refreshTelemetry();
+        timelinePanel.refresh();
         scenarioTimeLabel.setText("t = 0.0 / %.1f s".formatted(model.durationSeconds()));
         statusLabel.setText("Loaded %s — preset target structure is locked".formatted(preset));
     }
@@ -296,12 +310,13 @@ public final class TrackerFrame extends JFrame {
         profileWindow.refresh(selectedTarget);
         earthMapCanvas.resetView();
         refreshTelemetry();
+        timelinePanel.refresh();
         scenarioTimeLabel.setText("t = 0.0 s");
         statusLabel.setText("User-generated mode — draw a target trajectory");
     }
 
     private boolean isScenarioEditingLocked() {
-        return playback.isRunning() || presetScenarioActive;
+        return playback.isRunning() || playback.isComputing() || presetScenarioActive;
     }
 
     private void updateStructuralEditingControls() {
@@ -309,40 +324,67 @@ public final class TrackerFrame extends JFrame {
         clearPathButton.setEnabled(!presetScenarioActive);
     }
 
-    private void runScenario() {
+    private void precomputeScenario() {
         if (!validateSensorParameters()
                 || !validateImmParameters()
                 || !recordingPanel.commitParentFolder()) {
             return;
         }
         earthMapCanvas.finishPath();
-        if (!playback.start()) {
+        setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
+        statusLabel.setText(recorder.isArmed()
+                ? "Pre-computing tracker history and writing one-second samples…"
+                : "Pre-computing sensor and tracker history…");
+        statusLabel.paintImmediately(statusLabel.getBounds());
+        try {
+            if (!playback.precompute()) {
+                String message = recorder.lastError() == null
+                        ? "Draw or load at least one runnable target trajectory first."
+                        : recorder.lastError();
+                JOptionPane.showMessageDialog(
+                        this,
+                        message,
+                        "Scenario could not be pre-computed",
+                        JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            if (recorder.lastError() != null) {
+                statusLabel.setText("Pre-compute complete with a recording error");
+                JOptionPane.showMessageDialog(
+                        this,
+                        recorder.lastError(),
+                        "Track recording stopped",
+                        JOptionPane.WARNING_MESSAGE);
+            } else {
+                statusLabel.setText("Pre-compute complete — replay or drag the timeline");
+            }
+        } finally {
+            setCursor(java.awt.Cursor.getDefaultCursor());
+            recordingPanel.refresh();
+            timelinePanel.refresh();
+        }
+    }
+
+    private void replayScenario() {
+        if (!playback.startReplay()) {
             JOptionPane.showMessageDialog(
                     this,
-                    "Draw at least one two-point trajectory with a non-zero velocity profile first.",
-                    "Scenario is not ready",
+                    "Pre-compute the scenario before starting replay.",
+                    "Replay is not ready",
                     JOptionPane.INFORMATION_MESSAGE);
-            return;
         }
-        statusLabel.setText("Scenario running");
     }
 
     private void resetScenario() {
-        if (!validateSensorParameters()
-                || !validateImmParameters()
-                || !recordingPanel.commitParentFolder()) {
-            return;
-        }
-        earthMapCanvas.finishPath();
-        if (!playback.rewindPaused()) {
+        if (!playback.rewindReplayPaused()) {
             JOptionPane.showMessageDialog(
                     this,
-                    "Draw at least one two-point trajectory with a non-zero velocity profile first.",
-                    "Scenario is not ready",
+                    "Pre-compute the scenario before resetting its replay.",
+                    "Replay is not ready",
                     JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        statusLabel.setText("Scenario reset to t = 0.0 s — press Resume to continue");
+        statusLabel.setText("Replay reset to t = 0.0 s — press Resume to continue");
     }
 
     private void onPathChanged() {
@@ -351,6 +393,7 @@ public final class TrackerFrame extends JFrame {
         }
         resetCompletedPlayback();
         refreshTelemetry();
+        timelinePanel.refresh();
         statusLabel.setText(selectedTarget.path().size() < 2
                 ? "%s: add another point".formatted(selectedTarget.id())
                 : "%s: %d ECEF path points, %,.0f m geodesic length".formatted(
@@ -362,6 +405,7 @@ public final class TrackerFrame extends JFrame {
     private void onProfileChanged() {
         resetCompletedPlayback();
         refreshTelemetry();
+        timelinePanel.refresh();
         earthMapCanvas.repaint();
         statusLabel.setText("Updated motion profile for %s".formatted(selectedTarget.id()));
     }
@@ -381,11 +425,20 @@ public final class TrackerFrame extends JFrame {
                 playback.elapsedSeconds(), model.durationSeconds()));
         pauseButton.setEnabled(playback.isRunning());
         pauseButton.setText(playback.isPaused() ? "Resume" : "Pause");
+        precomputeButton.setEnabled(!playback.isComputing() && !playback.isRunning());
+        replayButton.setEnabled(playback.isReplayReady()
+                && !playback.isComputing() && !playback.isRunning());
         recordingPanel.refresh();
-        if (playback.isPaused()) {
-            statusLabel.setText("Scenario paused");
+        timelinePanel.refresh();
+        if (playback.isComputing()) {
+            statusLabel.setText("Pre-computing scenario…");
+        } else if (playback.isPaused()) {
+            statusLabel.setText("Replay paused");
         } else if (playback.isRunning()) {
-            statusLabel.setText("Scenario running");
+            statusLabel.setText("Replaying pre-computed scenario");
+        } else if (playback.isReplayDisplayActive()) {
+            statusLabel.setText("Replay at %.1f s — drag the timeline to seek"
+                    .formatted(playback.elapsedSeconds()));
         } else if (playback.elapsedSeconds() > 0.0
                 && playback.elapsedSeconds() >= model.durationSeconds()) {
             statusLabel.setText("Scenario complete");
@@ -447,7 +500,8 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void resetCompletedPlayback() {
-        if (!playback.isRunning() && playback.elapsedSeconds() > 0.0) {
+        if (!playback.isRunning()
+                && (playback.elapsedSeconds() > 0.0 || playback.isReplayReady())) {
             playback.reset();
         }
     }
@@ -459,7 +513,7 @@ public final class TrackerFrame extends JFrame {
         showSensorWindow();
         JOptionPane.showMessageDialog(
                 this,
-                "Correct the highlighted God sensor parameters before running the scenario.",
+                "Correct the highlighted God sensor parameters before pre-computing the scenario.",
                 "Invalid sensor parameters",
                 JOptionPane.WARNING_MESSAGE);
         return false;
@@ -473,6 +527,10 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void onSensorParametersChanged() {
+        if (playback.isReplayReady()) {
+            playback.reset();
+            return;
+        }
         measurementEngine.parametersChanged(playback.elapsedSeconds());
         earthMapCanvas.repaint();
     }
@@ -487,8 +545,16 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void onImmParametersChanged() {
+        if (playback.isReplayReady()) {
+            playback.reset();
+            return;
+        }
         immTracker.parametersChanged(playback.elapsedSeconds());
         earthMapCanvas.repaint();
+    }
+
+    private void onRecordingStateChanged() {
+        timelinePanel.refresh();
     }
 
     private boolean validateImmParameters() {
@@ -498,7 +564,7 @@ public final class TrackerFrame extends JFrame {
         showImmWindow();
         JOptionPane.showMessageDialog(
                 this,
-                "Correct the highlighted IMM tracker parameters before running the scenario.",
+                "Correct the highlighted IMM tracker parameters before pre-computing the scenario.",
                 "Invalid IMM parameters",
                 JOptionPane.WARNING_MESSAGE);
         return false;

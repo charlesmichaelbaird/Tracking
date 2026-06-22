@@ -39,7 +39,6 @@ public final class EarthMapCanvasSmokeTest {
                 model,
                 playback,
                 measurementEngine,
-                immTracker,
                 () -> target,
                 playback::isRunning,
                 () -> {
@@ -66,13 +65,13 @@ public final class EarthMapCanvasSmokeTest {
         }
 
         sensorSettings.setParameters(new SensorParameters(15.0, 0.0, 0.0, 0.0, 1.0, 5));
-        if (!playback.rewindPaused()) {
-            throw new AssertionError("A runnable scenario should rewind successfully");
+        if (!playback.precompute() || !playback.rewindReplayPaused()) {
+            throw new AssertionError("A runnable scenario should pre-compute and rewind successfully");
         }
         if (!playback.isRunning() || !playback.isPaused() || playback.elapsedSeconds() != 0.0) {
             throw new AssertionError("Rewind should leave playback at t=0 in a resumable paused state");
         }
-        if (measurementEngine.visibleMeasurements().size() != 1) {
+        if (measurementEngine.visibleMeasurementsAt(playback.elapsedSeconds()).size() != 1) {
             throw new AssertionError("A zero-offset sensor should measure the target at reset time");
         }
         graphics = rendered.createGraphics();

@@ -25,7 +25,7 @@ import java.nio.file.Path;
 final class RecordingPanel extends JPanel {
     private final Component dialogParent;
     private final TrackCsvRecorder recorder;
-    private final ScenarioPlayback playback;
+    private final Runnable onRecordingStateChanged;
     private final JTextField folderField;
     private final JButton browseButton = new JButton("Browse…");
     private final JToggleButton recordButton = new JToggleButton("Record");
@@ -34,11 +34,11 @@ final class RecordingPanel extends JPanel {
     RecordingPanel(
             Component dialogParent,
             TrackCsvRecorder recorder,
-            ScenarioPlayback playback) {
+            Runnable onRecordingStateChanged) {
         super(new FlowLayout(FlowLayout.LEFT, 8, 5));
         this.dialogParent = dialogParent;
         this.recorder = recorder;
-        this.playback = playback;
+        this.onRecordingStateChanged = onRecordingStateChanged;
         setOpaque(false);
         setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(232, 235, 239)),
@@ -49,14 +49,14 @@ final class RecordingPanel extends JPanel {
         add(title);
 
         recordButton.setIcon(new RecordDotIcon());
-        recordButton.setToolTipText("Arm recording for the next scenario run");
+        recordButton.setToolTipText("Arm one-second track recording for the next pre-compute");
         recordButton.addActionListener(event -> toggleRecording());
         add(recordButton);
 
         add(new JLabel("Parent folder:"));
         folderField = new JTextField(recorder.outputParent().toString(), 38);
         folderField.setToolTipText(
-                "Each run creates a unique scenario_yyyy-MM-dd_HH-mm-ss_SSS subfolder here");
+                "Each pre-compute creates a unique scenario_yyyy-MM-dd_HH-mm-ss_SSS subfolder here");
         folderField.addActionListener(event -> commitParentFolder());
         add(folderField);
 
@@ -107,7 +107,7 @@ final class RecordingPanel extends JPanel {
             statusLabel.setText("Recording to " + recorder.runDirectory().getFileName());
         } else if (recorder.isArmed()) {
             statusLabel.setForeground(new Color(145, 52, 52));
-            statusLabel.setText("Armed for next run");
+            statusLabel.setText("Armed for next pre-compute");
         } else {
             statusLabel.setForeground(new Color(91, 103, 115));
             statusLabel.setText("Off");
@@ -123,13 +123,11 @@ final class RecordingPanel extends JPanel {
                 return;
             }
             recorder.setArmed(true);
-            if (playback.isRunning()) {
-                recorder.beginRun();
-            }
         } else {
             recorder.setArmed(false);
         }
         refresh();
+        onRecordingStateChanged.run();
     }
 
     private void browseForFolder() {

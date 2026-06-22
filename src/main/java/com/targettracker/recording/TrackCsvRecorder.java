@@ -102,16 +102,14 @@ public final class TrackCsvRecorder implements AutoCloseable {
         }
     }
 
-    /** Writes update events only. Coast snapshots are deliberately ignored. */
-    public void recordUpdates(List<TrackRecord> records) {
+    /** Writes one predicted or updated sample for each supplied live track. */
+    public void recordSamples(List<TrackRecord> records) {
         if (!active || records.isEmpty()) {
             return;
         }
         try {
             for (TrackRecord record : records) {
-                if (record.updated()) {
-                    writeRecord(record);
-                }
+                writeRecord(record);
             }
             for (BufferedWriter writer : writers.values()) {
                 writer.flush();
@@ -158,10 +156,11 @@ public final class TrackCsvRecorder implements AutoCloseable {
         String text = """
                 ECEF Target Tracker recording
 
-                Each TRK-*.csv file contains the measurement-update history for one track.
+                Each TRK-*.csv file contains one row per integer scenario second while the track is live.
                 State order: [x, y, z, vx, vy, vz, ax, ay, az] in SI units and ECEF axes.
                 Covariance columns p_00 through p_88 are written in row-major order.
-                The updated column is true for every exported row; coast-only rows are omitted.
+                updated=true means a measurement updated the track at that exact second.
+                updated=false means the row is the track prediction/coast at that second.
 
                 MATLAB example:
                   T = readtable('TRK-001.csv');

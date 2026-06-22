@@ -1,8 +1,9 @@
 package com.targettracker.tracking;
 
 /**
- * Immutable snapshot of a fused 9D track state at one filter event.
+ * Immutable snapshot of a fused 9D track state at one scenario time.
  * State order is ECEF [x, y, z, vx, vy, vz, ax, ay, az].
+ * {@code updated=false} denotes a prediction/coast rather than a measurement update.
  */
 public record TrackRecord(
         String trackId,

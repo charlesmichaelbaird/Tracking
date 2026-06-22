@@ -19,6 +19,7 @@ public final class ImmTrackerSmokeTest {
         verifyAssociationCoastingAndTimeout();
         verifyGreedyOneToOneAssociation();
         verifyUpdateRecordsExcludeCoasts();
+        verifyFullLifeTail();
         verifyUncertaintyBreak();
         verifySquareTransitionValidation();
         System.out.println("ImmTrackerSmokeTest passed");
@@ -145,6 +146,19 @@ public final class ImmTrackerSmokeTest {
         List<TrackRecord> update = tracker.drainUpdatedRecords();
         if (update.size() != 1 || update.get(0).timeSeconds() != 5.0) {
             throw new AssertionError("Each associated measurement should publish one update record");
+        }
+    }
+
+    private static void verifyFullLifeTail() {
+        ImmSettings settings = new ImmSettings();
+        settings.setParameters(parameters(List.of(ImmModel.CV), 0.1, 0.1, 1_000.0));
+        ImmTracker tracker = new ImmTracker(settings);
+        tracker.processMeasurements(List.of(measurement(0.0, 0.0, 100.0)));
+        for (int index = 0; index <= 250; index++) {
+            tracker.advanceTo(index * 0.1);
+        }
+        if (tracker.currentViews().get(0).tail().size() <= 180) {
+            throw new AssertionError("Track tail should retain the complete track lifetime");
         }
     }
 

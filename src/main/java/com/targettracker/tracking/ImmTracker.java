@@ -4,10 +4,9 @@ import com.targettracker.model.EcefPoint;
 import com.targettracker.model.TargetMeasurement;
 
 import java.awt.Color;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
-import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -17,7 +16,6 @@ import java.util.TreeMap;
 public final class ImmTracker {
     private static final int STATE_SIZE = 9;
     private static final int MEASUREMENT_SIZE = 6;
-    private static final int TAIL_POINTS = 180;
     private static final double LOG_TWO_PI = Math.log(2.0 * Math.PI);
     private static final Color[] TRACK_COLORS = {
             new Color(255, 214, 10),
@@ -66,15 +64,32 @@ public final class ImmTracker {
     }
 
     public void advanceTo(double scenarioTimeSeconds) {
+        advanceTo(scenarioTimeSeconds, true);
+    }
+
+    /** Advances pre-computation without retaining a second internal copy of replay history. */
+    public void advanceToForReplay(double scenarioTimeSeconds) {
+        advanceTo(scenarioTimeSeconds, false);
+    }
+
+    private void advanceTo(double scenarioTimeSeconds, boolean retainTail) {
         ImmParameters parameters = settings.parameters();
         archiveBrokenTracks(scenarioTimeSeconds, parameters);
         List<TrackView> views = new ArrayList<>();
         for (Track track : activeTracks) {
             TrackView view = track.viewAt(scenarioTimeSeconds, parameters, false);
-            track.appendTail(view.meanPosition());
-            views.add(track.viewAt(scenarioTimeSeconds, parameters, false));
+            if (retainTail) {
+                track.appendTail(view.meanPosition());
+            } else {
+                view = withoutTail(view);
+            }
+            views.add(view);
         }
-        views.addAll(deadTrackViews);
+        if (retainTail) {
+            views.addAll(deadTrackViews);
+        } else {
+            deadTrackViews.stream().map(ImmTracker::withoutTail).forEach(views::add);
+        }
         currentViews = List.copyOf(views);
     }
 
@@ -82,11 +97,37 @@ public final class ImmTracker {
         return currentViews;
     }
 
+    private static TrackView withoutTail(TrackView view) {
+        return new TrackView(
+                view.id(),
+                view.meanPosition(),
+                view.positionCovariance(),
+                List.of(),
+                view.color(),
+                view.dead(),
+                view.uncertaintyRadiusMeters());
+    }
+
     /** Returns and clears track snapshots produced by measurement updates. */
     public List<TrackRecord> drainUpdatedRecords() {
         List<TrackRecord> drained = List.copyOf(updatedRecords);
         updatedRecords.clear();
         return drained;
+    }
+
+    /** Returns predicted or updated fused 9D snapshots for every currently live track. */
+    public List<TrackRecord> recordsAt(
+            double scenarioTimeSeconds,
+            Set<String> updatedTrackIds) {
+        ImmParameters parameters = settings.parameters();
+        List<TrackRecord> records = new ArrayList<>(activeTracks.size());
+        for (Track track : activeTracks) {
+            records.add(track.recordAt(
+                    scenarioTimeSeconds,
+                    parameters,
+                    updatedTrackIds.contains(track.id)));
+        }
+        return List.copyOf(records);
     }
 
     private void processMeasurementBatch(double timeSeconds, List<TargetMeasurement> measurements) {
@@ -308,7 +349,8 @@ public final class ImmTracker {
     private final class Track {
         private final String id;
         private final Color color;
-        private final Deque<EcefPoint> tail = new ArrayDeque<>();
+        private final List<EcefPoint> tail = new ArrayList<>();
+        private final List<EcefPoint> readOnlyTail = Collections.unmodifiableList(tail);
         private List<ImmModel> models;
         private ModelState[] states;
         private double[] probabilities;
@@ -444,6 +486,16 @@ public final class ImmTracker {
             return new TrackRecord(id, timeSeconds, fused.mean(), fused.covariance(), true);
         }
 
+        TrackRecord recordAt(
+                double timeSeconds,
+                ImmParameters parameters,
+                boolean updated) {
+            FusedState fused = Math.abs(timeSeconds - lastUpdateSeconds) < 1.0e-9
+                    ? fusedStoredState()
+                    : fusedAt(timeSeconds, parameters);
+            return new TrackRecord(id, timeSeconds, fused.mean(), fused.covariance(), updated);
+        }
+
         TrackView viewAt(double timeSeconds, ImmParameters parameters, boolean dead) {
             FusedState fused = fusedAt(timeSeconds, parameters);
             return viewFrom(fused, dead, uncertaintyRadius(fused.covariance()));
@@ -459,19 +511,16 @@ public final class ImmTracker {
                     id,
                     new EcefPoint(fused.mean()[0], fused.mean()[1], fused.mean()[2]),
                     positionCovariance,
-                    List.copyOf(tail),
+                    readOnlyTail,
                     color,
                     dead,
                     radius);
         }
 
         void appendTail(EcefPoint point) {
-            EcefPoint last = tail.peekLast();
+            EcefPoint last = tail.isEmpty() ? null : tail.get(tail.size() - 1);
             if (last == null || last.distanceTo(point) >= 1.0) {
-                tail.addLast(point);
-            }
-            while (tail.size() > TAIL_POINTS) {
-                tail.removeFirst();
+                tail.add(point);
             }
         }
     }
