@@ -18,7 +18,27 @@ public enum ScenarioPreset {
     SINGLE_TARGET_BLACKOUT("1 target — straight through blackout", 1, 15 * 60),
     MULTI_TARGET_BLACKOUT("5 targets — staggered blackout crossing", 5, 15 * 60),
     MOVE_STOP_BLACKOUT_DEPARTURES("11 targets — move-stop blackout departures", 11, 15 * 60),
-    AIRPORT_BLACKOUT("13 targets — airport hangar blackouts", 13, 20 * 60);
+    AIRPORT_BLACKOUT("13 targets — airport hangar blackouts", 13, 20 * 60),
+    DENSITY_OCEAN_BROKEN_MANEUVER(
+            "Density diagnostic - ocean broken maneuver",
+            1,
+            15 * 60),
+    DENSITY_AIRPORT_BIRTHS(
+            "Density diagnostic - airport births and stitch",
+            14,
+            20 * 60),
+    DENSITY_AIRPORT_VS_OCEAN(
+            "Density diagnostic - airport vs ocean duplicate",
+            14,
+            20 * 60),
+    DENSITY_COMPETING_BIRTH(
+            "Density diagnostic - crossing with competing birth",
+            12,
+            18 * 60),
+    DENSITY_TEMPORARY_BURST(
+            "Density diagnostic - temporary birth burst",
+            11,
+            20 * 60);
 
     private final String displayName;
     private final int targetCount;

@@ -85,7 +85,10 @@ public final class TrackStitchingAnalyzer {
             newSegments.sort(Comparator.comparing(Segment::trackId));
             boolean hasDistinctPair = oldSegments.stream().anyMatch(oldSegment ->
                     newSegments.stream().anyMatch(newSegment ->
-                            !oldSegment.trackId().equals(newSegment.trackId())));
+                            eligibleStrictPair(
+                                    oldSegment,
+                                    newSegment,
+                                    configuration.resolutionSeconds())));
             if (!hasDistinctPair) {
                 continue;
             }
@@ -94,7 +97,10 @@ public final class TrackStitchingAnalyzer {
             List<PairDiagnostics> diagnostics = new ArrayList<>();
             for (Segment oldSegment : oldSegments) {
                 for (Segment newSegment : newSegments) {
-                    if (!oldSegment.trackId().equals(newSegment.trackId())) {
+                    if (eligibleStrictPair(
+                            oldSegment,
+                            newSegment,
+                            configuration.resolutionSeconds())) {
                         PairDiagnostics pairDiagnostics = analyzePair(
                                 oldSegment,
                                 newSegment,
@@ -123,6 +129,18 @@ public final class TrackStitchingAnalyzer {
         return new AnalysisResult(List.copyOf(events), List.copyOf(densityHistory));
     }
 
+    private static boolean eligibleStrictPair(
+            Segment oldSegment,
+            Segment newSegment,
+            double resolutionSeconds) {
+        if (oldSegment.trackId().equals(newSegment.trackId())) {
+            return false;
+        }
+        double bankStep = bankStep(resolutionSeconds);
+        return oldSegment.lastUpdateTimeSeconds() + bankStep
+                <= newSegment.formationTimeSeconds() - bankStep + EPSILON;
+    }
+
     private static PairDiagnostics analyzePair(
             Segment oldSegment,
             Segment newSegment,
@@ -131,12 +149,13 @@ public final class TrackStitchingAnalyzer {
             Configuration configuration,
             BirthDensityField learnedBirthDensityField) {
         TrackRecord oldAnchor = oldSegment.lastUpdateRecord();
-        TrackRecord newAnchor = joinTimingAnchor(oldSegment, newSegment);
+        TrackRecord newAnchor = joinTimingAnchor(newSegment);
         double oldTime = oldAnchor.timeSeconds();
         double newTime = newAnchor.timeSeconds();
-        double bankStart = Math.min(oldTime, newTime);
-        double bankEnd = Math.max(oldTime, newTime);
-        List<Double> timeBank = timeBank(bankStart, bankEnd, configuration.resolutionSeconds());
+        double bankStep = bankStep(configuration.resolutionSeconds());
+        double bankStart = oldTime + bankStep;
+        double bankEnd = newTime - bankStep;
+        List<Double> timeBank = timeBank(bankStart, bankEnd, bankStep);
 
         double simpleTime = (oldTime + newTime) / 2.0;
         double kinematicTime = kinematicJoinTime(oldAnchor, newAnchor, bankStart, bankEnd);
@@ -317,7 +336,7 @@ public final class TrackStitchingAnalyzer {
         return new VariantScore(label, joinTimeSeconds, score);
     }
 
-    private static TrackRecord joinTimingAnchor(Segment oldSegment, Segment newSegment) {
+    private static TrackRecord joinTimingAnchor(Segment newSegment) {
         return newSegment.formationRecord();
     }
 
@@ -449,13 +468,20 @@ public final class TrackStitchingAnalyzer {
     }
 
     private static List<Double> timeBank(double start, double end, double resolutionSeconds) {
-        double resolution = Math.max(0.001, resolutionSeconds);
+        double resolution = bankStep(resolutionSeconds);
         List<Double> bank = new ArrayList<>();
+        if (start > end + EPSILON) {
+            return bank;
+        }
         for (double time = start; time < end - EPSILON; time += resolution) {
             bank.add(time);
         }
         bank.add(end);
         return bank;
+    }
+
+    private static double bankStep(double resolutionSeconds) {
+        return Math.max(0.001, resolutionSeconds);
     }
 
     private static BankEvaluation bankEvaluation(
@@ -1514,7 +1540,7 @@ public final class TrackStitchingAnalyzer {
             addObservableExposure();
             while (nextBirthIndex < births.size()
                     && births.get(nextBirthIndex).timeSeconds() + maturityDelaySeconds
-                            <= eventTimeSeconds + EPSILON) {
+                            < eventTimeSeconds - EPSILON) {
                 depositBirthEvidence(births.get(nextBirthIndex));
                 nextBirthIndex++;
             }
@@ -1712,7 +1738,7 @@ public final class TrackStitchingAnalyzer {
             if (!inRange(centerX, centerY, centerZ)) {
                 return new DensityEstimate(
                         priorDensityPerCubicKilometer,
-                        PRIOR_EXPOSURE_SCANS,
+                        PRIOR_EXPOSURE_SCANS * cellVolumeCubicKilometers,
                         0.0);
             }
             int radiusCells = Math.max(1, Math.min(MAXIMUM_SMOOTHING_RADIUS_CELLS,
@@ -1744,7 +1770,7 @@ public final class TrackStitchingAnalyzer {
             if (weightSum <= EPSILON) {
                 return new DensityEstimate(
                         priorDensityPerCubicKilometer,
-                        PRIOR_EXPOSURE_SCANS,
+                        PRIOR_EXPOSURE_SCANS * cellVolumeCubicKilometers,
                         0.0);
             }
             double exposureScanCubicKilometers = weightedExposure / weightSum;

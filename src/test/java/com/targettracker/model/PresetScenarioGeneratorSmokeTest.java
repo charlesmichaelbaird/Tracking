@@ -24,8 +24,12 @@ public final class PresetScenarioGeneratorSmokeTest {
             }
             int expectedBlackouts = switch (preset) {
                 case SINGLE_TARGET_BLACKOUT, MULTI_TARGET_BLACKOUT,
-                        MOVE_STOP_BLACKOUT_DEPARTURES -> 1;
-                case AIRPORT_BLACKOUT -> 2;
+                        MOVE_STOP_BLACKOUT_DEPARTURES,
+                        DENSITY_OCEAN_BROKEN_MANEUVER,
+                        DENSITY_AIRPORT_BIRTHS,
+                        DENSITY_COMPETING_BIRTH,
+                        DENSITY_TEMPORARY_BURST -> 1;
+                case AIRPORT_BLACKOUT, DENSITY_AIRPORT_VS_OCEAN -> 2;
                 default -> 0;
             };
             if (model.blackoutRegions().size() != expectedBlackouts) {
@@ -54,6 +58,7 @@ public final class PresetScenarioGeneratorSmokeTest {
         verifyStopProfiles(parameters);
         verifyBlackoutPresetGeometry(parameters);
         verifyMoveStopBlackoutDepartures();
+        verifyDensityDiagnosticPresets(parameters);
         verifyMinimumDuration();
         System.out.println("PresetScenarioGeneratorSmokeTest passed");
     }
@@ -126,6 +131,59 @@ public final class PresetScenarioGeneratorSmokeTest {
         }
     }
 
+    private static void verifyDensityDiagnosticPresets(PresetScenarioParameters parameters) {
+        ScenarioModel oceanModel = new ScenarioModel();
+        TargetTrajectory oceanTarget = PresetScenarioGenerator.generate(
+                oceanModel, ScenarioPreset.DENSITY_OCEAN_BROKEN_MANEUVER, parameters).get(0);
+        if (!crossesBlackout(oceanModel, oceanTarget, parameters.durationSeconds())) {
+            throw new AssertionError("Ocean diagnostic should force one sparse-region track break");
+        }
+
+        ScenarioModel airportModel = new ScenarioModel();
+        List<TargetTrajectory> airportTargets = PresetScenarioGenerator.generate(
+                airportModel, ScenarioPreset.DENSITY_AIRPORT_BIRTHS, parameters);
+        if (airportTargets.stream().skip(1)
+                .noneMatch(target -> airportModel.isInBlackout(target.positionAt(0.0)))) {
+            throw new AssertionError("Airport density diagnostic should seed delayed births in blackout");
+        }
+
+        ScenarioModel duplicateModel = new ScenarioModel();
+        List<TargetTrajectory> duplicateTargets = PresetScenarioGenerator.generate(
+                duplicateModel, ScenarioPreset.DENSITY_AIRPORT_VS_OCEAN, parameters);
+        if (!crossesBlackout(duplicateModel, duplicateTargets.get(0), parameters.durationSeconds())
+                || !crossesBlackout(duplicateModel, duplicateTargets.get(1), parameters.durationSeconds())) {
+            throw new AssertionError(
+                    "Airport-vs-ocean diagnostic should create two comparable stitch gaps");
+        }
+        if (duplicateTargets.stream().skip(2)
+                .noneMatch(target -> duplicateModel.isInBlackout(target.positionAt(0.0)))) {
+            throw new AssertionError(
+                    "Airport-vs-ocean diagnostic should seed births near the airport gap");
+        }
+
+        ScenarioModel competingModel = new ScenarioModel();
+        List<TargetTrajectory> competingTargets = PresetScenarioGenerator.generate(
+                competingModel, ScenarioPreset.DENSITY_COMPETING_BIRTH, parameters);
+        if (!competingModel.isInBlackout(competingTargets.get(1).positionAt(0.0))
+                || !Double.isFinite(firstInsideTime(
+                        competingModel,
+                        competingTargets.get(0),
+                        parameters.durationSeconds()))) {
+            throw new AssertionError(
+                    "Competing-birth diagnostic should pair a disappearing old target with a birth");
+        }
+
+        ScenarioModel burstModel = new ScenarioModel();
+        List<TargetTrajectory> burstTargets = PresetScenarioGenerator.generate(
+                burstModel, ScenarioPreset.DENSITY_TEMPORARY_BURST, parameters);
+        long burstBirths = burstTargets.stream().skip(1)
+                .filter(target -> burstModel.isInBlackout(target.positionAt(0.0)))
+                .count();
+        if (burstBirths < 8) {
+            throw new AssertionError("Temporary burst diagnostic should seed many delayed births");
+        }
+    }
+
     private static void verifyStopProfiles(PresetScenarioParameters parameters) {
         ScenarioModel model = new ScenarioModel();
         TargetTrajectory moveToStop = PresetScenarioGenerator.generate(
@@ -180,5 +238,24 @@ public final class PresetScenarioGeneratorSmokeTest {
             }
         }
         return Double.NaN;
+    }
+
+    private static boolean crossesBlackout(
+            ScenarioModel model,
+            TargetTrajectory target,
+            double durationSeconds) {
+        boolean wasOutside = !model.isInBlackout(target.positionAt(0.0));
+        boolean entered = false;
+        boolean exited = false;
+        for (double time = 0.0; time <= durationSeconds; time += 5.0) {
+            boolean inside = model.isInBlackout(target.positionAt(time));
+            if (wasOutside && inside) {
+                entered = true;
+            }
+            if (entered && !inside) {
+                exited = true;
+            }
+        }
+        return wasOutside && entered && exited;
     }
 }

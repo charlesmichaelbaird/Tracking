@@ -107,7 +107,9 @@ public final class TrackStitchingAnalyzerSmokeTest {
         }
         verifyEventLimitedJoinSeeds(analyzer);
         verifyDeadTrackJoinSeeds(analyzer);
+        verifyOverlappingTrackletsRejected(analyzer);
         verifyClusteredBirthDensity(analyzer);
+        verifyBirthDensityMaturesAfterNewTrackWindow(analyzer);
         System.out.println("TrackStitchingAnalyzerSmokeTest passed");
     }
 
@@ -134,6 +136,48 @@ public final class TrackStitchingAnalyzerSmokeTest {
             throw new AssertionError("Expected spatial density history");
         }
         return history.get(history.size() - 1).representativeDensityPerCubicKilometer();
+    }
+
+    private static void verifyBirthDensityMaturesAfterNewTrackWindow(
+            TrackStitchingAnalyzer analyzer) {
+        TrackStitchingAnalyzer.Configuration configuration =
+                new TrackStitchingAnalyzer.Configuration(1.0, 10.0, 0.0, 2.0,
+                        false, 0.5, 1.0e-6, 1.0e-6);
+        List<TrackRecord> tracks = List.of(track("TRK-BIRTH", 1.0, 0.0, 0.0, true));
+        List<RecordedMeasurement> measurements = List.of(
+                measurement("TRK-BIRTH", 1.0, 0.0),
+                measurement("TRK-BIRTH", 3.0, 0.0),
+                measurement("TRK-BIRTH", 4.0, 0.0));
+        TrackStitchingAnalyzer.AnalysisResult result = analyzer.analyzeDetailed(
+                new RecordedScenario(
+                        Path.of("birth_density_maturity_boundary"),
+                        "Birth density maturity boundary",
+                        4.0,
+                        tracks,
+                        List.of(),
+                        measurements),
+                configuration);
+        double boundaryDensity = densityAt(result, 3.0);
+        double maturedDensity = densityAt(result, 4.0);
+        if (boundaryDensity > 2.0e-6) {
+            throw new AssertionError(
+                    "Birth evidence should not self-count at the new-track window boundary");
+        }
+        if (!(maturedDensity > boundaryDensity * 10.0)) {
+            throw new AssertionError(
+                    "Birth evidence should mature after the new-track window has passed");
+        }
+    }
+
+    private static double densityAt(
+            TrackStitchingAnalyzer.AnalysisResult result,
+            double timeSeconds) {
+        return result.spatialDensityHistory().stream()
+                .filter(snapshot -> Math.abs(snapshot.timeSeconds() - timeSeconds) < 1.0e-6)
+                .findFirst()
+                .map(TrackStitchingAnalyzer.SpatialDensitySnapshot
+                        ::representativeDensityPerCubicKilometer)
+                .orElseThrow(() -> new AssertionError("Missing density snapshot at " + timeSeconds));
     }
 
     private static RecordedScenario birthDensityScenario(
@@ -197,13 +241,22 @@ public final class TrackStitchingAnalyzerSmokeTest {
         requireClose(firstPair.statisticalJoinTimeSeconds(),
                 secondPair.statisticalJoinTimeSeconds(),
                 "Mahalanobis bank should not drift to the later scenario timestamp");
-        if (secondPair.statisticalJoinTimeSeconds() > 3.0) {
+        if (secondPair.statisticalJoinTimeSeconds() < 0.5
+                || secondPair.statisticalJoinTimeSeconds() > 2.5) {
             throw new AssertionError(
-                    "Mahalanobis bank should stay inside the old-update to new-formation gap");
+                    "Mahalanobis bank should stay strictly inside the old/new update gap");
         }
         if (!Double.isFinite(secondPair.statisticalMahalanobisDistance())) {
             throw new AssertionError("Mahalanobis distance should be reported for each timing row");
         }
+        TrackStitchingAnalyzer.PairDiagnostics diagnostics = diagnostics(
+                events.get(1), "TRK-OLD", "TRK-NEW");
+        double firstBankTime = diagnostics.bankEvaluations().get(0).timeSeconds();
+        double lastBankTime = diagnostics.bankEvaluations()
+                .get(diagnostics.bankEvaluations().size() - 1)
+                .timeSeconds();
+        requireClose(0.5, firstBankTime, "Mahalanobis bank should start after old update");
+        requireClose(2.5, lastBankTime, "Mahalanobis bank should end before new formation");
     }
 
     private static void verifyDeadTrackJoinSeeds(TrackStitchingAnalyzer analyzer) {
@@ -245,6 +298,30 @@ public final class TrackStitchingAnalyzerSmokeTest {
         }
     }
 
+    private static void verifyOverlappingTrackletsRejected(TrackStitchingAnalyzer analyzer) {
+        List<TrackRecord> tracks = new ArrayList<>();
+        tracks.add(track("TRK-OLD", 0.0, 0.0, 10.0, true));
+        tracks.add(track("TRK-OLD", 1.0, 10.0, 10.0, true));
+        tracks.add(track("TRK-OLD", 2.0, 20.0, 10.0, true));
+        tracks.add(track("TRK-OLD", 3.0, 30.0, 10.0, false));
+        tracks.add(track("TRK-NEW", 1.5, 15.0, 10.0, true));
+        tracks.add(track("TRK-NEW", 3.0, 30.0, 10.0, false));
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("overlapping_tracklets_rejected"),
+                "Overlapping tracklets rejected",
+                3.0,
+                tracks,
+                List.of(),
+                List.of(measurement("TRK-NEW", 3.0, 30.0)));
+        if (!analyzer.analyze(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(
+                        0.5, 10.0, 0.0, 10.0, false, 0.5)).isEmpty()) {
+            throw new AssertionError(
+                    "Overlapping old/new update timelines should not produce a stitch pair");
+        }
+    }
+
     private static TrackStitchingAnalyzer.PairResult pair(
             TrackStitchingAnalyzer.EventResult event,
             String oldTrackId,
@@ -255,6 +332,18 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
                         "Missing pair " + oldTrackId + " -> " + newTrackId));
+    }
+
+    private static TrackStitchingAnalyzer.PairDiagnostics diagnostics(
+            TrackStitchingAnalyzer.EventResult event,
+            String oldTrackId,
+            String newTrackId) {
+        return event.diagnostics().stream()
+                .filter(candidate -> candidate.result().oldTrackId().equals(oldTrackId)
+                        && candidate.result().newTrackId().equals(newTrackId))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "Missing diagnostics " + oldTrackId + " -> " + newTrackId));
     }
 
     private static void verifyCanonicalInnovationMetrics() {
