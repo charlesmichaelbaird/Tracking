@@ -68,6 +68,20 @@ public final class EarthMapCanvasSmokeTest {
         if (!"1.0×".equals(canvas.viewDescription())) {
             throw new AssertionError("World-view reset should restore 1.0× zoom");
         }
+        target.clearPath();
+        canvas.setDrawingMode(EarthMapCanvas.DrawingMode.SEGMENTED);
+        click(canvas, 420, 280);
+        click(canvas, 480, 335);
+        if (target.path().size() != 2) {
+            throw new AssertionError("Segmented drawing should add clicked vertices");
+        }
+        canvas.finishPath();
+        click(canvas, 520, 360);
+        if (target.path().size() != 2) {
+            throw new AssertionError(
+                    "Finish Path should stop segmented clicks from extending the target");
+        }
+        canvas.setDrawingMode(EarthMapCanvas.DrawingMode.FREE_HAND);
         canvas.focusOnPoints(target.path());
         if ("1.0×".equals(canvas.viewDescription())) {
             throw new AssertionError("Scenario extent focus should zoom into its local region");

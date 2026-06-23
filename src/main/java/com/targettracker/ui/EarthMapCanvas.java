@@ -88,6 +88,7 @@ final class EarthMapCanvas extends JPanel {
     private boolean freeHandDrawing;
     private boolean blackoutDrawing;
     private boolean panning;
+    private TargetTrajectory finishedSegmentedTarget;
     private Point mousePoint;
     private GeodeticPoint blackoutFirstCorner;
     private Point panAnchor;
@@ -158,9 +159,14 @@ final class EarthMapCanvas extends JPanel {
 
                 if (drawingMode == DrawingMode.FREE_HAND) {
                     target.clearPath();
+                    finishedSegmentedTarget = null;
                     addMapPoint(target, event.getPoint());
                     freeHandDrawing = true;
                 } else {
+                    if (target == finishedSegmentedTarget && !target.path().isEmpty()) {
+                        return;
+                    }
+                    finishedSegmentedTarget = null;
                     addMapPoint(target, event.getPoint());
                     if (event.getClickCount() >= 2) {
                         finishPath();
@@ -234,6 +240,7 @@ final class EarthMapCanvas extends JPanel {
         freeHandDrawing = false;
         blackoutDrawing = false;
         blackoutFirstCorner = null;
+        finishedSegmentedTarget = null;
         repaint();
     }
 
@@ -241,6 +248,12 @@ final class EarthMapCanvas extends JPanel {
         freeHandDrawing = false;
         blackoutDrawing = false;
         blackoutFirstCorner = null;
+        TargetTrajectory target = selectedTarget.get();
+        if (drawingMode == DrawingMode.SEGMENTED && target != null && !target.path().isEmpty()) {
+            finishedSegmentedTarget = target;
+        } else if (target == null || target.path().isEmpty()) {
+            finishedSegmentedTarget = null;
+        }
         mousePoint = null;
         onPathChanged.run();
         repaint();
@@ -250,6 +263,7 @@ final class EarthMapCanvas extends JPanel {
         freeHandDrawing = false;
         blackoutDrawing = true;
         blackoutFirstCorner = null;
+        finishedSegmentedTarget = null;
         mousePoint = null;
         setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
         repaint();
@@ -870,6 +884,9 @@ final class EarthMapCanvas extends JPanel {
         }
         TargetTrajectory target = selectedTarget.get();
         if (target == null || target.path().isEmpty() || !mapBounds().contains(mousePoint)) {
+            return;
+        }
+        if (target == finishedSegmentedTarget) {
             return;
         }
         EcefPoint end = Wgs84.toEcef(toGeodetic(mousePoint).withAltitude(0.0));
