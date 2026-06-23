@@ -152,12 +152,16 @@ final class SensorParametersPanel extends JPanel {
             empty.setForeground(new Color(91, 103, 115));
             blackoutListPanel.add(empty);
         } else {
+            int index = 1;
             for (BlackoutRegion region : regions) {
                 JLabel row = new JLabel("<html><b>%s</b> &nbsp; %.2f km × %.2f km</html>"
                         .formatted(
-                                region.name(),
+                                "Region " + index++,
                                 region.widthMeters() / 1_000.0,
                                 region.heightMeters() / 1_000.0));
+                row.setText("<html>%.2f km by %.2f km</html>".formatted(
+                        region.widthMeters() / 1_000.0,
+                        region.heightMeters() / 1_000.0));
                 row.setForeground(new Color(55, 65, 75));
                 blackoutListPanel.add(row);
             }

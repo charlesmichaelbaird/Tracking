@@ -59,8 +59,11 @@ public final class SensorParametersPanelSmokeTest {
         panel.refreshBlackoutRegions();
         labels.clear();
         collectLabels(panel, labels);
-        if (labels.stream().noneMatch(text -> text.contains("BLK-001"))) {
-            throw new AssertionError("Blackout list should show existing region IDs");
+        if (labels.stream().anyMatch(text -> text.contains("BLK-001"))) {
+            throw new AssertionError("Blackout list should not show internal region IDs");
+        }
+        if (labels.stream().noneMatch(text -> text.contains("1.00 km"))) {
+            throw new AssertionError("Blackout list should still show region dimensions");
         }
     }
 

@@ -498,19 +498,6 @@ final class EarthMapCanvas extends JPanel {
             g.setColor(new Color(60, 65, 72, 180));
             g.setStroke(new BasicStroke(1.4f));
             g.drawPolygon(polygon);
-            Point labelPoint = toScreen(region.center());
-            if (labelPoint != null) {
-                g.setFont(g.getFont().deriveFont(Font.BOLD, 11.0f));
-                String label = region.name();
-                FontMetrics metrics = g.getFontMetrics();
-                int width = metrics.stringWidth(label) + 10;
-                g.setColor(new Color(255, 255, 255, 210));
-                g.fillRoundRect(labelPoint.x - width / 2, labelPoint.y - 10,
-                        width, 18, 8, 8);
-                g.setColor(new Color(61, 66, 73));
-                g.drawString(label, labelPoint.x - metrics.stringWidth(label) / 2,
-                        labelPoint.y + 3);
-            }
         }
     }
 

@@ -23,7 +23,8 @@ public final class PresetScenarioGeneratorSmokeTest {
                 throw new AssertionError(preset + " generated the wrong target count");
             }
             int expectedBlackouts = switch (preset) {
-                case SINGLE_TARGET_BLACKOUT, MULTI_TARGET_BLACKOUT -> 1;
+                case SINGLE_TARGET_BLACKOUT, MULTI_TARGET_BLACKOUT,
+                        MOVE_STOP_BLACKOUT_DEPARTURES -> 1;
                 case AIRPORT_BLACKOUT -> 2;
                 default -> 0;
             };
@@ -52,6 +53,7 @@ public final class PresetScenarioGeneratorSmokeTest {
 
         verifyStopProfiles(parameters);
         verifyBlackoutPresetGeometry(parameters);
+        verifyMoveStopBlackoutDepartures();
         verifyMinimumDuration();
         System.out.println("PresetScenarioGeneratorSmokeTest passed");
     }
@@ -75,6 +77,52 @@ public final class PresetScenarioGeneratorSmokeTest {
                 .anyMatch(target -> airportModel.isInBlackout(target.positionAt(0.0)));
         if (!hasHangarBirth) {
             throw new AssertionError("Airport departures should begin inside a hangar blackout");
+        }
+    }
+
+    private static void verifyMoveStopBlackoutDepartures() {
+        PresetScenarioParameters parameters = new PresetScenarioParameters(
+                40.7, -74.0, 100.0, 1_500.0, 15 * 60);
+        ScenarioModel model = new ScenarioModel();
+        List<TargetTrajectory> targets = PresetScenarioGenerator.generate(
+                model, ScenarioPreset.MOVE_STOP_BLACKOUT_DEPARTURES, parameters);
+        if (targets.size() != 11 || model.blackoutRegions().size() != 1) {
+            throw new AssertionError(
+                    "Move-stop blackout departure preset should define 11 targets and 1 blackout");
+        }
+
+        TargetTrajectory inboundStopper = targets.get(0);
+        double inboundEntryTime = firstInsideTime(model, inboundStopper, parameters.durationSeconds());
+        if (!Double.isFinite(inboundEntryTime)) {
+            throw new AssertionError("Inbound stopper should enter the blackout region");
+        }
+        if (!model.isInBlackout(inboundStopper.positionAt(parameters.durationSeconds()))) {
+            throw new AssertionError("Inbound stopper should end inside the blackout region");
+        }
+
+        int nearInboundDepartures = 0;
+        for (int index = 1; index < targets.size(); index++) {
+            TargetTrajectory departure = targets.get(index);
+            if (!model.isInBlackout(departure.positionAt(0.0))) {
+                throw new AssertionError("Departure target " + index
+                        + " should begin stopped inside the blackout region");
+            }
+            double exitTime = firstOutsideTime(model, departure, parameters.durationSeconds());
+            if (!Double.isFinite(exitTime)) {
+                throw new AssertionError("Departure target " + index
+                        + " should exit the blackout region");
+            }
+            if (exitTime >= inboundEntryTime) {
+                throw new AssertionError("Departure target " + index
+                        + " exited after the inbound target reached the blackout");
+            }
+            if (Math.abs(inboundEntryTime - exitTime) <= 90.0) {
+                nearInboundDepartures++;
+            }
+        }
+        if (nearInboundDepartures < 2) {
+            throw new AssertionError(
+                    "At least two departures should be close in time to the inbound blackout entry");
         }
     }
 
@@ -108,5 +156,29 @@ public final class PresetScenarioGeneratorSmokeTest {
         } catch (IllegalArgumentException expected) {
             // Expected validation path.
         }
+    }
+
+    private static double firstInsideTime(
+            ScenarioModel model,
+            TargetTrajectory target,
+            double durationSeconds) {
+        for (double time = 0.0; time <= durationSeconds; time += 5.0) {
+            if (model.isInBlackout(target.positionAt(time))) {
+                return time;
+            }
+        }
+        return Double.NaN;
+    }
+
+    private static double firstOutsideTime(
+            ScenarioModel model,
+            TargetTrajectory target,
+            double durationSeconds) {
+        for (double time = 0.0; time <= durationSeconds; time += 5.0) {
+            if (!model.isInBlackout(target.positionAt(time))) {
+                return time;
+            }
+        }
+        return Double.NaN;
     }
 }

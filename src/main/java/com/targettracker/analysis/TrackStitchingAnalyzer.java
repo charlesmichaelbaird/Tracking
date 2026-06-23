@@ -21,11 +21,24 @@ public final class TrackStitchingAnalyzer {
     private static final double PROCESS_NOISE_SPECTRAL_DENSITY = 1.0;
     private static final double MINIMUM_LAMBDA_EX = 1.0e-300;
     private static final double CUBIC_METERS_PER_CUBIC_KILOMETER = 1.0e9;
+    private static final double MINIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e-12;
+    private static final double MAXIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0;
+    private static final double PRIOR_EXPOSURE_OPPORTUNITIES = 1.0;
+    private static final double FIELD_FORGETTING_HALF_LIFE_SECONDS = 30.0 * 60.0;
+    private static final double MINIMUM_SPATIAL_CELL_METERS = 1_000.0;
+    private static final double MAXIMUM_GRID_AXIS_CELLS = 20.0;
 
     public List<EventResult> analyze(RecordedScenario scenario, Configuration configuration) {
+        return analyzeDetailed(scenario, configuration).events();
+    }
+
+    public AnalysisResult analyzeDetailed(
+            RecordedScenario scenario,
+            Configuration configuration) {
         Map<String, List<TrackRecord>> tracks = groupTracks(scenario.records());
         Map<String, List<GroundTruthRecord>> truth = groupTruth(scenario.groundTruth());
-        List<BirthPoint> birthPoints = birthPoints(tracks);
+        BirthDensityField learnedBirthDensityField = BirthDensityField.create(
+                tracks, scenario.measurements(), configuration);
         Map<String, List<RecordedMeasurement>> measurementsByTrack =
                 associateMeasurements(tracks, scenario.measurements());
         TreeSet<Double> measurementTimes = new TreeSet<>();
@@ -34,6 +47,7 @@ public final class TrackStitchingAnalyzer {
                 .forEach(measurementTimes::add);
 
         List<EventResult> events = new ArrayList<>();
+        List<SpatialDensitySnapshot> densityHistory = new ArrayList<>();
         for (double eventTime : measurementTimes) {
             List<Segment> allSegments = new ArrayList<>();
             List<Segment> oldSegments = new ArrayList<>();
@@ -61,8 +75,9 @@ public final class TrackStitchingAnalyzer {
                 }
             }
             allSegments.sort(Comparator.comparing(Segment::trackId));
-            double learnedBirthDensity = learnedBirthDensityPerCubicKilometerSecond(
-                    birthPoints, eventTime);
+            learnedBirthDensityField.advanceTo(eventTime);
+            double learnedBirthDensity = learnedBirthDensityField.meanDensityPerCubicKilometer();
+            densityHistory.add(learnedBirthDensityField.snapshot(eventTime));
             oldSegments.sort(Comparator.comparing(Segment::trackId));
             newSegments.sort(Comparator.comparing(Segment::trackId));
             boolean hasDistinctPair = oldSegments.stream().anyMatch(oldSegment ->
@@ -73,16 +88,19 @@ public final class TrackStitchingAnalyzer {
             }
 
             List<PairResult> pairs = new ArrayList<>();
+            List<PairDiagnostics> diagnostics = new ArrayList<>();
             for (Segment oldSegment : oldSegments) {
                 for (Segment newSegment : newSegments) {
                     if (!oldSegment.trackId().equals(newSegment.trackId())) {
-                        pairs.add(analyzePair(
+                        PairDiagnostics pairDiagnostics = analyzePair(
                                 oldSegment,
                                 newSegment,
                                 truth,
                                 measurementsByTrack.getOrDefault(newSegment.trackId(), List.of()),
                                 configuration,
-                                learnedBirthDensity));
+                                learnedBirthDensityField);
+                        pairs.add(pairDiagnostics.result());
+                        diagnostics.add(pairDiagnostics);
                     }
                 }
             }
@@ -96,18 +114,19 @@ public final class TrackStitchingAnalyzer {
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.MAHALANOBIS),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.STATIC_NLLR),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.LEARNED_NLLR),
-                    learnedBirthDensity));
+                    learnedBirthDensity,
+                    List.copyOf(diagnostics)));
         }
-        return List.copyOf(events);
+        return new AnalysisResult(List.copyOf(events), List.copyOf(densityHistory));
     }
 
-    private static PairResult analyzePair(
+    private static PairDiagnostics analyzePair(
             Segment oldSegment,
             Segment newSegment,
             Map<String, List<GroundTruthRecord>> truth,
             List<RecordedMeasurement> newTrackMeasurements,
             Configuration configuration,
-            double learnedBirthDensityPerCubicKilometerSecond) {
+            BirthDensityField learnedBirthDensityField) {
         TrackRecord oldAnchor = oldSegment.lastUpdateRecord();
         TrackRecord newAnchor = joinTimingAnchor(oldSegment, newSegment);
         double oldTime = oldAnchor.timeSeconds();
@@ -120,13 +139,21 @@ public final class TrackStitchingAnalyzer {
         double kinematicTime = kinematicJoinTime(oldAnchor, newAnchor, bankStart, bankEnd);
         List<ScoredTime> mahalanobisScores = new ArrayList<>();
         List<TruthScore> truthScores = new ArrayList<>();
+        List<BankEvaluation> bankEvaluations = new ArrayList<>();
         for (double time : timeBank) {
-            PropagatedState oldState = predictOld(oldAnchor, time);
-            PropagatedState newState = retrodictNew(
-                    newSegment, newTrackMeasurements, time);
-            InnovationScore innovation = innovationScore(oldState, newState);
-            mahalanobisScores.add(new ScoredTime(time, innovation.mahalanobisDistance()));
-            TruthScore truthScore = truthScore(time, oldState.state(), newState.state(), truth);
+            BankEvaluation evaluation = bankEvaluation(
+                    oldSegment.trackId(),
+                    newSegment.trackId(),
+                    oldAnchor,
+                    newSegment,
+                    newTrackMeasurements,
+                    time,
+                    configuration,
+                    learnedBirthDensityField);
+            bankEvaluations.add(evaluation);
+            mahalanobisScores.add(new ScoredTime(time, evaluation.mahalanobisDistance()));
+            TruthScore truthScore = truthScore(
+                    time, evaluation.oldState(), evaluation.newState(), truth);
             if (truthScore != null) {
                 truthScores.add(truthScore);
             }
@@ -141,17 +168,17 @@ public final class TrackStitchingAnalyzer {
                 .orElse("");
 
         JoinMetrics simpleMetrics = joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
-                simpleTime, configuration, learnedBirthDensityPerCubicKilometerSecond);
+                simpleTime, configuration, learnedBirthDensityField);
         JoinMetrics kinematicMetrics = joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
-                kinematicTime, configuration, learnedBirthDensityPerCubicKilometerSecond);
+                kinematicTime, configuration, learnedBirthDensityField);
         JoinMetrics statisticalMetrics = joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
-                statisticalTime, configuration, learnedBirthDensityPerCubicKilometerSecond);
+                statisticalTime, configuration, learnedBirthDensityField);
         JoinMetrics actualMetrics = Double.isFinite(actualTime)
                 ? joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
-                        actualTime, configuration, learnedBirthDensityPerCubicKilometerSecond)
+                        actualTime, configuration, learnedBirthDensityField)
                 : JoinMetrics.nan();
 
-        return new PairResult(
+        PairResult result = new PairResult(
                 oldSegment.trackId(),
                 newSegment.trackId(),
                 truthTargetId,
@@ -175,6 +202,7 @@ public final class TrackStitchingAnalyzer {
                 kinematicMetrics.learnedNegativeLogLikelihoodRatio(),
                 statisticalMetrics.learnedNegativeLogLikelihoodRatio(),
                 actualMetrics.learnedNegativeLogLikelihoodRatio());
+        return new PairDiagnostics(result, List.copyOf(bankEvaluations));
     }
 
     private static List<OptimalAssignment> optimalAssignments(
@@ -430,23 +458,72 @@ public final class TrackStitchingAnalyzer {
         return bank;
     }
 
+    private static BankEvaluation bankEvaluation(
+            String oldTrackId,
+            String newTrackId,
+            TrackRecord oldAnchor,
+            Segment newSegment,
+            List<RecordedMeasurement> newTrackMeasurements,
+            double timeSeconds,
+            Configuration configuration,
+            BirthDensityField learnedBirthDensityField) {
+        PropagatedState oldState = predictOld(oldAnchor, timeSeconds);
+        PropagatedState newState = retrodictNew(newSegment, newTrackMeasurements, timeSeconds);
+        InnovationScore score = innovationScore(oldState, newState);
+        double nll = canonicalNegativeLogLikelihood(score);
+        double innovationVolume = innovationVolumeCubicKilometers(score.innovationCovariance());
+        double staticDensity = configuration.falseAlarmRatePerCubicKilometer()
+                + configuration.birthRatePerCubicKilometer();
+        double staticLambdaEx = lambdaEx(staticDensity, innovationVolume);
+        BirthDensityQuery learnedQuery = learnedBirthDensityField.queryExpectedBirths(
+                queryCenter(oldState.state(), newState.state()),
+                score.innovationCovariance(),
+                innovationVolume);
+        double learnedLambdaEx = Math.max(MINIMUM_LAMBDA_EX, learnedQuery.expectedBirths());
+        return new BankEvaluation(
+                oldTrackId,
+                newTrackId,
+                timeSeconds,
+                oldState.state(),
+                oldState.covariance(),
+                newState.state(),
+                newState.covariance(),
+                score.innovation(),
+                score.innovationCovariance(),
+                score.mahalanobisDistance(),
+                score.innovationQuadratic(),
+                score.logDeterminant(),
+                nll,
+                innovationVolume,
+                staticLambdaEx,
+                nll + Math.log(staticLambdaEx),
+                learnedQuery.densityPerCubicKilometer(),
+                learnedQuery.expectedBirths(),
+                learnedQuery.sigmaMeters(),
+                nll + Math.log(learnedLambdaEx));
+    }
+
     private static JoinMetrics joinMetrics(
             TrackRecord oldAnchor,
             Segment newSegment,
             List<RecordedMeasurement> newTrackMeasurements,
             double timeSeconds,
             Configuration configuration,
-            double learnedBirthDensityPerCubicKilometerSecond) {
-        InnovationScore score = innovationScore(
-                predictOld(oldAnchor, timeSeconds),
-                retrodictNew(newSegment, newTrackMeasurements, timeSeconds));
+            BirthDensityField learnedBirthDensityField) {
+        PropagatedState oldState = predictOld(oldAnchor, timeSeconds);
+        PropagatedState newState = retrodictNew(newSegment, newTrackMeasurements, timeSeconds);
+        InnovationScore score = innovationScore(oldState, newState);
         double nll = canonicalNegativeLogLikelihood(score);
         double innovationVolume = innovationVolumeCubicKilometers(score.innovationCovariance());
         double staticDensity = configuration.falseAlarmRatePerCubicKilometer()
                 + configuration.birthRatePerCubicKilometer();
         double staticNllr = nll + Math.log(lambdaEx(staticDensity, innovationVolume));
-        double learnedNllr = nll + Math.log(lambdaEx(
-                learnedBirthDensityPerCubicKilometerSecond, innovationVolume));
+        BirthDensityQuery learnedQuery = learnedBirthDensityField.queryExpectedBirths(
+                queryCenter(oldState.state(), newState.state()),
+                score.innovationCovariance(),
+                innovationVolume);
+        double learnedNllr = nll + Math.log(Math.max(
+                MINIMUM_LAMBDA_EX, learnedQuery.expectedBirths()));
         return new JoinMetrics(
                 nll,
                 score.mahalanobisDistance(),
@@ -459,6 +536,13 @@ public final class TrackStitchingAnalyzer {
         return Math.max(MINIMUM_LAMBDA_EX,
                 Math.max(0.0, densityPerCubicKilometer)
                         * Math.max(0.0, volumeCubicKilometers));
+    }
+
+    private static double[] queryCenter(double[] oldState, double[] newState) {
+        return new double[]{
+                (oldState[0] + newState[0]) / 2.0,
+                (oldState[1] + newState[1]) / 2.0,
+                (oldState[2] + newState[2]) / 2.0};
     }
 
     private static double innovationVolumeCubicKilometers(double[][] innovationCovariance) {
@@ -705,7 +789,8 @@ public final class TrackStitchingAnalyzer {
 
     private static List<BirthPoint> birthPoints(Map<String, List<TrackRecord>> tracks) {
         List<BirthPoint> births = new ArrayList<>();
-        for (List<TrackRecord> records : tracks.values()) {
+        for (Map.Entry<String, List<TrackRecord>> entry : tracks.entrySet()) {
+            List<TrackRecord> records = entry.getValue();
             if (records.isEmpty()) {
                 continue;
             }
@@ -715,42 +800,92 @@ public final class TrackStitchingAnalyzer {
                     birth.timeSeconds(),
                     state[0],
                     state[1],
-                    state[2]));
+                    state[2],
+                    birthUncertaintyMeters(birth),
+                    birthConfidence(entry.getKey(), birth, tracks)));
         }
         births.sort(Comparator.comparingDouble(BirthPoint::timeSeconds));
         return List.copyOf(births);
     }
 
-    private static double learnedBirthDensityPerCubicKilometerSecond(
-            List<BirthPoint> births,
-            double eventTime) {
-        List<BirthPoint> observed = births.stream()
-                .filter(birth -> birth.timeSeconds() <= eventTime + EPSILON)
-                .toList();
-        if (observed.isEmpty()) {
-            return 0.0;
+    private static double birthUncertaintyMeters(TrackRecord birth) {
+        double[][] covariance = birth.covariance();
+        double variance = Math.max(0.0,
+                covariance[0][0] + covariance[1][1] + covariance[2][2]);
+        return Math.max(250.0, Math.min(10_000.0, Math.sqrt(variance)));
+    }
+
+    private static double birthConfidence(
+            String birthTrackId,
+            TrackRecord birth,
+            Map<String, List<TrackRecord>> tracks) {
+        double bestCompatibility = Double.POSITIVE_INFINITY;
+        for (Map.Entry<String, List<TrackRecord>> entry : tracks.entrySet()) {
+            if (entry.getKey().equals(birthTrackId)) {
+                continue;
+            }
+            TrackRecord prior = latestUpdatedBefore(entry.getValue(), birth.timeSeconds());
+            if (prior == null) {
+                continue;
+            }
+            PropagatedState prediction = predictOld(prior, birth.timeSeconds());
+            double distance = Math.sqrt(positionDistanceSquared(
+                    prediction.state(), birth.state()));
+            double[][] covariance = add(prediction.covariance(), birth.covariance());
+            double oneSigma = Math.sqrt(Math.max(1.0,
+                    covariance[0][0] + covariance[1][1] + covariance[2][2]));
+            bestCompatibility = Math.min(bestCompatibility,
+                    distance / Math.max(500.0, 3.0 * oneSigma));
         }
-        double minX = Double.POSITIVE_INFINITY;
-        double minY = Double.POSITIVE_INFINITY;
-        double minZ = Double.POSITIVE_INFINITY;
-        double maxX = Double.NEGATIVE_INFINITY;
-        double maxY = Double.NEGATIVE_INFINITY;
-        double maxZ = Double.NEGATIVE_INFINITY;
-        for (BirthPoint birth : observed) {
-            minX = Math.min(minX, birth.xMeters());
-            maxX = Math.max(maxX, birth.xMeters());
-            minY = Math.min(minY, birth.yMeters());
-            maxY = Math.max(maxY, birth.yMeters());
-            minZ = Math.min(minZ, birth.zMeters());
-            maxZ = Math.max(maxZ, birth.zMeters());
+        if (!Double.isFinite(bestCompatibility)) {
+            return 1.0;
         }
-        double widthKilometers = Math.max(1.0, (maxX - minX) / 1_000.0);
-        double heightKilometers = Math.max(1.0, (maxY - minY) / 1_000.0);
-        double depthKilometers = Math.max(1.0, (maxZ - minZ) / 1_000.0);
-        double volumeCubicKilometers = widthKilometers * heightKilometers * depthKilometers;
-        double firstTime = observed.get(0).timeSeconds();
-        double durationSeconds = Math.max(1.0, eventTime - firstTime + 1.0);
-        return observed.size() / (volumeCubicKilometers * durationSeconds);
+        if (bestCompatibility < 1.0) {
+            return 0.10;
+        }
+        if (bestCompatibility < 2.0) {
+            return 0.35;
+        }
+        if (bestCompatibility < 3.0) {
+            return 0.65;
+        }
+        return 1.0;
+    }
+
+    private static TrackRecord latestUpdatedBefore(
+            List<TrackRecord> records,
+            double timeSeconds) {
+        TrackRecord latest = null;
+        for (TrackRecord record : records) {
+            if (record.timeSeconds() >= timeSeconds - EPSILON) {
+                break;
+            }
+            if (record.updated()) {
+                latest = record;
+            }
+        }
+        return latest;
+    }
+
+    private static Bounds operatingBounds(
+            Map<String, List<TrackRecord>> tracks,
+            List<RecordedMeasurement> measurements,
+            List<BirthPoint> births) {
+        MutableBounds bounds = new MutableBounds();
+        for (List<TrackRecord> records : tracks.values()) {
+            for (TrackRecord record : records) {
+                double[] state = record.state();
+                bounds.include(state[0], state[1], state[2]);
+            }
+        }
+        for (RecordedMeasurement measurement : measurements) {
+            double[] mean = measurement.mean();
+            bounds.include(mean[0], mean[1], mean[2]);
+        }
+        for (BirthPoint birth : births) {
+            bounds.include(birth.xMeters(), birth.yMeters(), birth.zMeters());
+        }
+        return bounds.toBounds();
     }
 
     private static Map<String, List<TrackRecord>> groupTracks(List<TrackRecord> records) {
@@ -983,6 +1118,27 @@ public final class TrackStitchingAnalyzer {
         return result;
     }
 
+    private static double[] copyVector(double[] source, int size) {
+        if (source == null || source.length != size) {
+            throw new IllegalArgumentException("Unexpected vector size");
+        }
+        return source.clone();
+    }
+
+    private static double[][] copySquare(double[][] source, int size) {
+        if (source == null || source.length != size) {
+            throw new IllegalArgumentException("Unexpected matrix size");
+        }
+        double[][] copy = new double[size][size];
+        for (int row = 0; row < size; row++) {
+            if (source[row] == null || source[row].length != size) {
+                throw new IllegalArgumentException("Unexpected matrix size");
+            }
+            System.arraycopy(source[row], 0, copy[row], 0, size);
+        }
+        return copy;
+    }
+
     public record Configuration(
             double coastedMinimumSeconds,
             double coastedMaximumSeconds,
@@ -1024,6 +1180,17 @@ public final class TrackStitchingAnalyzer {
         }
     }
 
+    public record AnalysisResult(
+            List<EventResult> events,
+            List<SpatialDensitySnapshot> spatialDensityHistory) {
+        public AnalysisResult {
+            events = events == null ? List.of() : List.copyOf(events);
+            spatialDensityHistory = spatialDensityHistory == null
+                    ? List.of()
+                    : List.copyOf(spatialDensityHistory);
+        }
+    }
+
     public record Segment(
             String trackId,
             double formationTimeSeconds,
@@ -1048,7 +1215,25 @@ public final class TrackStitchingAnalyzer {
             List<OptimalAssignment> mahalanobisAssignments,
             List<OptimalAssignment> staticNllrAssignments,
             List<OptimalAssignment> learnedNllrAssignments,
-            double learnedBirthDensityPerCubicKilometerSecond) {
+            double learnedBirthDensityPerCubicKilometer,
+            List<PairDiagnostics> diagnostics) {
+        public EventResult {
+            allSegments = allSegments == null ? List.of() : List.copyOf(allSegments);
+            oldSegments = oldSegments == null ? List.of() : List.copyOf(oldSegments);
+            newSegments = newSegments == null ? List.of() : List.copyOf(newSegments);
+            pairs = pairs == null ? List.of() : List.copyOf(pairs);
+            nllAssignments = nllAssignments == null ? List.of() : List.copyOf(nllAssignments);
+            mahalanobisAssignments = mahalanobisAssignments == null
+                    ? List.of()
+                    : List.copyOf(mahalanobisAssignments);
+            staticNllrAssignments = staticNllrAssignments == null
+                    ? List.of()
+                    : List.copyOf(staticNllrAssignments);
+            learnedNllrAssignments = learnedNllrAssignments == null
+                    ? List.of()
+                    : List.copyOf(learnedNllrAssignments);
+            diagnostics = diagnostics == null ? List.of() : List.copyOf(diagnostics);
+        }
     }
 
     public record PairResult(
@@ -1086,6 +1271,96 @@ public final class TrackStitchingAnalyzer {
             double score) {
     }
 
+    public record PairDiagnostics(
+            PairResult result,
+            List<BankEvaluation> bankEvaluations) {
+        public PairDiagnostics {
+            if (result == null) {
+                throw new IllegalArgumentException("Pair result is required");
+            }
+            bankEvaluations = bankEvaluations == null ? List.of() : List.copyOf(bankEvaluations);
+        }
+    }
+
+    public record BankEvaluation(
+            String oldTrackId,
+            String newTrackId,
+            double timeSeconds,
+            double[] oldState,
+            double[][] oldCovariance,
+            double[] newState,
+            double[][] newCovariance,
+            double[] innovation,
+            double[][] innovationCovariance,
+            double mahalanobisDistance,
+            double innovationQuadratic,
+            double logDeterminant,
+            double negativeLogLikelihood,
+            double innovationVolumeCubicKilometers,
+            double staticLambdaEx,
+            double staticNegativeLogLikelihoodRatio,
+            double learnedBirthDensityPerCubicKilometer,
+            double learnedExpectedBirths,
+            double learnedQuerySigmaMeters,
+            double learnedNegativeLogLikelihoodRatio) {
+        public BankEvaluation {
+            oldState = copyVector(oldState, STATE_SIZE);
+            oldCovariance = copySquare(oldCovariance, STATE_SIZE);
+            newState = copyVector(newState, STATE_SIZE);
+            newCovariance = copySquare(newCovariance, STATE_SIZE);
+            innovation = copyVector(innovation, STATE_SIZE);
+            innovationCovariance = copySquare(innovationCovariance, STATE_SIZE);
+        }
+
+        @Override
+        public double[] oldState() {
+            return oldState.clone();
+        }
+
+        @Override
+        public double[][] oldCovariance() {
+            return copySquare(oldCovariance, STATE_SIZE);
+        }
+
+        @Override
+        public double[] newState() {
+            return newState.clone();
+        }
+
+        @Override
+        public double[][] newCovariance() {
+            return copySquare(newCovariance, STATE_SIZE);
+        }
+
+        @Override
+        public double[] innovation() {
+            return innovation.clone();
+        }
+
+        @Override
+        public double[][] innovationCovariance() {
+            return copySquare(innovationCovariance, STATE_SIZE);
+        }
+    }
+
+    public record SpatialDensitySnapshot(
+            double timeSeconds,
+            double meanDensityPerCubicKilometer,
+            double totalBirthEvidence,
+            double totalExposure,
+            double priorDensityPerCubicKilometer,
+            double cellMeters,
+            int xCells,
+            int yCells,
+            int zCells,
+            double minX,
+            double minY,
+            double minZ,
+            double maxX,
+            double maxY,
+            double maxZ) {
+    }
+
     record PropagatedState(double[] state, double[][] covariance) {
     }
 
@@ -1101,6 +1376,12 @@ public final class TrackStitchingAnalyzer {
     }
 
     private record TruthScore(double timeSeconds, double score, String targetId) {
+    }
+
+    private record BirthDensityQuery(
+            double densityPerCubicKilometer,
+            double expectedBirths,
+            double sigmaMeters) {
     }
 
     private enum Metric {
@@ -1141,7 +1422,412 @@ public final class TrackStitchingAnalyzer {
             double timeSeconds,
             double xMeters,
             double yMeters,
-            double zMeters) {
+            double zMeters,
+            double uncertaintyMeters,
+            double confidence) {
+    }
+
+    private static final class BirthDensityField {
+        private final List<BirthPoint> births;
+        private final double priorDensityPerCubicKilometer;
+        private final double maxX;
+        private final double maxY;
+        private final double maxZ;
+        private final double minX;
+        private final double minY;
+        private final double minZ;
+        private final double cellMeters;
+        private final double cellVolumeCubicKilometers;
+        private final int xCells;
+        private final int yCells;
+        private final int zCells;
+        private final double[] birthEvidence;
+        private final double[] exposure;
+        private int nextBirthIndex;
+        private double currentTimeSeconds;
+
+        private BirthDensityField(
+                List<BirthPoint> births,
+                double priorDensityPerCubicKilometer,
+                Bounds bounds,
+                double cellMeters) {
+            this.births = births;
+            this.priorDensityPerCubicKilometer = clampDensity(priorDensityPerCubicKilometer);
+            this.cellMeters = cellMeters;
+            this.minX = bounds.minX();
+            this.minY = bounds.minY();
+            this.minZ = bounds.minZ();
+            this.maxX = bounds.maxX();
+            this.maxY = bounds.maxY();
+            this.maxZ = bounds.maxZ();
+            this.xCells = Math.max(1, (int) Math.ceil((maxX - minX) / cellMeters));
+            this.yCells = Math.max(1, (int) Math.ceil((maxY - minY) / cellMeters));
+            this.zCells = Math.max(1, (int) Math.ceil((maxZ - minZ) / cellMeters));
+            this.cellVolumeCubicKilometers = Math.pow(cellMeters / 1_000.0, 3.0);
+            this.birthEvidence = new double[xCells * yCells * zCells];
+            this.exposure = new double[birthEvidence.length];
+            initializePrior();
+        }
+
+        static BirthDensityField create(
+                Map<String, List<TrackRecord>> tracks,
+                List<RecordedMeasurement> measurements,
+                Configuration configuration) {
+            List<BirthPoint> births = birthPoints(tracks);
+            Bounds rawBounds = operatingBounds(tracks, measurements, births);
+            double span = Math.max(rawBounds.maxX() - rawBounds.minX(),
+                    Math.max(rawBounds.maxY() - rawBounds.minY(),
+                            rawBounds.maxZ() - rawBounds.minZ()));
+            double cellMeters = Math.max(MINIMUM_SPATIAL_CELL_METERS,
+                    span / MAXIMUM_GRID_AXIS_CELLS);
+            Bounds paddedBounds = rawBounds.padded(Math.max(3.0 * cellMeters, 2_000.0));
+            return new BirthDensityField(
+                    births,
+                    configuration.birthRatePerCubicKilometer(),
+                    paddedBounds,
+                    cellMeters);
+        }
+
+        void advanceTo(double eventTimeSeconds) {
+            double dt = Math.max(0.0, eventTimeSeconds - currentTimeSeconds);
+            applyForgetting(dt);
+            addExposure();
+            while (nextBirthIndex < births.size()
+                    && births.get(nextBirthIndex).timeSeconds() <= eventTimeSeconds + EPSILON) {
+                depositBirthEvidence(births.get(nextBirthIndex));
+                nextBirthIndex++;
+            }
+            currentTimeSeconds = Math.max(currentTimeSeconds, eventTimeSeconds);
+        }
+
+        BirthDensityQuery queryExpectedBirths(
+                double[] centerMeters,
+                double[][] innovationCovariance,
+                double innovationVolumeCubicKilometers) {
+            if (centerMeters == null || centerMeters.length < 3
+                    || innovationVolumeCubicKilometers <= 0.0
+                    || !Double.isFinite(innovationVolumeCubicKilometers)) {
+                double fallbackVolume = Math.max(cellVolumeCubicKilometers,
+                        innovationVolumeCubicKilometers);
+                double expected = Math.max(MINIMUM_LAMBDA_EX,
+                        priorDensityPerCubicKilometer
+                                * fallbackVolume);
+                return new BirthDensityQuery(
+                        priorDensityPerCubicKilometer,
+                        expected,
+                        cellMeters);
+            }
+            double equivalentRadiusKilometers = Math.cbrt(
+                    3.0 * innovationVolumeCubicKilometers / (4.0 * Math.PI));
+            double uncertaintyKilometers = positionUncertaintyKilometers(innovationCovariance);
+            double sigmaMeters = Math.max(cellMeters,
+                    Math.max(equivalentRadiusKilometers, uncertaintyKilometers) * 1_000.0);
+            double density = smoothedDensity(centerMeters, sigmaMeters);
+            return new BirthDensityQuery(
+                    density,
+                    Math.max(MINIMUM_LAMBDA_EX,
+                            density * innovationVolumeCubicKilometers),
+                    sigmaMeters);
+        }
+
+        double meanDensityPerCubicKilometer() {
+            double weightedDensity = 0.0;
+            double totalExposure = 0.0;
+            for (int index = 0; index < birthEvidence.length; index++) {
+                double cellExposure = exposure[index];
+                if (cellExposure <= EPSILON) {
+                    continue;
+                }
+                weightedDensity += densityAt(index) * cellExposure;
+                totalExposure += cellExposure;
+            }
+            return totalExposure <= EPSILON
+                    ? priorDensityPerCubicKilometer
+                    : clampDensity(weightedDensity / totalExposure);
+        }
+
+        SpatialDensitySnapshot snapshot(double timeSeconds) {
+            return new SpatialDensitySnapshot(
+                    timeSeconds,
+                    meanDensityPerCubicKilometer(),
+                    totalBirthEvidence(),
+                    totalExposure(),
+                    priorDensityPerCubicKilometer,
+                    cellMeters,
+                    xCells,
+                    yCells,
+                    zCells,
+                    minX,
+                    minY,
+                    minZ,
+                    maxX,
+                    maxY,
+                    maxZ);
+        }
+
+        private double totalBirthEvidence() {
+            double total = 0.0;
+            for (double value : birthEvidence) {
+                total += value;
+            }
+            return total;
+        }
+
+        private double totalExposure() {
+            double total = 0.0;
+            for (double value : exposure) {
+                total += value;
+            }
+            return total;
+        }
+
+        private void initializePrior() {
+            double priorExposure = PRIOR_EXPOSURE_OPPORTUNITIES * cellVolumeCubicKilometers;
+            double priorEvidence = priorDensityPerCubicKilometer * priorExposure;
+            for (int index = 0; index < birthEvidence.length; index++) {
+                exposure[index] = priorExposure;
+                birthEvidence[index] = priorEvidence;
+            }
+        }
+
+        private void applyForgetting(double deltaTimeSeconds) {
+            if (deltaTimeSeconds <= EPSILON) {
+                return;
+            }
+            double decay = Math.pow(0.5,
+                    deltaTimeSeconds / FIELD_FORGETTING_HALF_LIFE_SECONDS);
+            for (int index = 0; index < birthEvidence.length; index++) {
+                birthEvidence[index] *= decay;
+                exposure[index] *= decay;
+            }
+        }
+
+        private void addExposure() {
+            for (int index = 0; index < exposure.length; index++) {
+                exposure[index] += cellVolumeCubicKilometers;
+            }
+        }
+
+        private void depositBirthEvidence(BirthPoint birth) {
+            if (birth.confidence() <= EPSILON) {
+                return;
+            }
+            double sigmaMeters = Math.max(cellMeters * 1.25, birth.uncertaintyMeters());
+            int minCellX = clampCellX((int) Math.floor((birth.xMeters() - minX
+                    - 3.0 * sigmaMeters) / cellMeters));
+            int maxCellX = clampCellX((int) Math.ceil((birth.xMeters() - minX
+                    + 3.0 * sigmaMeters) / cellMeters));
+            int minCellY = clampCellY((int) Math.floor((birth.yMeters() - minY
+                    - 3.0 * sigmaMeters) / cellMeters));
+            int maxCellY = clampCellY((int) Math.ceil((birth.yMeters() - minY
+                    + 3.0 * sigmaMeters) / cellMeters));
+            int minCellZ = clampCellZ((int) Math.floor((birth.zMeters() - minZ
+                    - 3.0 * sigmaMeters) / cellMeters));
+            int maxCellZ = clampCellZ((int) Math.ceil((birth.zMeters() - minZ
+                    + 3.0 * sigmaMeters) / cellMeters));
+            double weightSum = 0.0;
+            for (int z = minCellZ; z <= maxCellZ; z++) {
+                for (int y = minCellY; y <= maxCellY; y++) {
+                    for (int x = minCellX; x <= maxCellX; x++) {
+                        weightSum += gaussianWeight(
+                                cellCenterX(x) - birth.xMeters(),
+                                cellCenterY(y) - birth.yMeters(),
+                                cellCenterZ(z) - birth.zMeters(),
+                                sigmaMeters);
+                    }
+                }
+            }
+            if (weightSum <= EPSILON) {
+                return;
+            }
+            for (int z = minCellZ; z <= maxCellZ; z++) {
+                for (int y = minCellY; y <= maxCellY; y++) {
+                    for (int x = minCellX; x <= maxCellX; x++) {
+                        int index = index(x, y, z);
+                        double weight = gaussianWeight(
+                                cellCenterX(x) - birth.xMeters(),
+                                cellCenterY(y) - birth.yMeters(),
+                                cellCenterZ(z) - birth.zMeters(),
+                                sigmaMeters);
+                        birthEvidence[index] += birth.confidence() * weight / weightSum;
+                    }
+                }
+            }
+        }
+
+        private double smoothedDensity(double[] centerMeters, double sigmaMeters) {
+            int centerX = cellX(centerMeters[0]);
+            int centerY = cellY(centerMeters[1]);
+            int centerZ = cellZ(centerMeters[2]);
+            if (!inRange(centerX, centerY, centerZ)) {
+                return priorDensityPerCubicKilometer;
+            }
+            int radiusCells = Math.max(1, (int) Math.ceil(3.0 * sigmaMeters / cellMeters));
+            int minCellX = clampCellX(centerX - radiusCells);
+            int maxCellX = clampCellX(centerX + radiusCells);
+            int minCellY = clampCellY(centerY - radiusCells);
+            int maxCellY = clampCellY(centerY + radiusCells);
+            int minCellZ = clampCellZ(centerZ - radiusCells);
+            int maxCellZ = clampCellZ(centerZ + radiusCells);
+            double weightedDensity = 0.0;
+            double weightSum = 0.0;
+            for (int z = minCellZ; z <= maxCellZ; z++) {
+                for (int y = minCellY; y <= maxCellY; y++) {
+                    for (int x = minCellX; x <= maxCellX; x++) {
+                        double weight = gaussianWeight(
+                                cellCenterX(x) - centerMeters[0],
+                                cellCenterY(y) - centerMeters[1],
+                                cellCenterZ(z) - centerMeters[2],
+                                sigmaMeters);
+                        weightedDensity += densityAt(index(x, y, z)) * weight;
+                        weightSum += weight;
+                    }
+                }
+            }
+            return weightSum <= EPSILON
+                    ? priorDensityPerCubicKilometer
+                    : clampDensity(weightedDensity / weightSum);
+        }
+
+        private double densityAt(int index) {
+            if (exposure[index] <= EPSILON) {
+                return priorDensityPerCubicKilometer;
+            }
+            return clampDensity(birthEvidence[index] / exposure[index]);
+        }
+
+        private int index(int x, int y, int z) {
+            return (z * yCells + y) * xCells + x;
+        }
+
+        private int cellX(double xMeters) {
+            return (int) Math.floor((xMeters - minX) / cellMeters);
+        }
+
+        private int cellY(double yMeters) {
+            return (int) Math.floor((yMeters - minY) / cellMeters);
+        }
+
+        private int cellZ(double zMeters) {
+            return (int) Math.floor((zMeters - minZ) / cellMeters);
+        }
+
+        private boolean inRange(int x, int y, int z) {
+            return x >= 0 && x < xCells
+                    && y >= 0 && y < yCells
+                    && z >= 0 && z < zCells;
+        }
+
+        private int clampCellX(int value) {
+            return Math.max(0, Math.min(xCells - 1, value));
+        }
+
+        private int clampCellY(int value) {
+            return Math.max(0, Math.min(yCells - 1, value));
+        }
+
+        private int clampCellZ(int value) {
+            return Math.max(0, Math.min(zCells - 1, value));
+        }
+
+        private double cellCenterX(int x) {
+            return minX + (x + 0.5) * cellMeters;
+        }
+
+        private double cellCenterY(int y) {
+            return minY + (y + 0.5) * cellMeters;
+        }
+
+        private double cellCenterZ(int z) {
+            return minZ + (z + 0.5) * cellMeters;
+        }
+
+        private static double positionUncertaintyKilometers(double[][] covariance) {
+            if (covariance == null || covariance.length < 3) {
+                return 0.0;
+            }
+            double variance = Math.max(0.0,
+                    covariance[0][0] + covariance[1][1] + covariance[2][2]);
+            return Math.sqrt(variance / 3.0) / 1_000.0;
+        }
+
+        private static double gaussianWeight(
+                double dxMeters,
+                double dyMeters,
+                double dzMeters,
+                double sigmaMeters) {
+            double sigma = Math.max(1.0, sigmaMeters);
+            double distanceSquared = dxMeters * dxMeters
+                    + dyMeters * dyMeters
+                    + dzMeters * dzMeters;
+            return Math.exp(-0.5 * distanceSquared / (sigma * sigma));
+        }
+
+        private static double clampDensity(double densityPerCubicKilometer) {
+            if (!Double.isFinite(densityPerCubicKilometer)) {
+                return MINIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER;
+            }
+            return Math.max(MINIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER,
+                    Math.min(MAXIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER,
+                            densityPerCubicKilometer));
+        }
+    }
+
+    private record Bounds(
+            double minX,
+            double minY,
+            double minZ,
+            double maxX,
+            double maxY,
+            double maxZ) {
+        Bounds padded(double paddingMeters) {
+            return new Bounds(
+                    minX - paddingMeters,
+                    minY - paddingMeters,
+                    minZ - paddingMeters,
+                    maxX + paddingMeters,
+                    maxY + paddingMeters,
+                    maxZ + paddingMeters);
+        }
+    }
+
+    private static final class MutableBounds {
+        private double minX = Double.POSITIVE_INFINITY;
+        private double minY = Double.POSITIVE_INFINITY;
+        private double minZ = Double.POSITIVE_INFINITY;
+        private double maxX = Double.NEGATIVE_INFINITY;
+        private double maxY = Double.NEGATIVE_INFINITY;
+        private double maxZ = Double.NEGATIVE_INFINITY;
+
+        void include(double x, double y, double z) {
+            if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
+                return;
+            }
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            minZ = Math.min(minZ, z);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+            maxZ = Math.max(maxZ, z);
+        }
+
+        Bounds toBounds() {
+            if (!Double.isFinite(minX)) {
+                return new Bounds(-500.0, -500.0, -500.0, 500.0, 500.0, 500.0);
+            }
+            double span = Math.max(maxX - minX, Math.max(maxY - minY, maxZ - minZ));
+            if (span < MINIMUM_SPATIAL_CELL_METERS) {
+                double pad = (MINIMUM_SPATIAL_CELL_METERS - span) / 2.0;
+                return new Bounds(
+                        minX - pad,
+                        minY - pad,
+                        minZ - pad,
+                        maxX + pad,
+                        maxY + pad,
+                        maxZ + pad);
+            }
+            return new Bounds(minX, minY, minZ, maxX, maxY, maxZ);
+        }
     }
 
     private record CholeskyResult(double[][] lower, double logDeterminant) {

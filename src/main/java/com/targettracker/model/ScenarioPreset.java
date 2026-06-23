@@ -17,6 +17,7 @@ public enum ScenarioPreset {
     MERGE_AND_FAN("4 targets — merge, cluster, and fan out", 4),
     SINGLE_TARGET_BLACKOUT("1 target — straight through blackout", 1, 15 * 60),
     MULTI_TARGET_BLACKOUT("5 targets — staggered blackout crossing", 5, 15 * 60),
+    MOVE_STOP_BLACKOUT_DEPARTURES("11 targets — move-stop blackout departures", 11, 15 * 60),
     AIRPORT_BLACKOUT("13 targets — airport hangar blackouts", 13, 20 * 60);
 
     private final String displayName;

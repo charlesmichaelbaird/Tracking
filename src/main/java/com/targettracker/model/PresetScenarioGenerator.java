@@ -23,7 +23,10 @@ public final class PresetScenarioGenerator {
         for (int index = 0; index < targets.size(); index++) {
             TargetTrajectory target = targets.get(index);
             TargetPlan plan = plans.get(index);
-            double spreadStep = preset == ScenarioPreset.AIRPORT_BLACKOUT ? 0.015 : 0.04;
+            double spreadStep = switch (preset) {
+                case AIRPORT_BLACKOUT, MOVE_STOP_BLACKOUT_DEPARTURES -> 0.015;
+                default -> 0.04;
+            };
             double spreadFactor = targets.size() == 1
                     ? 1.0
                     : 1.0 + (index - (targets.size() - 1) / 2.0) * spreadStep;
@@ -106,6 +109,7 @@ public final class PresetScenarioGenerator {
                     plan(SpeedShape.CONSTANT, p(-0.68, 0.06), p(0.68, 0.25)),
                     plan(SpeedShape.CONSTANT, p(0.68, -0.24), p(-0.68, -0.02)),
                     plan(SpeedShape.CONSTANT, p(0.68, 0.18), p(-0.68, 0.30)));
+            case MOVE_STOP_BLACKOUT_DEPARTURES -> moveStopBlackoutDeparturePlans();
             case AIRPORT_BLACKOUT -> airportPlans();
             case USER_GENERATED -> throw new IllegalArgumentException(
                     "User-generated mode has no preset paths");
@@ -167,6 +171,14 @@ public final class PresetScenarioGenerator {
                             0.03 * lengthMeters,
                             Math.max(10_000.0, lengthMeters * 0.50),
                             Math.max(6_000.0, lengthMeters * 0.34)));
+            case MOVE_STOP_BLACKOUT_DEPARTURES -> model.addBlackoutRegion(
+                    BlackoutRegion.fromLocal(
+                            "Move-stop departure blackout",
+                            parameters.origin(),
+                            0.0,
+                            0.0,
+                            Math.max(2_500.0, lengthMeters * 0.055),
+                            Math.max(2_500.0, lengthMeters * 0.055)));
             case AIRPORT_BLACKOUT -> {
                 model.addBlackoutRegion(BlackoutRegion.fromLocal(
                         "West hangar blackout",
@@ -258,6 +270,32 @@ public final class PresetScenarioGenerator {
                         p(0.10, -0.074), p(0.00, -0.05), p(-0.24, -0.12), p(-0.68, -0.42)),
                 planWindow(SpeedShape.STOP_TO_MOVE, 0.68, 1.0,
                         p(-0.09, 0.076), p(0.02, 0.02), p(0.26, -0.03), p(0.70, -0.26)));
+    }
+
+    private static List<TargetPlan> moveStopBlackoutDeparturePlans() {
+        return List.of(
+                plan(SpeedShape.MOVE_TO_STOP,
+                        p(-0.68, 0.0), p(-0.18, 0.0), p(0.0, 0.0)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.00, 1.0,
+                        p(-0.014, -0.010), p(0.12, -0.08), p(0.62, -0.38)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.03, 1.0,
+                        p(-0.010, 0.012), p(0.12, 0.08), p(0.64, 0.32)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.06, 1.0,
+                        p(0.012, -0.012), p(-0.12, -0.08), p(-0.64, -0.30)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.09, 1.0,
+                        p(0.014, 0.010), p(-0.12, 0.08), p(-0.62, 0.36)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.12, 1.0,
+                        p(-0.006, -0.014), p(0.30, -0.16), p(0.68, -0.08)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.15, 1.0,
+                        p(0.006, 0.014), p(-0.30, 0.14), p(-0.68, 0.06)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.18, 1.0,
+                        p(-0.016, 0.004), p(0.10, 0.20), p(0.48, 0.52)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.22, 1.0,
+                        p(0.016, -0.004), p(-0.10, -0.20), p(-0.48, -0.52)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.27, 1.0,
+                        p(-0.004, 0.016), p(0.12, 0.02), p(0.68, 0.18)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.30, 1.0,
+                        p(0.004, -0.016), p(-0.12, -0.02), p(-0.68, -0.18)));
     }
 
     private static LocalPoint p(double east, double north) {

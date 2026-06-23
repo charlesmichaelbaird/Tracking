@@ -353,7 +353,7 @@ public final class TrackerFrame extends JFrame {
         sensorParametersPanel.refreshBlackoutRegions();
         earthMapCanvas.repaint();
         timelinePanel.refresh();
-        statusLabel.setText("Added blackout region %s".formatted(region.name()));
+        statusLabel.setText("Added blackout region");
     }
 
     private void loadPresetScenario(

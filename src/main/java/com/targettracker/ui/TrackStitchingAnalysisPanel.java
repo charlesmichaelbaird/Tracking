@@ -1,5 +1,6 @@
 package com.targettracker.ui;
 
+import com.targettracker.analysis.TrackStitchingAnalysisExporter;
 import com.targettracker.analysis.TrackStitchingAnalyzer;
 import com.targettracker.recording.RecordedMeasurement;
 import com.targettracker.recording.RecordedScenario;
@@ -30,6 +31,9 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -47,6 +51,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final Runnable closeAction;
     private final Consumer<String> statusConsumer;
     private final TrackStitchingAnalyzer analyzer = new TrackStitchingAnalyzer();
+    private final TrackStitchingAnalysisExporter exporter = new TrackStitchingAnalysisExporter();
     private final JTabbedPane eventTabs = new JTabbedPane(JTabbedPane.TOP);
     private final JTextArea summaryArea = new JTextArea();
     private final JTextArea assignmentArea = new JTextArea();
@@ -66,13 +71,18 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final JTextField resolutionField = new JTextField("0.5", 7);
     private final JTextField falseAlarmRateField = new JTextField("1e-6", 8);
     private final JTextField birthRateField = new JTextField("1e-6", 8);
+    private final JTextField outputDirectoryField = new JTextField("", 18);
     private final JButton analyzeButton = new JButton("Run stitching analysis");
+    private final JButton exportButton = new JButton("Output data to folder");
     private final JToggleButton feasibilityButton = new JToggleButton("Feasibility", true);
     private final JToggleButton alternativeButton = new JToggleButton("Alternative Hypothesis");
     private final JToggleButton showAllButton = new JToggleButton("All", true);
     private final JToggleButton showGreyedButton = new JToggleButton("Greyed");
     private final JToggleButton showOnlyButton = new JToggleButton("Only Stitched");
     private List<TrackStitchingAnalyzer.EventResult> events = List.of();
+    private TrackStitchingAnalyzer.AnalysisResult analysisResult =
+            new TrackStitchingAnalyzer.AnalysisResult(List.of(), List.of());
+    private TrackStitchingAnalyzer.Configuration latestConfiguration;
     private boolean active = true;
 
     private enum ScoreMode {
@@ -106,6 +116,10 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         newWindow = new TimeRangeControl(
                 "Allowed new-track age", maximumWindowSeconds,
                 0, Math.min(60, maximumWindowSeconds));
+        Path defaultOutputParent = scenario.folder().getParent() == null
+                ? scenario.folder()
+                : scenario.folder().getParent();
+        outputDirectoryField.setText(defaultOutputParent.toString());
 
         eventTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         eventTabs.setBorder(BorderFactory.createCompoundBorder(
@@ -138,6 +152,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         showAllButton.addActionListener(event -> updateSelectedEvent());
         showGreyedButton.addActionListener(event -> updateSelectedEvent());
         showOnlyButton.addActionListener(event -> updateSelectedEvent());
+        exportButton.addActionListener(event -> exportAnalysis());
         runAnalysis();
     }
 
@@ -188,11 +203,36 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         analyzeButton.setAlignmentX(LEFT_ALIGNMENT);
         analyzeButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
         panel.add(analyzeButton);
+        panel.add(Box.createVerticalStrut(10));
+        panel.add(createExportPanel());
         panel.add(Box.createVerticalStrut(7));
         statusLabel.setForeground(new Color(80, 92, 104));
         statusLabel.setAlignmentX(LEFT_ALIGNMENT);
         panel.add(statusLabel);
         panel.add(Box.createVerticalGlue());
+        return panel;
+    }
+
+    private JPanel createExportPanel() {
+        JPanel panel = new JPanel(new BorderLayout(6, 5));
+        panel.setOpaque(false);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 82));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder("Data export"),
+                BorderFactory.createEmptyBorder(3, 4, 5, 4)));
+        JLabel label = new JLabel("Output parent folder");
+        label.setForeground(new Color(69, 79, 90));
+        panel.add(label, BorderLayout.NORTH);
+
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setOpaque(false);
+        outputDirectoryField.setToolTipText(
+                "Parent directory. Export creates a scenario/date-time subfolder here.");
+        row.add(outputDirectoryField, BorderLayout.CENTER);
+        exportButton.setToolTipText("Write full Track Stitching Analysis CSV dump");
+        row.add(exportButton, BorderLayout.EAST);
+        panel.add(row, BorderLayout.CENTER);
         return panel;
     }
 
@@ -213,25 +253,43 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         allowDeadTracks.setAlignmentX(LEFT_ALIGNMENT);
         timingPanel.add(allowDeadTracks);
 
+        JPanel alternativeColumn = new JPanel(new BorderLayout());
+        alternativeColumn.setOpaque(false);
+        alternativeColumn.add(createAlternativeHypothesisPanel(), BorderLayout.NORTH);
+
         panel.add(timingPanel, BorderLayout.CENTER);
-        panel.add(createAlternativeHypothesisPanel(), BorderLayout.EAST);
+        panel.add(alternativeColumn, BorderLayout.EAST);
         return panel;
     }
 
     private JPanel createAlternativeHypothesisPanel() {
-        JPanel panel = new JPanel(new GridLayout(0, 2, 6, 5));
+        JPanel panel = new JPanel(new GridLayout(0, 2, 5, 2));
         panel.setOpaque(false);
         panel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.setPreferredSize(new Dimension(260, 86));
-        panel.setMaximumSize(new Dimension(280, 92));
-        panel.setBorder(BorderFactory.createTitledBorder("Alternative Hypothesis"));
+        panel.setPreferredSize(new Dimension(244, 66));
+        panel.setMinimumSize(new Dimension(244, 66));
+        panel.setMaximumSize(new Dimension(252, 70));
+        javax.swing.border.TitledBorder titleBorder =
+                BorderFactory.createTitledBorder("Alternative Hypothesis");
+        titleBorder.setTitleFont(titleBorder.getTitleFont().deriveFont(Font.PLAIN, 11f));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                titleBorder,
+                BorderFactory.createEmptyBorder(0, 4, 3, 4)));
         falseAlarmRateField.setToolTipText("Expected false alarms per 1 km^3 innovation volume");
         birthRateField.setToolTipText("Expected target births per 1 km^3 innovation volume");
-        panel.add(new JLabel("False alarms / km^3"));
+        falseAlarmRateField.setColumns(7);
+        birthRateField.setColumns(7);
+        panel.add(compactLabel("False alarms / km^3"));
         panel.add(falseAlarmRateField);
-        panel.add(new JLabel("Target births / km^3"));
+        panel.add(compactLabel("Target births / km^3"));
         panel.add(birthRateField);
         return panel;
+    }
+
+    private static JLabel compactLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.PLAIN, 11f));
+        return label;
     }
 
     private JPanel createVisibilityPanel() {
@@ -305,12 +363,16 @@ final class TrackStitchingAnalysisPanel extends JPanel {
 
     private static void styleScoreModeButton(JToggleButton button, boolean selected) {
         button.setOpaque(true);
+        button.setFocusPainted(false);
+        button.setFont(button.getFont().deriveFont(selected ? Font.BOLD : Font.PLAIN));
         if (selected) {
-            button.setBackground(new Color(48, 84, 128));
-            button.setForeground(Color.WHITE);
+            button.setBackground(new Color(188, 193, 199));
+            button.setForeground(Color.BLACK);
+            button.setBorder(BorderFactory.createLineBorder(new Color(91, 98, 106)));
         } else {
-            button.setBackground(new Color(222, 226, 232));
-            button.setForeground(new Color(98, 106, 116));
+            button.setBackground(new Color(241, 243, 245));
+            button.setForeground(new Color(67, 74, 82));
+            button.setBorder(BorderFactory.createLineBorder(new Color(178, 184, 190)));
         }
     }
 
@@ -376,7 +438,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                         resolution,
                         falseAlarmRate,
                         birthRate);
+        latestConfiguration = configuration;
         analyzeButton.setEnabled(false);
+        exportButton.setEnabled(false);
         statusLabel.setText("Analyzing measurement times...");
         eventTabs.removeAll();
         eventTabs.addTab("Analyzing...", emptyTabBody());
@@ -384,11 +448,11 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         mapCanvas.clearStitchingFocus();
         clearOutput();
 
-        SwingWorker<List<TrackStitchingAnalyzer.EventResult>, Void> worker =
+        SwingWorker<TrackStitchingAnalyzer.AnalysisResult, Void> worker =
                 new SwingWorker<>() {
                     @Override
-                    protected List<TrackStitchingAnalyzer.EventResult> doInBackground() {
-                        return analyzer.analyze(scenario, configuration);
+                    protected TrackStitchingAnalyzer.AnalysisResult doInBackground() {
+                        return analyzer.analyzeDetailed(scenario, configuration);
                     }
 
                     @Override
@@ -398,9 +462,11 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                         }
                         analyzeButton.setEnabled(true);
                         try {
-                            events = get();
+                            analysisResult = get();
+                            events = analysisResult.events();
                             populateEventTabs();
                             statusLabel.setText(events.size() + " candidate timestamp(s)");
+                            exportButton.setEnabled(true);
                         } catch (InterruptedException exception) {
                             Thread.currentThread().interrupt();
                             statusLabel.setText("Analysis interrupted");
@@ -408,10 +474,65 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                             statusLabel.setText("Analysis failed: "
                                     + exception.getCause().getMessage());
                             events = List.of();
+                            analysisResult = new TrackStitchingAnalyzer.AnalysisResult(
+                                    List.of(), List.of());
                             populateEventTabs();
                         }
                     }
                 };
+        worker.execute();
+    }
+
+    private void exportAnalysis() {
+        if (latestConfiguration == null) {
+            statusLabel.setText("Run stitching analysis before exporting");
+            return;
+        }
+        final Path parentDirectory;
+        try {
+            parentDirectory = Paths.get(outputDirectoryField.getText().trim())
+                    .toAbsolutePath()
+                    .normalize();
+            outputDirectoryField.setBackground(Color.WHITE);
+        } catch (RuntimeException exception) {
+            outputDirectoryField.setBackground(new Color(255, 224, 224));
+            statusLabel.setText("Enter a valid output folder");
+            return;
+        }
+
+        exportButton.setEnabled(false);
+        analyzeButton.setEnabled(false);
+        statusLabel.setText("Exporting stitching analysis data...");
+        SwingWorker<Path, Void> worker = new SwingWorker<>() {
+            @Override
+            protected Path doInBackground() throws IOException {
+                return exporter.export(
+                        scenario,
+                        analysisResult,
+                        latestConfiguration,
+                        parentDirectory);
+            }
+
+            @Override
+            protected void done() {
+                if (!active) {
+                    return;
+                }
+                analyzeButton.setEnabled(true);
+                exportButton.setEnabled(true);
+                try {
+                    Path output = get();
+                    statusLabel.setText("Exported to " + output);
+                    statusConsumer.accept("Track stitching data exported to " + output);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    statusLabel.setText("Export interrupted");
+                } catch (ExecutionException exception) {
+                    statusLabel.setText("Export failed: "
+                            + exception.getCause().getMessage());
+                }
+            }
+        };
         worker.execute();
     }
 
@@ -570,8 +691,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             ScoreMode mode) {
         StringBuilder text = new StringBuilder();
         text.append("Learned null birth density:\n  ")
-                .append(formatScientific(event.learnedBirthDensityPerCubicKilometerSecond()))
-                .append(" births / km^3 / s\n\n");
+                .append(formatScientific(event.learnedBirthDensityPerCubicKilometer()))
+                .append(" births / km^3\n\n");
         if (mode == ScoreMode.ALTERNATIVE) {
             appendAssignments(text, "Static/uniform NLLR optimum", event.staticNllrAssignments());
             appendAssignments(text, "Learned spatial NLLR optimum", event.learnedNllrAssignments());

@@ -84,7 +84,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 || !Double.isFinite(pair.simpleStaticNegativeLogLikelihoodRatio())
                 || !Double.isFinite(pair.simpleLearnedNegativeLogLikelihoodRatio())
                 || !Double.isFinite(events.get(0)
-                .learnedBirthDensityPerCubicKilometerSecond())) {
+                .learnedBirthDensityPerCubicKilometer())) {
             throw new AssertionError("Alternative-hypothesis NLLR outputs should be available");
         }
 
