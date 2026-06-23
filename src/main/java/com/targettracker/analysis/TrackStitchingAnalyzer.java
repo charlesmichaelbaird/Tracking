@@ -22,11 +22,10 @@ public final class TrackStitchingAnalyzer {
     private static final double MINIMUM_LAMBDA_EX = 1.0e-300;
     private static final double CUBIC_METERS_PER_CUBIC_KILOMETER = 1.0e9;
     private static final double MINIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e-12;
-    private static final double MAXIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0;
-    private static final double PRIOR_EXPOSURE_OPPORTUNITIES = 1.0;
+    private static final double MAXIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e3;
     private static final double FIELD_FORGETTING_HALF_LIFE_SECONDS = 30.0 * 60.0;
-    private static final double MINIMUM_SPATIAL_CELL_METERS = 1_000.0;
-    private static final double MAXIMUM_GRID_AXIS_CELLS = 20.0;
+    private static final double MINIMUM_SPATIAL_KERNEL_METERS = 1_000.0;
+    private static final double MAXIMUM_SPATIAL_KERNEL_METERS = 10_000.0;
 
     public List<EventResult> analyze(RecordedScenario scenario, Configuration configuration) {
         return analyzeDetailed(scenario, configuration).events();
@@ -37,10 +36,10 @@ public final class TrackStitchingAnalyzer {
             Configuration configuration) {
         Map<String, List<TrackRecord>> tracks = groupTracks(scenario.records());
         Map<String, List<GroundTruthRecord>> truth = groupTruth(scenario.groundTruth());
-        BirthDensityField learnedBirthDensityField = BirthDensityField.create(
-                tracks, scenario.measurements(), configuration);
         Map<String, List<RecordedMeasurement>> measurementsByTrack =
                 associateMeasurements(tracks, scenario.measurements());
+        BirthDensityField learnedBirthDensityField = BirthDensityField.create(
+                tracks, measurementsByTrack, scenario.measurements(), configuration);
         TreeSet<Double> measurementTimes = new TreeSet<>();
         scenario.measurements().stream()
                 .map(RecordedMeasurement::timeSeconds)
@@ -787,39 +786,42 @@ public final class TrackStitchingAnalyzer {
                 .orElse(fallback);
     }
 
-    private static List<BirthPoint> birthPoints(Map<String, List<TrackRecord>> tracks) {
+    private static List<BirthPoint> birthPoints(
+            Map<String, List<TrackRecord>> tracks,
+            Map<String, List<RecordedMeasurement>> measurementsByTrack) {
         List<BirthPoint> births = new ArrayList<>();
         for (Map.Entry<String, List<TrackRecord>> entry : tracks.entrySet()) {
-            List<TrackRecord> records = entry.getValue();
-            if (records.isEmpty()) {
+            List<RecordedMeasurement> measurements = measurementsByTrack.get(entry.getKey());
+            if (measurements == null || measurements.isEmpty()) {
                 continue;
             }
-            TrackRecord birth = records.get(0);
-            double[] state = birth.state();
+            RecordedMeasurement birth = measurements.get(0);
+            double[] mean = birth.mean();
             births.add(new BirthPoint(
                     birth.timeSeconds(),
-                    state[0],
-                    state[1],
-                    state[2],
-                    birthUncertaintyMeters(birth),
+                    mean[0],
+                    mean[1],
+                    mean[2],
+                    measurementUncertaintyMeters(birth),
                     birthConfidence(entry.getKey(), birth, tracks)));
         }
         births.sort(Comparator.comparingDouble(BirthPoint::timeSeconds));
         return List.copyOf(births);
     }
 
-    private static double birthUncertaintyMeters(TrackRecord birth) {
+    private static double measurementUncertaintyMeters(RecordedMeasurement birth) {
         double[][] covariance = birth.covariance();
         double variance = Math.max(0.0,
                 covariance[0][0] + covariance[1][1] + covariance[2][2]);
-        return Math.max(250.0, Math.min(10_000.0, Math.sqrt(variance)));
+        return Math.max(250.0, Math.min(MAXIMUM_SPATIAL_KERNEL_METERS, Math.sqrt(variance)));
     }
 
     private static double birthConfidence(
             String birthTrackId,
-            TrackRecord birth,
+            RecordedMeasurement birth,
             Map<String, List<TrackRecord>> tracks) {
         double bestCompatibility = Double.POSITIVE_INFINITY;
+        double[] mean = birth.mean();
         for (Map.Entry<String, List<TrackRecord>> entry : tracks.entrySet()) {
             if (entry.getKey().equals(birthTrackId)) {
                 continue;
@@ -829,11 +831,18 @@ public final class TrackStitchingAnalyzer {
                 continue;
             }
             PropagatedState prediction = predictOld(prior, birth.timeSeconds());
+            double[] measurementState = {
+                    mean[0], mean[1], mean[2], mean[3], mean[4], mean[5], 0.0, 0.0, 0.0};
             double distance = Math.sqrt(positionDistanceSquared(
-                    prediction.state(), birth.state()));
-            double[][] covariance = add(prediction.covariance(), birth.covariance());
+                    prediction.state(), measurementState));
+            double[][] measurementCovariance = birth.covariance();
+            double[][] predictionCovariance = prediction.covariance();
             double oneSigma = Math.sqrt(Math.max(1.0,
-                    covariance[0][0] + covariance[1][1] + covariance[2][2]));
+                    predictionCovariance[0][0] + predictionCovariance[1][1]
+                            + predictionCovariance[2][2]
+                            + measurementCovariance[0][0]
+                            + measurementCovariance[1][1]
+                            + measurementCovariance[2][2]));
             bestCompatibility = Math.min(bestCompatibility,
                     distance / Math.max(500.0, 3.0 * oneSigma));
         }
@@ -1345,14 +1354,12 @@ public final class TrackStitchingAnalyzer {
 
     public record SpatialDensitySnapshot(
             double timeSeconds,
-            double meanDensityPerCubicKilometer,
-            double totalBirthEvidence,
-            double totalExposure,
+            double representativeDensityPerCubicKilometer,
+            double peakDensityPerCubicKilometer,
+            double totalComponentWeight,
+            int activeComponentCount,
             double priorDensityPerCubicKilometer,
-            double cellMeters,
-            int xCells,
-            int yCells,
-            int zCells,
+            double kernelSigmaMeters,
             double minX,
             double minY,
             double minZ,
@@ -1429,20 +1436,10 @@ public final class TrackStitchingAnalyzer {
 
     private static final class BirthDensityField {
         private final List<BirthPoint> births;
+        private final List<BirthPoint> activeBirths = new ArrayList<>();
         private final double priorDensityPerCubicKilometer;
-        private final double maxX;
-        private final double maxY;
-        private final double maxZ;
-        private final double minX;
-        private final double minY;
-        private final double minZ;
-        private final double cellMeters;
-        private final double cellVolumeCubicKilometers;
-        private final int xCells;
-        private final int yCells;
-        private final int zCells;
-        private final double[] birthEvidence;
-        private final double[] exposure;
+        private final Bounds bounds;
+        private final double kernelSigmaMeters;
         private int nextBirthIndex;
         private double currentTimeSeconds;
 
@@ -1450,51 +1447,37 @@ public final class TrackStitchingAnalyzer {
                 List<BirthPoint> births,
                 double priorDensityPerCubicKilometer,
                 Bounds bounds,
-                double cellMeters) {
+                double kernelSigmaMeters) {
             this.births = births;
             this.priorDensityPerCubicKilometer = clampDensity(priorDensityPerCubicKilometer);
-            this.cellMeters = cellMeters;
-            this.minX = bounds.minX();
-            this.minY = bounds.minY();
-            this.minZ = bounds.minZ();
-            this.maxX = bounds.maxX();
-            this.maxY = bounds.maxY();
-            this.maxZ = bounds.maxZ();
-            this.xCells = Math.max(1, (int) Math.ceil((maxX - minX) / cellMeters));
-            this.yCells = Math.max(1, (int) Math.ceil((maxY - minY) / cellMeters));
-            this.zCells = Math.max(1, (int) Math.ceil((maxZ - minZ) / cellMeters));
-            this.cellVolumeCubicKilometers = Math.pow(cellMeters / 1_000.0, 3.0);
-            this.birthEvidence = new double[xCells * yCells * zCells];
-            this.exposure = new double[birthEvidence.length];
-            initializePrior();
+            this.bounds = bounds;
+            this.kernelSigmaMeters = kernelSigmaMeters;
         }
 
         static BirthDensityField create(
                 Map<String, List<TrackRecord>> tracks,
+                Map<String, List<RecordedMeasurement>> measurementsByTrack,
                 List<RecordedMeasurement> measurements,
                 Configuration configuration) {
-            List<BirthPoint> births = birthPoints(tracks);
+            List<BirthPoint> births = birthPoints(tracks, measurementsByTrack);
             Bounds rawBounds = operatingBounds(tracks, measurements, births);
             double span = Math.max(rawBounds.maxX() - rawBounds.minX(),
                     Math.max(rawBounds.maxY() - rawBounds.minY(),
                             rawBounds.maxZ() - rawBounds.minZ()));
-            double cellMeters = Math.max(MINIMUM_SPATIAL_CELL_METERS,
-                    span / MAXIMUM_GRID_AXIS_CELLS);
-            Bounds paddedBounds = rawBounds.padded(Math.max(3.0 * cellMeters, 2_000.0));
+            double kernelSigmaMeters = Math.max(MINIMUM_SPATIAL_KERNEL_METERS,
+                    Math.min(MAXIMUM_SPATIAL_KERNEL_METERS, span / 80.0));
+            Bounds paddedBounds = rawBounds.padded(Math.max(3.0 * kernelSigmaMeters, 2_000.0));
             return new BirthDensityField(
                     births,
                     configuration.birthRatePerCubicKilometer(),
                     paddedBounds,
-                    cellMeters);
+                    kernelSigmaMeters);
         }
 
         void advanceTo(double eventTimeSeconds) {
-            double dt = Math.max(0.0, eventTimeSeconds - currentTimeSeconds);
-            applyForgetting(dt);
-            addExposure();
             while (nextBirthIndex < births.size()
                     && births.get(nextBirthIndex).timeSeconds() <= eventTimeSeconds + EPSILON) {
-                depositBirthEvidence(births.get(nextBirthIndex));
+                activeBirths.add(births.get(nextBirthIndex));
                 nextBirthIndex++;
             }
             currentTimeSeconds = Math.max(currentTimeSeconds, eventTimeSeconds);
@@ -1507,239 +1490,99 @@ public final class TrackStitchingAnalyzer {
             if (centerMeters == null || centerMeters.length < 3
                     || innovationVolumeCubicKilometers <= 0.0
                     || !Double.isFinite(innovationVolumeCubicKilometers)) {
-                double fallbackVolume = Math.max(cellVolumeCubicKilometers,
-                        innovationVolumeCubicKilometers);
-                double expected = Math.max(MINIMUM_LAMBDA_EX,
-                        priorDensityPerCubicKilometer
-                                * fallbackVolume);
+                double fallbackVolume = Math.max(1.0e-9, innovationVolumeCubicKilometers);
                 return new BirthDensityQuery(
                         priorDensityPerCubicKilometer,
-                        expected,
-                        cellMeters);
+                        Math.max(MINIMUM_LAMBDA_EX,
+                                priorDensityPerCubicKilometer * fallbackVolume),
+                        kernelSigmaMeters);
             }
             double equivalentRadiusKilometers = Math.cbrt(
                     3.0 * innovationVolumeCubicKilometers / (4.0 * Math.PI));
             double uncertaintyKilometers = positionUncertaintyKilometers(innovationCovariance);
-            double sigmaMeters = Math.max(cellMeters,
+            double querySigmaMeters = Math.max(MINIMUM_SPATIAL_KERNEL_METERS,
                     Math.max(equivalentRadiusKilometers, uncertaintyKilometers) * 1_000.0);
-            double density = smoothedDensity(centerMeters, sigmaMeters);
+            double density = densityAt(centerMeters, querySigmaMeters);
             return new BirthDensityQuery(
                     density,
                     Math.max(MINIMUM_LAMBDA_EX,
                             density * innovationVolumeCubicKilometers),
-                    sigmaMeters);
+                    querySigmaMeters);
         }
 
         double meanDensityPerCubicKilometer() {
-            double weightedDensity = 0.0;
-            double totalExposure = 0.0;
-            for (int index = 0; index < birthEvidence.length; index++) {
-                double cellExposure = exposure[index];
-                if (cellExposure <= EPSILON) {
-                    continue;
-                }
-                weightedDensity += densityAt(index) * cellExposure;
-                totalExposure += cellExposure;
-            }
-            return totalExposure <= EPSILON
-                    ? priorDensityPerCubicKilometer
-                    : clampDensity(weightedDensity / totalExposure);
+            return representativeDensityPerCubicKilometer();
         }
 
         SpatialDensitySnapshot snapshot(double timeSeconds) {
             return new SpatialDensitySnapshot(
                     timeSeconds,
-                    meanDensityPerCubicKilometer(),
-                    totalBirthEvidence(),
-                    totalExposure(),
+                    representativeDensityPerCubicKilometer(),
+                    peakDensityPerCubicKilometer(),
+                    totalActiveWeight(),
+                    activeBirths.size(),
                     priorDensityPerCubicKilometer,
-                    cellMeters,
-                    xCells,
-                    yCells,
-                    zCells,
-                    minX,
-                    minY,
-                    minZ,
-                    maxX,
-                    maxY,
-                    maxZ);
+                    kernelSigmaMeters,
+                    bounds.minX(),
+                    bounds.minY(),
+                    bounds.minZ(),
+                    bounds.maxX(),
+                    bounds.maxY(),
+                    bounds.maxZ());
         }
 
-        private double totalBirthEvidence() {
-            double total = 0.0;
-            for (double value : birthEvidence) {
-                total += value;
-            }
-            return total;
-        }
-
-        private double totalExposure() {
-            double total = 0.0;
-            for (double value : exposure) {
-                total += value;
-            }
-            return total;
-        }
-
-        private void initializePrior() {
-            double priorExposure = PRIOR_EXPOSURE_OPPORTUNITIES * cellVolumeCubicKilometers;
-            double priorEvidence = priorDensityPerCubicKilometer * priorExposure;
-            for (int index = 0; index < birthEvidence.length; index++) {
-                exposure[index] = priorExposure;
-                birthEvidence[index] = priorEvidence;
-            }
-        }
-
-        private void applyForgetting(double deltaTimeSeconds) {
-            if (deltaTimeSeconds <= EPSILON) {
-                return;
-            }
-            double decay = Math.pow(0.5,
-                    deltaTimeSeconds / FIELD_FORGETTING_HALF_LIFE_SECONDS);
-            for (int index = 0; index < birthEvidence.length; index++) {
-                birthEvidence[index] *= decay;
-                exposure[index] *= decay;
-            }
-        }
-
-        private void addExposure() {
-            for (int index = 0; index < exposure.length; index++) {
-                exposure[index] += cellVolumeCubicKilometers;
-            }
-        }
-
-        private void depositBirthEvidence(BirthPoint birth) {
-            if (birth.confidence() <= EPSILON) {
-                return;
-            }
-            double sigmaMeters = Math.max(cellMeters * 1.25, birth.uncertaintyMeters());
-            int minCellX = clampCellX((int) Math.floor((birth.xMeters() - minX
-                    - 3.0 * sigmaMeters) / cellMeters));
-            int maxCellX = clampCellX((int) Math.ceil((birth.xMeters() - minX
-                    + 3.0 * sigmaMeters) / cellMeters));
-            int minCellY = clampCellY((int) Math.floor((birth.yMeters() - minY
-                    - 3.0 * sigmaMeters) / cellMeters));
-            int maxCellY = clampCellY((int) Math.ceil((birth.yMeters() - minY
-                    + 3.0 * sigmaMeters) / cellMeters));
-            int minCellZ = clampCellZ((int) Math.floor((birth.zMeters() - minZ
-                    - 3.0 * sigmaMeters) / cellMeters));
-            int maxCellZ = clampCellZ((int) Math.ceil((birth.zMeters() - minZ
-                    + 3.0 * sigmaMeters) / cellMeters));
-            double weightSum = 0.0;
-            for (int z = minCellZ; z <= maxCellZ; z++) {
-                for (int y = minCellY; y <= maxCellY; y++) {
-                    for (int x = minCellX; x <= maxCellX; x++) {
-                        weightSum += gaussianWeight(
-                                cellCenterX(x) - birth.xMeters(),
-                                cellCenterY(y) - birth.yMeters(),
-                                cellCenterZ(z) - birth.zMeters(),
-                                sigmaMeters);
-                    }
-                }
-            }
-            if (weightSum <= EPSILON) {
-                return;
-            }
-            for (int z = minCellZ; z <= maxCellZ; z++) {
-                for (int y = minCellY; y <= maxCellY; y++) {
-                    for (int x = minCellX; x <= maxCellX; x++) {
-                        int index = index(x, y, z);
-                        double weight = gaussianWeight(
-                                cellCenterX(x) - birth.xMeters(),
-                                cellCenterY(y) - birth.yMeters(),
-                                cellCenterZ(z) - birth.zMeters(),
-                                sigmaMeters);
-                        birthEvidence[index] += birth.confidence() * weight / weightSum;
-                    }
-                }
-            }
-        }
-
-        private double smoothedDensity(double[] centerMeters, double sigmaMeters) {
-            int centerX = cellX(centerMeters[0]);
-            int centerY = cellY(centerMeters[1]);
-            int centerZ = cellZ(centerMeters[2]);
-            if (!inRange(centerX, centerY, centerZ)) {
-                return priorDensityPerCubicKilometer;
-            }
-            int radiusCells = Math.max(1, (int) Math.ceil(3.0 * sigmaMeters / cellMeters));
-            int minCellX = clampCellX(centerX - radiusCells);
-            int maxCellX = clampCellX(centerX + radiusCells);
-            int minCellY = clampCellY(centerY - radiusCells);
-            int maxCellY = clampCellY(centerY + radiusCells);
-            int minCellZ = clampCellZ(centerZ - radiusCells);
-            int maxCellZ = clampCellZ(centerZ + radiusCells);
-            double weightedDensity = 0.0;
-            double weightSum = 0.0;
-            for (int z = minCellZ; z <= maxCellZ; z++) {
-                for (int y = minCellY; y <= maxCellY; y++) {
-                    for (int x = minCellX; x <= maxCellX; x++) {
-                        double weight = gaussianWeight(
-                                cellCenterX(x) - centerMeters[0],
-                                cellCenterY(y) - centerMeters[1],
-                                cellCenterZ(z) - centerMeters[2],
-                                sigmaMeters);
-                        weightedDensity += densityAt(index(x, y, z)) * weight;
-                        weightSum += weight;
-                    }
-                }
-            }
-            return weightSum <= EPSILON
+        private double representativeDensityPerCubicKilometer() {
+            return activeBirths.isEmpty()
                     ? priorDensityPerCubicKilometer
-                    : clampDensity(weightedDensity / weightSum);
+                    : peakDensityPerCubicKilometer();
         }
 
-        private double densityAt(int index) {
-            if (exposure[index] <= EPSILON) {
-                return priorDensityPerCubicKilometer;
+        private double peakDensityPerCubicKilometer() {
+            double peak = priorDensityPerCubicKilometer;
+            for (BirthPoint birth : activeBirths) {
+                double[] center = {birth.xMeters(), birth.yMeters(), birth.zMeters()};
+                peak = Math.max(peak, densityAt(center, 0.0));
             }
-            return clampDensity(birthEvidence[index] / exposure[index]);
+            return clampDensity(peak);
         }
 
-        private int index(int x, int y, int z) {
-            return (z * yCells + y) * xCells + x;
+        private double totalActiveWeight() {
+            double total = 0.0;
+            for (BirthPoint birth : activeBirths) {
+                total += activeWeight(birth);
+            }
+            return total;
         }
 
-        private int cellX(double xMeters) {
-            return (int) Math.floor((xMeters - minX) / cellMeters);
+        private double densityAt(double[] centerMeters, double querySigmaMeters) {
+            double density = priorDensityPerCubicKilometer;
+            for (BirthPoint birth : activeBirths) {
+                density += componentDensity(centerMeters, birth, querySigmaMeters);
+            }
+            return clampDensity(density);
         }
 
-        private int cellY(double yMeters) {
-            return (int) Math.floor((yMeters - minY) / cellMeters);
+        private double componentDensity(
+                double[] centerMeters,
+                BirthPoint birth,
+                double querySigmaMeters) {
+            double componentSigma = Math.max(kernelSigmaMeters, birth.uncertaintyMeters());
+            double sigma = Math.sqrt(componentSigma * componentSigma
+                    + Math.max(0.0, querySigmaMeters) * Math.max(0.0, querySigmaMeters));
+            double dx = centerMeters[0] - birth.xMeters();
+            double dy = centerMeters[1] - birth.yMeters();
+            double dz = centerMeters[2] - birth.zMeters();
+            double distanceSquared = dx * dx + dy * dy + dz * dz;
+            double normalizerPerCubicKilometer = CUBIC_METERS_PER_CUBIC_KILOMETER
+                    / (Math.pow(2.0 * Math.PI, 1.5) * sigma * sigma * sigma);
+            return activeWeight(birth) * normalizerPerCubicKilometer
+                    * Math.exp(-0.5 * distanceSquared / (sigma * sigma));
         }
 
-        private int cellZ(double zMeters) {
-            return (int) Math.floor((zMeters - minZ) / cellMeters);
-        }
-
-        private boolean inRange(int x, int y, int z) {
-            return x >= 0 && x < xCells
-                    && y >= 0 && y < yCells
-                    && z >= 0 && z < zCells;
-        }
-
-        private int clampCellX(int value) {
-            return Math.max(0, Math.min(xCells - 1, value));
-        }
-
-        private int clampCellY(int value) {
-            return Math.max(0, Math.min(yCells - 1, value));
-        }
-
-        private int clampCellZ(int value) {
-            return Math.max(0, Math.min(zCells - 1, value));
-        }
-
-        private double cellCenterX(int x) {
-            return minX + (x + 0.5) * cellMeters;
-        }
-
-        private double cellCenterY(int y) {
-            return minY + (y + 0.5) * cellMeters;
-        }
-
-        private double cellCenterZ(int z) {
-            return minZ + (z + 0.5) * cellMeters;
+        private double activeWeight(BirthPoint birth) {
+            double ageSeconds = Math.max(0.0, currentTimeSeconds - birth.timeSeconds());
+            double forgetting = Math.pow(0.5, ageSeconds / FIELD_FORGETTING_HALF_LIFE_SECONDS);
+            return birth.confidence() * forgetting;
         }
 
         private static double positionUncertaintyKilometers(double[][] covariance) {
@@ -1749,18 +1592,6 @@ public final class TrackStitchingAnalyzer {
             double variance = Math.max(0.0,
                     covariance[0][0] + covariance[1][1] + covariance[2][2]);
             return Math.sqrt(variance / 3.0) / 1_000.0;
-        }
-
-        private static double gaussianWeight(
-                double dxMeters,
-                double dyMeters,
-                double dzMeters,
-                double sigmaMeters) {
-            double sigma = Math.max(1.0, sigmaMeters);
-            double distanceSquared = dxMeters * dxMeters
-                    + dyMeters * dyMeters
-                    + dzMeters * dzMeters;
-            return Math.exp(-0.5 * distanceSquared / (sigma * sigma));
         }
 
         private static double clampDensity(double densityPerCubicKilometer) {
@@ -1816,8 +1647,8 @@ public final class TrackStitchingAnalyzer {
                 return new Bounds(-500.0, -500.0, -500.0, 500.0, 500.0, 500.0);
             }
             double span = Math.max(maxX - minX, Math.max(maxY - minY, maxZ - minZ));
-            if (span < MINIMUM_SPATIAL_CELL_METERS) {
-                double pad = (MINIMUM_SPATIAL_CELL_METERS - span) / 2.0;
+            if (span < MINIMUM_SPATIAL_KERNEL_METERS) {
+                double pad = (MINIMUM_SPATIAL_KERNEL_METERS - span) / 2.0;
                 return new Bounds(
                         minX - pad,
                         minY - pad,

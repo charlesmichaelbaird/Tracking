@@ -107,7 +107,54 @@ public final class TrackStitchingAnalyzerSmokeTest {
         }
         verifyEventLimitedJoinSeeds(analyzer);
         verifyDeadTrackJoinSeeds(analyzer);
+        verifyClusteredBirthDensity(analyzer);
         System.out.println("TrackStitchingAnalyzerSmokeTest passed");
+    }
+
+    private static void verifyClusteredBirthDensity(TrackStitchingAnalyzer analyzer) {
+        TrackStitchingAnalyzer.Configuration configuration =
+                new TrackStitchingAnalyzer.Configuration(1.0, 10.0, 0.0, 1.0,
+                        false, 0.5, 1.0e-6, 1.0e-6);
+        double singleDensity = lastDensity(analyzer.analyzeDetailed(
+                birthDensityScenario("single_birth_density", 1, 50_000.0),
+                configuration));
+        double clusteredDensity = lastDensity(analyzer.analyzeDetailed(
+                birthDensityScenario("clustered_birth_density", 10, 250.0),
+                configuration));
+        if (!(clusteredDensity > singleDensity * 3.0)) {
+            throw new AssertionError("Clustered first-measurement births should produce "
+                    + "larger learned spatial density than a single birth");
+        }
+    }
+
+    private static double lastDensity(TrackStitchingAnalyzer.AnalysisResult result) {
+        List<TrackStitchingAnalyzer.SpatialDensitySnapshot> history =
+                result.spatialDensityHistory();
+        if (history.isEmpty()) {
+            throw new AssertionError("Expected spatial density history");
+        }
+        return history.get(history.size() - 1).representativeDensityPerCubicKilometer();
+    }
+
+    private static RecordedScenario birthDensityScenario(
+            String name,
+            int birthCount,
+            double spacingMeters) {
+        List<TrackRecord> tracks = new ArrayList<>();
+        List<RecordedMeasurement> measurements = new ArrayList<>();
+        for (int index = 0; index < birthCount; index++) {
+            String trackId = "TRK-BIRTH-" + index;
+            double x = index * spacingMeters;
+            tracks.add(track(trackId, 1.0, x, 0.0, true));
+            measurements.add(measurement(trackId, 1.0, x));
+        }
+        return new RecordedScenario(
+                Path.of(name),
+                name,
+                1.0,
+                tracks,
+                List.of(),
+                measurements);
     }
 
     private static void verifyEventLimitedJoinSeeds(TrackStitchingAnalyzer analyzer) {

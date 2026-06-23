@@ -353,14 +353,12 @@ public final class TrackStitchingAnalysisExporter {
         try (BufferedWriter writer = newWriter(path)) {
             writer.write(String.join(",",
                     "scenario_time_seconds",
-                    "mean_density_per_km3",
-                    "total_birth_evidence",
-                    "total_exposure",
+                    "representative_density_per_km3",
+                    "peak_density_per_km3",
+                    "total_component_weight",
+                    "active_component_count",
                     "prior_density_per_km3",
-                    "cell_meters",
-                    "x_cells",
-                    "y_cells",
-                    "z_cells",
+                    "kernel_sigma_meters",
                     "min_x_m",
                     "min_y_m",
                     "min_z_m",
@@ -371,14 +369,12 @@ public final class TrackStitchingAnalysisExporter {
             for (TrackStitchingAnalyzer.SpatialDensitySnapshot snapshot : snapshots) {
                 writeCsvRow(writer,
                         snapshot.timeSeconds(),
-                        snapshot.meanDensityPerCubicKilometer(),
-                        snapshot.totalBirthEvidence(),
-                        snapshot.totalExposure(),
+                        snapshot.representativeDensityPerCubicKilometer(),
+                        snapshot.peakDensityPerCubicKilometer(),
+                        snapshot.totalComponentWeight(),
+                        snapshot.activeComponentCount(),
                         snapshot.priorDensityPerCubicKilometer(),
-                        snapshot.cellMeters(),
-                        snapshot.xCells(),
-                        snapshot.yCells(),
-                        snapshot.zCells(),
+                        snapshot.kernelSigmaMeters(),
                         snapshot.minX(),
                         snapshot.minY(),
                         snapshot.minZ(),
@@ -422,7 +418,9 @@ public final class TrackStitchingAnalysisExporter {
                     + "state/covariance, innovation, innovation covariance, Mahalanobis distance, "
                     + "NLL, NLLR values, and learned-density query values.\n");
             writer.write("- `spatial_density/spatial_density_history.csv`: learned extraneous-track "
-                    + "birth density estimate over the course of the scenario.\n\n");
+                    + "birth intensity over the course of the scenario. The learned estimator is a "
+                    + "Gaussian mixture seeded only by each track's first associated measurement; "
+                    + "clustered first births produce higher local intensity.\n\n");
             writer.write("## MATLAB usage\n\n");
             writer.write("Use `readtable` on the CSVs. Example:\n\n");
             writer.write("```matlab\n");
