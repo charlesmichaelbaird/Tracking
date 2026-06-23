@@ -192,8 +192,15 @@ public final class TrackStitchingAnalyzerSmokeTest {
         TrackStitchingAnalyzer.PairResult secondPair = pair(events.get(1), "TRK-OLD", "TRK-NEW");
         double firstSimple = firstPair.simpleJoinTimeSeconds();
         double secondSimple = secondPair.simpleJoinTimeSeconds();
-        requireClose(2.0, firstSimple, "first event-limited midpoint");
-        requireClose(2.5, secondSimple, "second event-limited midpoint");
+        requireClose(1.5, firstSimple, "first formation-limited midpoint");
+        requireClose(1.5, secondSimple, "second formation-limited midpoint");
+        requireClose(firstPair.statisticalJoinTimeSeconds(),
+                secondPair.statisticalJoinTimeSeconds(),
+                "Mahalanobis bank should not drift to the later scenario timestamp");
+        if (secondPair.statisticalJoinTimeSeconds() > 3.0) {
+            throw new AssertionError(
+                    "Mahalanobis bank should stay inside the old-update to new-formation gap");
+        }
         if (!Double.isFinite(secondPair.statisticalMahalanobisDistance())) {
             throw new AssertionError("Mahalanobis distance should be reported for each timing row");
         }
@@ -254,22 +261,27 @@ public final class TrackStitchingAnalyzerSmokeTest {
         double[] oldState = new double[9];
         double[] newState = new double[9];
         newState[0] = 2.0;
+        newState[3] = 100.0;
+        newState[6] = -25.0;
         double[][] oldCovariance = diagonal(9, 1.0);
         double[][] newCovariance = diagonal(9, 1.0);
         TrackStitchingAnalyzer.InnovationScore score =
                 TrackStitchingAnalyzer.innovationScore(
                         new TrackStitchingAnalyzer.PropagatedState(oldState, oldCovariance),
                         new TrackStitchingAnalyzer.PropagatedState(newState, newCovariance));
+        if (score.innovation().length != 3 || score.innovationCovariance().length != 3) {
+            throw new AssertionError("Stitching score should use 3D position-only innovation");
+        }
         requireClose(-2.0, score.innovation()[0], "innovation sign");
         requireClose(2.0, score.innovationCovariance()[0][0],
                 "summed innovation covariance");
         requireClose(Math.sqrt(2.0), score.mahalanobisDistance(),
-                "canonical Mahalanobis distance");
-        double expectedNll = 0.5 * (9.0 * Math.log(2.0 * Math.PI)
-                + 9.0 * Math.log(2.0) + 2.0);
+                "position-only Mahalanobis distance");
+        double expectedNll = 0.5 * (3.0 * Math.log(2.0 * Math.PI)
+                + 3.0 * Math.log(2.0) + 2.0);
         requireClose(expectedNll,
                 TrackStitchingAnalyzer.canonicalNegativeLogLikelihood(score),
-                "canonical Gaussian NLL");
+                "position-only Gaussian NLL");
     }
 
     private static void verifyBackwardPropagationAndSmoothing() {
@@ -300,7 +312,18 @@ public final class TrackStitchingAnalyzerSmokeTest {
         TrackStitchingAnalyzer.PropagatedState unsmoothed =
                 TrackStitchingAnalyzer.retrodictNew(segment, List.of(), 4.0);
         requireClose(40.0, unsmoothed.state()[0],
-                "retrodiction starts at most-future state and passes spawn time");
+                "retrodiction starts at latest updated state and passes spawn time");
+
+        TrackRecord coastedDisplaySample = track("TRK-NEW", 12.0, 1_000.0, 10.0, false);
+        TrackStitchingAnalyzer.Segment segmentWithCoast =
+                new TrackStitchingAnalyzer.Segment(
+                        "TRK-NEW", 6.0, 10.0, 12.0,
+                        false, true, formation, future, coastedDisplaySample, coastedDisplaySample,
+                        List.of(formation, future, coastedDisplaySample));
+        TrackStitchingAnalyzer.PropagatedState coastIgnored =
+                TrackStitchingAnalyzer.retrodictNew(segmentWithCoast, List.of(), 4.0);
+        requireClose(40.0, coastIgnored.state()[0],
+                "retrodiction should start at latest updated measurement, not a coasted sample");
 
         double[][] measurementCovariance = diagonal(6, 0.01);
         RecordedMeasurement earlierMeasurement = new RecordedMeasurement(

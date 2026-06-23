@@ -17,6 +17,7 @@ import java.util.Locale;
 /** Writes a complete Track Stitching Analysis result tree for MATLAB/offline review. */
 public final class TrackStitchingAnalysisExporter {
     private static final int STATE_SIZE = 9;
+    private static final int POSITION_SIZE = 3;
     private static final DateTimeFormatter FOLDER_TIME =
             DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
@@ -295,8 +296,8 @@ public final class TrackStitchingAnalysisExporter {
             addMatrixHeader(header, "old_covariance", STATE_SIZE);
             addVectorHeader(header, "new_state", STATE_SIZE);
             addMatrixHeader(header, "new_covariance", STATE_SIZE);
-            addVectorHeader(header, "innovation", STATE_SIZE);
-            addMatrixHeader(header, "innovation_covariance", STATE_SIZE);
+            addVectorHeader(header, "position_innovation", POSITION_SIZE);
+            addMatrixHeader(header, "position_innovation_covariance", POSITION_SIZE);
             header.addAll(List.of(
                     "mahalanobis_distance",
                     "innovation_quadratic",
@@ -429,8 +430,9 @@ public final class TrackStitchingAnalysisExporter {
                     + "Mahalanobis, static/uniform NLLR, and learned-spatial NLLR.\n");
             writer.write("- `bank_evaluations/bank_evaluations.csv`: one row per candidate pair per "
                     + "time-bank sample. It includes old predicted state/covariance, new retrodicted "
-                    + "state/covariance, innovation, innovation covariance, Mahalanobis distance, "
-                    + "NLL, NLLR values, and learned-density query values.\n");
+                    + "state/covariance, 3D position innovation, 3x3 position innovation "
+                    + "covariance, Mahalanobis distance, NLL, NLLR values, and "
+                    + "learned-density query values.\n");
             writer.write("- `spatial_density/spatial_density_history.csv`: learned extraneous-track "
                     + "birth density over the course of the scenario. The learned estimator is an "
                     + "online evidence/exposure grid. Each cell stores birth evidence and "

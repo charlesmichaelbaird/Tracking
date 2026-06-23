@@ -46,7 +46,7 @@ public final class TrackStitchingAnalysisExporterSmokeTest {
 
         String bankCsv = Files.readString(bank);
         if (!bankCsv.contains("old_state_0")
-                || !bankCsv.contains("innovation_covariance_8_8")
+                || !bankCsv.contains("position_innovation_covariance_2_2")
                 || !bankCsv.contains("learned_negative_log_likelihood_ratio")) {
             throw new AssertionError("Bank export should include state, covariance, and NLLR columns");
         }

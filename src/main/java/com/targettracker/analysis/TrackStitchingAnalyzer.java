@@ -15,6 +15,7 @@ import java.util.TreeSet;
 /** Track-segment timing, compatibility, and truth-reference analysis. */
 public final class TrackStitchingAnalyzer {
     private static final int STATE_SIZE = 9;
+    private static final int POSITION_SIZE = 3;
     private static final int MEASUREMENT_SIZE = 6;
     private static final double EPSILON = 1.0e-8;
     private static final double LIVE_SAMPLE_TOLERANCE_SECONDS = 1.01;
@@ -317,10 +318,7 @@ public final class TrackStitchingAnalyzer {
     }
 
     private static TrackRecord joinTimingAnchor(Segment oldSegment, Segment newSegment) {
-        if (oldSegment.deadAtEvent()) {
-            return newSegment.formationRecord();
-        }
-        return newSegment.mostFutureRecord();
+        return newSegment.formationRecord();
     }
 
     private static int[] hungarian(double[][] cost) {
@@ -570,7 +568,7 @@ public final class TrackStitchingAnalyzer {
     }
 
     static double canonicalNegativeLogLikelihood(InnovationScore score) {
-        double logLikelihood = -0.5 * (STATE_SIZE * Math.log(2.0 * Math.PI)
+        double logLikelihood = -0.5 * (POSITION_SIZE * Math.log(2.0 * Math.PI)
                 + score.logDeterminant()
                 + score.innovationQuadratic());
         return -logLikelihood;
@@ -579,11 +577,17 @@ public final class TrackStitchingAnalyzer {
     static InnovationScore innovationScore(
             PropagatedState oldState,
             PropagatedState newState) {
-        double[] innovation = new double[STATE_SIZE];
-        for (int index = 0; index < STATE_SIZE; index++) {
+        double[] innovation = new double[POSITION_SIZE];
+        for (int index = 0; index < POSITION_SIZE; index++) {
             innovation[index] = oldState.state()[index] - newState.state()[index];
         }
-        double[][] covariance = add(oldState.covariance(), newState.covariance());
+        double[][] covariance = new double[POSITION_SIZE][POSITION_SIZE];
+        for (int row = 0; row < POSITION_SIZE; row++) {
+            for (int column = 0; column < POSITION_SIZE; column++) {
+                covariance[row][column] = oldState.covariance()[row][column]
+                        + newState.covariance()[row][column];
+            }
+        }
         CholeskyResult cholesky = cholesky(covariance);
         double[] solved = solveCholesky(cholesky.lower(), innovation);
         double innovationQuadratic = Math.max(0.0, dot(innovation, solved));
@@ -606,7 +610,7 @@ public final class TrackStitchingAnalyzer {
             Segment newSegment,
             List<RecordedMeasurement> measurements,
             double wantedTime) {
-        TrackRecord futureRecord = newSegment.mostFutureRecord();
+        TrackRecord futureRecord = newSegment.lastUpdateRecord();
         PropagatedState state = new PropagatedState(
                 futureRecord.state(), futureRecord.covariance());
         double currentTime = futureRecord.timeSeconds();
@@ -1324,8 +1328,8 @@ public final class TrackStitchingAnalyzer {
             oldCovariance = copySquare(oldCovariance, STATE_SIZE);
             newState = copyVector(newState, STATE_SIZE);
             newCovariance = copySquare(newCovariance, STATE_SIZE);
-            innovation = copyVector(innovation, STATE_SIZE);
-            innovationCovariance = copySquare(innovationCovariance, STATE_SIZE);
+            innovation = copyVector(innovation, POSITION_SIZE);
+            innovationCovariance = copySquare(innovationCovariance, POSITION_SIZE);
         }
 
         @Override
@@ -1355,7 +1359,7 @@ public final class TrackStitchingAnalyzer {
 
         @Override
         public double[][] innovationCovariance() {
-            return copySquare(innovationCovariance, STATE_SIZE);
+            return copySquare(innovationCovariance, POSITION_SIZE);
         }
     }
 
