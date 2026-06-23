@@ -1,8 +1,11 @@
 package com.targettracker.ui;
 
 import com.targettracker.model.GeodeticPoint;
+import com.targettracker.model.BlackoutRegion;
 import com.targettracker.model.PresetScenarioGenerator;
 import com.targettracker.model.PresetScenarioParameters;
+import com.targettracker.model.SavedScenarioDefinition;
+import com.targettracker.model.SavedScenarioRepository;
 import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.ScenarioPreset;
 import com.targettracker.model.SensorSettings;
@@ -41,12 +44,13 @@ public final class TrackerFrame extends JFrame {
     private final MeasurementEngine measurementEngine;
     private final ImmTracker immTracker;
     private final TrackCsvRecorder recorder = new TrackCsvRecorder();
+    private final SavedScenarioRepository savedScenarioRepository =
+            new SavedScenarioRepository(Path.of("saved_scenarios"));
     private final ScenarioPlayback playback;
     private final EarthMapCanvas earthMapCanvas;
     private final MotionTelemetryPanel motionTelemetryPanel;
     private final SensorParametersPanel sensorParametersPanel;
     private final ImmParametersPanel immParametersPanel;
-    private final TargetsPanel targetsPanel;
     private final ControlSidebar controlSidebar;
     private final RecordingPanel recordingPanel;
     private final AnalysisLoadPanel analysisLoadPanel;
@@ -102,10 +106,21 @@ public final class TrackerFrame extends JFrame {
             }
 
             @Override
+            public void loadSavedScenario(SavedScenarioDefinition scenario) {
+                loadSavedUserScenario(scenario);
+            }
+
+            @Override
             public void selectUserGeneratedMode() {
                 activateUserGeneratedMode();
             }
+
+            @Override
+            public void saveUserScenario(String scenarioName) {
+                saveUserGeneratedScenario(scenarioName);
+            }
         });
+        refreshSavedScenarioChoices();
         earthMapCanvas = new EarthMapCanvas(
                 model,
                 playback,
@@ -114,6 +129,7 @@ public final class TrackerFrame extends JFrame {
                 () -> selectedTarget,
                 this::isScenarioEditingLocked,
                 this::onPathChanged,
+                this::onBlackoutRegionCreated,
                 this::onCursorChanged);
         displayControlsPanel = new DisplayControlsPanel(
                 displayHistorySettings, earthMapCanvas::repaint);
@@ -123,21 +139,24 @@ public final class TrackerFrame extends JFrame {
                 playback,
                 this::isScenarioEditingLocked,
                 this::onProfileChanged,
-                this::selectTarget);
-        sensorParametersPanel = new SensorParametersPanel(
-                sensorSettings, this::onSensorParametersChanged);
-        immParametersPanel = new ImmParametersPanel(
-                immSettings, this::onImmParametersChanged);
-        targetsPanel = new TargetsPanel(
+                this::selectTarget,
                 this::addTarget,
                 earthMapCanvas::setDrawingMode,
                 earthMapCanvas::finishPath,
-                this::clearSelectedPath);
+                this::clearSelectedPath,
+                this::removeSelectedTarget,
+                earthMapCanvas::setProfileHighlightNormalizedTime);
+        sensorParametersPanel = new SensorParametersPanel(
+                sensorSettings,
+                model,
+                this::onSensorParametersChanged,
+                this::beginBlackoutRegionDrawing);
+        immParametersPanel = new ImmParametersPanel(
+                immSettings, this::onImmParametersChanged);
         controlSidebar = new ControlSidebar(
                 immParametersPanel,
                 sensorParametersPanel,
                 motionTelemetryPanel,
-                targetsPanel,
                 presetScenarioPanel);
 
         setLayout(new BorderLayout());
@@ -295,9 +314,46 @@ public final class TrackerFrame extends JFrame {
         earthMapCanvas.repaint();
     }
 
+    private void removeSelectedTarget() {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
+            return;
+        }
+        TargetTrajectory target = motionTelemetryPanel.selectedTarget();
+        if (target == null) {
+            return;
+        }
+        playback.reset();
+        model.removeTarget(target);
+        selectedTarget = model.targets().isEmpty() ? null : model.targets().get(0);
+        motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
+        updateStructuralEditingControls();
+        refreshTelemetry();
+        timelinePanel.refresh();
+        earthMapCanvas.repaint();
+        statusLabel.setText("Removed %s".formatted(target.id()));
+    }
+
     static void clearPathForTarget(ScenarioPlayback playback, TargetTrajectory target) {
         playback.reset();
         target.clearPath();
+    }
+
+    private void beginBlackoutRegionDrawing() {
+        if (analysisMode || presetScenarioActive || playback.isRunning() || playback.isComputing()) {
+            statusLabel.setText("Blackout regions can be drawn in idle user-generated scenarios");
+            return;
+        }
+        resetCompletedPlayback();
+        earthMapCanvas.startBlackoutRegionDrawing();
+        statusLabel.setText("Blackout drawing armed — click two opposite rectangle corners");
+    }
+
+    private void onBlackoutRegionCreated(BlackoutRegion region) {
+        resetCompletedPlayback();
+        sensorParametersPanel.refreshBlackoutRegions();
+        earthMapCanvas.repaint();
+        timelinePanel.refresh();
+        statusLabel.setText("Added blackout region %s".formatted(region.name()));
     }
 
     private void loadPresetScenario(
@@ -312,6 +368,7 @@ public final class TrackerFrame extends JFrame {
         currentScenarioName = preset.toString();
         selectedTarget = model.targets().get(0);
         motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
+        sensorParametersPanel.refreshBlackoutRegions();
         updateStructuralEditingControls();
         earthMapCanvas.focusOnTargets();
         refreshTelemetry();
@@ -320,11 +377,87 @@ public final class TrackerFrame extends JFrame {
         statusLabel.setText("Loaded %s — preset target structure is locked".formatted(preset));
     }
 
+    private void loadSavedUserScenario(SavedScenarioDefinition scenario) {
+        if (analysisMode || scenario == null) {
+            return;
+        }
+        playback.reset();
+        try {
+            savedScenarioRepository.loadInto(scenario, model);
+        } catch (RuntimeException exception) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    exception.getMessage(),
+                    "Saved scenario load failed",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        presetScenarioActive = false;
+        currentScenarioName = scenario.name();
+        selectedTarget = model.targets().isEmpty() ? null : model.targets().get(0);
+        motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
+        sensorParametersPanel.refreshBlackoutRegions();
+        updateStructuralEditingControls();
+        earthMapCanvas.focusOnTargets();
+        refreshTelemetry();
+        timelinePanel.refresh();
+        scenarioTimeLabel.setText("t = 0.0 / %.1f s".formatted(model.durationSeconds()));
+        statusLabel.setText("Loaded saved user scenario %s — editing enabled"
+                .formatted(scenario.name()));
+    }
+
+    private void saveUserGeneratedScenario(String scenarioName) {
+        if (analysisMode || presetScenarioActive) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Only user-generated scenarios can be saved from this section.",
+                    "Scenario save unavailable",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        boolean hasAsset = model.targets().stream().anyMatch(target -> !target.path().isEmpty())
+                || !model.blackoutRegions().isEmpty();
+        if (!hasAsset) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Add at least one target path or blackout region before saving.",
+                    "Nothing to save",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        try {
+            SavedScenarioDefinition saved = savedScenarioRepository.save(scenarioName, model);
+            refreshSavedScenarioChoices();
+            currentScenarioName = saved.name();
+            statusLabel.setText("Saved scenario %s".formatted(saved.name()));
+        } catch (IllegalArgumentException exception) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    exception.getMessage(),
+                    "Invalid scenario name",
+                    JOptionPane.WARNING_MESSAGE);
+        } catch (IOException exception) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    exception.getMessage(),
+                    "Scenario save failed",
+                    JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    private void refreshSavedScenarioChoices() {
+        try {
+            presetScenarioPanel.setSavedScenarios(savedScenarioRepository.list());
+        } catch (IOException exception) {
+            statusLabel.setText("Saved scenario scan failed: " + exception.getMessage());
+        }
+    }
+
     private void activateUserGeneratedMode() {
         if (analysisMode) {
             return;
         }
-        if (!presetScenarioActive) {
+        if (!presetScenarioActive && "User generated".equals(currentScenarioName)) {
             return;
         }
         playback.reset();
@@ -332,6 +465,7 @@ public final class TrackerFrame extends JFrame {
         currentScenarioName = "User generated";
         selectedTarget = model.replaceTargets(1).get(0);
         motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
+        sensorParametersPanel.refreshBlackoutRegions();
         updateStructuralEditingControls();
         earthMapCanvas.resetView();
         refreshTelemetry();
@@ -348,7 +482,7 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void updateStructuralEditingControls() {
-        targetsPanel.setEditingState(isScenarioEditingLocked(), presetScenarioActive);
+        motionTelemetryPanel.setEditingState(isScenarioEditingLocked(), presetScenarioActive);
     }
 
     private void precomputeScenario() {
@@ -410,6 +544,17 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void resetScenario() {
+        if (!analysisMode) {
+            playback.reset();
+            earthMapCanvas.setProfileHighlightNormalizedTime(Double.NaN);
+            updateStructuralEditingControls();
+            refreshTelemetry();
+            timelinePanel.refresh();
+            earthMapCanvas.repaint();
+            scenarioTimeLabel.setText("t = 0.0 s");
+            statusLabel.setText("Scenario reset — editing unlocked");
+            return;
+        }
         if (!playback.rewindReplayPaused()) {
             JOptionPane.showMessageDialog(
                     this,
@@ -437,6 +582,9 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void onProfileChanged() {
+        if (selectedTarget == null) {
+            return;
+        }
         resetCompletedPlayback();
         refreshTelemetry();
         timelinePanel.refresh();
@@ -561,6 +709,7 @@ public final class TrackerFrame extends JFrame {
             currentScenarioName = "User generated";
             selectedTarget = model.replaceTargets(1).get(0);
             motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
+            sensorParametersPanel.refreshBlackoutRegions();
             dataModeLayout.show(dataModePanel, "analysis");
             analysisLoadPanel.setParentFolder(recorder.outputParent());
             analysisLoadPanel.setStitchingEnabled(false);
@@ -570,6 +719,7 @@ public final class TrackerFrame extends JFrame {
             analysisLoadPanel.setStitchingEnabled(false);
             loadedAnalysisScenario = null;
             dataModeLayout.show(dataModePanel, "generation");
+            sensorParametersPanel.refreshBlackoutRegions();
             statusLabel.setText("Scenario Generation mode");
         }
         updateModeControls();

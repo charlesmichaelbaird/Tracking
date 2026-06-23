@@ -22,6 +22,14 @@ public final class PresetScenarioGeneratorSmokeTest {
             if (targets.size() != preset.targetCount()) {
                 throw new AssertionError(preset + " generated the wrong target count");
             }
+            int expectedBlackouts = switch (preset) {
+                case SINGLE_TARGET_BLACKOUT, MULTI_TARGET_BLACKOUT -> 1;
+                case AIRPORT_BLACKOUT -> 2;
+                default -> 0;
+            };
+            if (model.blackoutRegions().size() != expectedBlackouts) {
+                throw new AssertionError(preset + " generated the wrong blackout count");
+            }
             double speedSum = 0.0;
             for (TargetTrajectory target : targets) {
                 if (!target.isRunnable()) {
@@ -43,8 +51,31 @@ public final class PresetScenarioGeneratorSmokeTest {
         }
 
         verifyStopProfiles(parameters);
+        verifyBlackoutPresetGeometry(parameters);
         verifyMinimumDuration();
         System.out.println("PresetScenarioGeneratorSmokeTest passed");
+    }
+
+    private static void verifyBlackoutPresetGeometry(PresetScenarioParameters parameters) {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory straightBlackout = PresetScenarioGenerator.generate(
+                model, ScenarioPreset.SINGLE_TARGET_BLACKOUT, parameters).get(0);
+        if (model.blackoutRegions().isEmpty()
+                || !model.blackoutRegions().get(0).contains(straightBlackout.positionAt(150.0))) {
+            throw new AssertionError("Straight blackout preset should cover the trajectory middle");
+        }
+
+        ScenarioModel airportModel = new ScenarioModel();
+        PresetScenarioGenerator.generate(airportModel, ScenarioPreset.AIRPORT_BLACKOUT, parameters);
+        if (airportModel.blackoutRegions().size() != 2) {
+            throw new AssertionError("Airport preset should define two hangar blackouts");
+        }
+        boolean hasHangarBirth = airportModel.targets().stream()
+                .skip(4)
+                .anyMatch(target -> airportModel.isInBlackout(target.positionAt(0.0)));
+        if (!hasHangarBirth) {
+            throw new AssertionError("Airport departures should begin inside a hangar blackout");
+        }
     }
 
     private static void verifyStopProfiles(PresetScenarioParameters parameters) {

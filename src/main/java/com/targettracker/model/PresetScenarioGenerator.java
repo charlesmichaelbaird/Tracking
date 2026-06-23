@@ -23,17 +23,19 @@ public final class PresetScenarioGenerator {
         for (int index = 0; index < targets.size(); index++) {
             TargetTrajectory target = targets.get(index);
             TargetPlan plan = plans.get(index);
+            double spreadStep = preset == ScenarioPreset.AIRPORT_BLACKOUT ? 0.015 : 0.04;
             double spreadFactor = targets.size() == 1
                     ? 1.0
-                    : 1.0 + (index - (targets.size() - 1) / 2.0) * 0.04;
+                    : 1.0 + (index - (targets.size() - 1) / 2.0) * spreadStep;
             configureVelocity(
                     target.velocityProfile(),
-                    plan.speedShape(),
+                    plan,
                     parameters.averageSpeedMetersPerSecond() * spreadFactor);
             fillProfile(target.altitudeProfile(), parameters.altitudeMeters());
             double wantedLength = target.velocityProfile().average() * parameters.durationSeconds();
             buildScaledPath(target, parameters.origin(), plan.path(), wantedLength);
         }
+        configureBlackoutRegions(model, preset, parameters);
         return targets;
     }
 
@@ -96,6 +98,15 @@ public final class PresetScenarioGenerator {
                             p(0.16, 0.01), p(0.64, 0.16)),
                     plan(SpeedShape.CONSTANT, p(-0.64, 0.36), p(-0.20, 0.05),
                             p(0.16, 0.03), p(0.64, 0.42)));
+            case SINGLE_TARGET_BLACKOUT -> List.of(plan(SpeedShape.CONSTANT,
+                    p(-0.64, 0.0), p(0.64, 0.0)));
+            case MULTI_TARGET_BLACKOUT -> List.of(
+                    plan(SpeedShape.CONSTANT, p(-0.68, -0.26), p(0.68, -0.10)),
+                    plan(SpeedShape.CONSTANT, p(-0.68, -0.10), p(0.68, 0.08)),
+                    plan(SpeedShape.CONSTANT, p(-0.68, 0.06), p(0.68, 0.25)),
+                    plan(SpeedShape.CONSTANT, p(0.68, -0.24), p(-0.68, -0.02)),
+                    plan(SpeedShape.CONSTANT, p(0.68, 0.18), p(-0.68, 0.30)));
+            case AIRPORT_BLACKOUT -> airportPlans();
             case USER_GENERATED -> throw new IllegalArgumentException(
                     "User-generated mode has no preset paths");
         };
@@ -103,16 +114,19 @@ public final class PresetScenarioGenerator {
 
     private static void configureVelocity(
             ScalarProfile profile,
-            SpeedShape shape,
+            TargetPlan plan,
             double wantedAverage) {
         double[] raw = new double[profile.sampleCount()];
         double sum = 0.0;
         for (int index = 0; index < raw.length; index++) {
             double normalizedTime = (double) index / (raw.length - 1);
-            raw[index] = shape.valueAt(normalizedTime);
+            raw[index] = plan.speedAt(normalizedTime);
             sum += raw[index];
         }
         double rawAverage = sum / raw.length;
+        if (rawAverage <= 1.0e-9) {
+            throw new IllegalArgumentException("Generated scenario has no moving interval");
+        }
         double scale = wantedAverage / rawAverage;
         for (int index = 0; index < raw.length; index++) {
             double value = raw[index] * scale;
@@ -127,6 +141,51 @@ public final class PresetScenarioGenerator {
     private static void fillProfile(ScalarProfile profile, double value) {
         for (int index = 0; index < profile.sampleCount(); index++) {
             profile.setSample(index, value);
+        }
+    }
+
+    private static void configureBlackoutRegions(
+            ScenarioModel model,
+            ScenarioPreset preset,
+            PresetScenarioParameters parameters) {
+        double lengthMeters = parameters.averageSpeedMetersPerSecond()
+                * parameters.durationSeconds();
+        switch (preset) {
+            case SINGLE_TARGET_BLACKOUT -> model.addBlackoutRegion(
+                    BlackoutRegion.fromLocal(
+                            "Central blackout",
+                            parameters.origin(),
+                            0.0,
+                            0.0,
+                            Math.max(8_000.0, lengthMeters * 0.52),
+                            Math.max(3_000.0, lengthMeters * 0.18)));
+            case MULTI_TARGET_BLACKOUT -> model.addBlackoutRegion(
+                    BlackoutRegion.fromLocal(
+                            "Large crossing blackout",
+                            parameters.origin(),
+                            0.0,
+                            0.03 * lengthMeters,
+                            Math.max(10_000.0, lengthMeters * 0.50),
+                            Math.max(6_000.0, lengthMeters * 0.34)));
+            case AIRPORT_BLACKOUT -> {
+                model.addBlackoutRegion(BlackoutRegion.fromLocal(
+                        "West hangar blackout",
+                        parameters.origin(),
+                        -0.09 * lengthMeters,
+                        0.075 * lengthMeters,
+                        Math.max(1_800.0, lengthMeters * 0.055),
+                        Math.max(1_200.0, lengthMeters * 0.038)));
+                model.addBlackoutRegion(BlackoutRegion.fromLocal(
+                        "East hangar blackout",
+                        parameters.origin(),
+                        0.09 * lengthMeters,
+                        -0.075 * lengthMeters,
+                        Math.max(1_800.0, lengthMeters * 0.055),
+                        Math.max(1_200.0, lengthMeters * 0.038)));
+            }
+            default -> {
+                // Maneuver-only presets do not include sensor blackout geometry.
+            }
         }
     }
 
@@ -160,7 +219,45 @@ public final class PresetScenarioGenerator {
     }
 
     private static TargetPlan plan(SpeedShape shape, LocalPoint... points) {
-        return new TargetPlan(List.of(points), shape);
+        return new TargetPlan(List.of(points), shape, 0.0, 1.0);
+    }
+
+    private static TargetPlan planWindow(
+            SpeedShape shape,
+            double activeStart,
+            double activeEnd,
+            LocalPoint... points) {
+        return new TargetPlan(List.of(points), shape, activeStart, activeEnd);
+    }
+
+    private static List<TargetPlan> airportPlans() {
+        return List.of(
+                plan(SpeedShape.CONSTANT,
+                        p(-0.18, -0.02), p(0.04, 0.00), p(0.24, 0.06), p(0.68, 0.24)),
+                plan(SpeedShape.CONSTANT,
+                        p(0.18, 0.02), p(-0.04, 0.00), p(-0.24, -0.05), p(-0.68, -0.20)),
+                planWindow(SpeedShape.MOVE_TO_STOP, 0.0, 0.72,
+                        p(0.70, 0.28), p(0.24, 0.12), p(-0.02, 0.07), p(-0.09, 0.075)),
+                planWindow(SpeedShape.MOVE_TO_STOP, 0.0, 0.76,
+                        p(-0.70, -0.24), p(-0.26, -0.10), p(0.02, -0.07), p(0.09, -0.075)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.08, 1.0,
+                        p(-0.10, 0.078), p(-0.02, 0.04), p(0.18, 0.06), p(0.66, 0.30)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.16, 1.0,
+                        p(-0.085, 0.070), p(0.00, 0.02), p(0.20, 0.00), p(0.66, -0.10)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.24, 1.0,
+                        p(-0.095, 0.082), p(-0.04, 0.00), p(-0.20, 0.03), p(-0.66, 0.18)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.32, 1.0,
+                        p(0.10, -0.078), p(0.02, -0.04), p(-0.18, -0.06), p(-0.66, -0.30)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.40, 1.0,
+                        p(0.085, -0.070), p(0.00, -0.02), p(-0.20, 0.00), p(-0.66, 0.10)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.48, 1.0,
+                        p(0.095, -0.082), p(0.04, 0.00), p(0.20, -0.03), p(0.66, -0.18)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.56, 1.0,
+                        p(-0.10, 0.074), p(0.00, 0.05), p(0.24, 0.12), p(0.68, 0.42)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.64, 1.0,
+                        p(0.10, -0.074), p(0.00, -0.05), p(-0.24, -0.12), p(-0.68, -0.42)),
+                planWindow(SpeedShape.STOP_TO_MOVE, 0.68, 1.0,
+                        p(-0.09, 0.076), p(0.02, 0.02), p(0.26, -0.03), p(0.70, -0.26)));
     }
 
     private static LocalPoint p(double east, double north) {
@@ -217,7 +314,19 @@ public final class PresetScenarioGenerator {
         abstract double valueAt(double time);
     }
 
-    private record TargetPlan(List<LocalPoint> path, SpeedShape speedShape) {
+    private record TargetPlan(
+            List<LocalPoint> path,
+            SpeedShape speedShape,
+            double activeStart,
+            double activeEnd) {
+        double speedAt(double normalizedTime) {
+            if (normalizedTime < activeStart || normalizedTime > activeEnd) {
+                return 0.0;
+            }
+            double span = Math.max(1.0e-9, activeEnd - activeStart);
+            double localTime = (normalizedTime - activeStart) / span;
+            return speedShape.valueAt(localTime);
+        }
     }
 
     private record LocalPoint(double east, double north) {

@@ -1,6 +1,7 @@
 package com.targettracker.ui;
 
 import com.targettracker.analysis.TrackStitchingAnalyzer;
+import com.targettracker.model.BlackoutRegion;
 import com.targettracker.model.EcefPoint;
 import com.targettracker.model.GeodeticPoint;
 import com.targettracker.model.ScenarioModel;
@@ -24,6 +25,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
 import java.awt.Point;
+import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
@@ -77,14 +79,17 @@ final class EarthMapCanvas extends JPanel {
     private final Supplier<TargetTrajectory> selectedTarget;
     private final BooleanSupplier editingLocked;
     private final Runnable onPathChanged;
+    private final Consumer<BlackoutRegion> onBlackoutRegionCreated;
     private final Consumer<GeodeticPoint> onCursorChanged;
     private final BufferedImage earthImage;
     private final NaturalEarthDetailLayer detailLayer;
 
     private DrawingMode drawingMode = DrawingMode.FREE_HAND;
     private boolean freeHandDrawing;
+    private boolean blackoutDrawing;
     private boolean panning;
     private Point mousePoint;
+    private GeodeticPoint blackoutFirstCorner;
     private Point panAnchor;
     private double panStartLongitude;
     private double panStartLatitude;
@@ -97,6 +102,7 @@ final class EarthMapCanvas extends JPanel {
     private Set<String> stitchingTargetIds = Set.of();
     private List<TrackStitchingAnalyzer.Segment> stitchingSegments = List.of();
     private StitchingVisibilityMode stitchingVisibilityMode = StitchingVisibilityMode.ALL;
+    private double profileHighlightNormalizedTime = Double.NaN;
 
     EarthMapCanvas(
             ScenarioModel model,
@@ -106,6 +112,7 @@ final class EarthMapCanvas extends JPanel {
             Supplier<TargetTrajectory> selectedTarget,
             BooleanSupplier editingLocked,
             Runnable onPathChanged,
+            Consumer<BlackoutRegion> onBlackoutRegionCreated,
             Consumer<GeodeticPoint> onCursorChanged) {
         this.model = model;
         this.playback = playback;
@@ -114,6 +121,7 @@ final class EarthMapCanvas extends JPanel {
         this.selectedTarget = selectedTarget;
         this.editingLocked = editingLocked;
         this.onPathChanged = onPathChanged;
+        this.onBlackoutRegionCreated = onBlackoutRegionCreated;
         this.onCursorChanged = onCursorChanged;
         this.earthImage = loadEarthImage();
         this.detailLayer = new NaturalEarthDetailLayer(
@@ -137,6 +145,10 @@ final class EarthMapCanvas extends JPanel {
                 if (!SwingUtilities.isLeftMouseButton(event)
                         || editingLocked.getAsBoolean()
                         || !mapBounds().contains(event.getPoint())) {
+                    return;
+                }
+                if (blackoutDrawing) {
+                    handleBlackoutClick(event.getPoint());
                     return;
                 }
                 TargetTrajectory target = selectedTarget.get();
@@ -220,13 +232,26 @@ final class EarthMapCanvas extends JPanel {
     void setDrawingMode(DrawingMode drawingMode) {
         this.drawingMode = drawingMode;
         freeHandDrawing = false;
+        blackoutDrawing = false;
+        blackoutFirstCorner = null;
         repaint();
     }
 
     void finishPath() {
         freeHandDrawing = false;
+        blackoutDrawing = false;
+        blackoutFirstCorner = null;
         mousePoint = null;
         onPathChanged.run();
+        repaint();
+    }
+
+    void startBlackoutRegionDrawing() {
+        freeHandDrawing = false;
+        blackoutDrawing = true;
+        blackoutFirstCorner = null;
+        mousePoint = null;
+        setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
         repaint();
     }
 
@@ -249,6 +274,11 @@ final class EarthMapCanvas extends JPanel {
         List<EcefPoint> points = new ArrayList<>();
         for (TargetTrajectory target : model.targets()) {
             points.addAll(target.path());
+        }
+        for (BlackoutRegion region : model.blackoutRegions()) {
+            for (GeodeticPoint corner : region.corners()) {
+                points.add(Wgs84.toEcef(corner));
+            }
         }
         focusOnPoints(points);
     }
@@ -294,6 +324,13 @@ final class EarthMapCanvas extends JPanel {
         repaint();
     }
 
+    void setProfileHighlightNormalizedTime(double normalizedTime) {
+        profileHighlightNormalizedTime = Double.isFinite(normalizedTime)
+                ? Math.max(0.0, Math.min(1.0, normalizedTime))
+                : Double.NaN;
+        repaint();
+    }
+
     void setStitchingFocus(
             Set<String> trackIds,
             Set<String> targetIds,
@@ -333,6 +370,8 @@ final class EarthMapCanvas extends JPanel {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             drawEarth(g);
             drawGridAndAxes(g);
+            drawBlackoutRegions(g);
+            drawBlackoutPreview(g);
             drawScaleBar(g);
             drawPlannedTrajectories(g);
             drawRecentHistory(g);
@@ -427,6 +466,86 @@ final class EarthMapCanvas extends JPanel {
         g.rotate(Math.PI / 2.0);
     }
 
+    private void drawBlackoutRegions(Graphics2D g) {
+        if (model.blackoutRegions().isEmpty()) {
+            return;
+        }
+        Rectangle map = mapBounds();
+        for (BlackoutRegion region : model.blackoutRegions()) {
+            Polygon polygon = new Polygon();
+            for (GeodeticPoint corner : region.corners()) {
+                Point point = toScreenUnclipped(corner);
+                polygon.addPoint(point.x, point.y);
+            }
+            Graphics2D zone = (Graphics2D) g.create();
+            try {
+                zone.clip(map);
+                zone.setColor(new Color(210, 214, 219, 124));
+                zone.fillPolygon(polygon);
+                zone.clip(polygon);
+                zone.setStroke(new BasicStroke(7.0f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL));
+                zone.setColor(new Color(92, 98, 105, 118));
+                Rectangle bounds = polygon.getBounds();
+                int start = bounds.x - bounds.height - 40;
+                int end = bounds.x + bounds.width + 40;
+                for (int x = start; x <= end; x += 22) {
+                    zone.drawLine(x, bounds.y + bounds.height + 40,
+                            x + bounds.height + 40, bounds.y);
+                }
+            } finally {
+                zone.dispose();
+            }
+            g.setColor(new Color(60, 65, 72, 180));
+            g.setStroke(new BasicStroke(1.4f));
+            g.drawPolygon(polygon);
+            Point labelPoint = toScreen(region.center());
+            if (labelPoint != null) {
+                g.setFont(g.getFont().deriveFont(Font.BOLD, 11.0f));
+                String label = region.name();
+                FontMetrics metrics = g.getFontMetrics();
+                int width = metrics.stringWidth(label) + 10;
+                g.setColor(new Color(255, 255, 255, 210));
+                g.fillRoundRect(labelPoint.x - width / 2, labelPoint.y - 10,
+                        width, 18, 8, 8);
+                g.setColor(new Color(61, 66, 73));
+                g.drawString(label, labelPoint.x - metrics.stringWidth(label) / 2,
+                        labelPoint.y + 3);
+            }
+        }
+    }
+
+    private void drawBlackoutPreview(Graphics2D g) {
+        if (!blackoutDrawing || blackoutFirstCorner == null || mousePoint == null
+                || !mapBounds().contains(mousePoint)) {
+            return;
+        }
+        Point first = toScreen(blackoutFirstCorner);
+        if (first == null) {
+            return;
+        }
+        int x = Math.min(first.x, mousePoint.x);
+        int y = Math.min(first.y, mousePoint.y);
+        int width = Math.abs(mousePoint.x - first.x);
+        int height = Math.abs(mousePoint.y - first.y);
+        if (width < 2 || height < 2) {
+            return;
+        }
+        Stroke previousStroke = g.getStroke();
+        g.setColor(new Color(230, 234, 238, 92));
+        g.fillRect(x, y, width, height);
+        g.setStroke(new BasicStroke(
+                2.0f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL,
+                10.0f, new float[]{8.0f, 5.0f}, 0.0f));
+        g.setColor(new Color(35, 41, 48, 210));
+        g.drawRect(x, y, width, height);
+        g.setStroke(previousStroke);
+        g.setFont(g.getFont().deriveFont(Font.BOLD, 11.0f));
+        g.setColor(new Color(255, 255, 255, 225));
+        g.fillRoundRect(mousePoint.x + 10, mousePoint.y - 28, 122, 22, 9, 9);
+        g.setColor(new Color(45, 52, 60));
+        g.drawString("Click second corner", mousePoint.x + 18, mousePoint.y - 13);
+    }
+
     private void drawPlannedTrajectories(Graphics2D g) {
         if (!displaySettings.groundTruthVisible()) {
             return;
@@ -461,7 +580,23 @@ final class EarthMapCanvas extends JPanel {
             g.setColor(withAlpha(color, alpha));
             g.setStroke(target == selected ? SELECTED_PLANNED_STROKE : PLANNED_STROKE);
             drawEcefPath(g, sampledGeodesicPath(target.path()));
+            if (target == selected && Double.isFinite(profileHighlightNormalizedTime)) {
+                drawProfileHighlight(g, target, color);
+            }
         }
+    }
+
+    private void drawProfileHighlight(Graphics2D g, TargetTrajectory target, Color color) {
+        if (!target.isRunnable() || profileHighlightNormalizedTime <= 0.0) {
+            return;
+        }
+        List<EcefPoint> prefix = trajectoryPrefix(target, profileHighlightNormalizedTime);
+        if (prefix.size() < 2) {
+            return;
+        }
+        g.setColor(withAlpha(color, 245));
+        g.setStroke(new BasicStroke(7.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        drawEcefPath(g, sampledGeodesicPath(prefix));
     }
 
     private void drawRecentHistory(Graphics2D g) {
@@ -858,8 +993,57 @@ final class EarthMapCanvas extends JPanel {
         return sampled;
     }
 
+    private static List<EcefPoint> trajectoryPrefix(
+            TargetTrajectory target,
+            double normalizedTime) {
+        if (target.path().size() < 2) {
+            return List.of();
+        }
+        double wantedDistance = target.surfaceLengthMeters()
+                * target.velocityProfile().normalizedIntegralAt(normalizedTime);
+        if (wantedDistance <= 1.0e-6) {
+            return List.of(target.path().get(0));
+        }
+        List<EcefPoint> prefix = new ArrayList<>();
+        prefix.add(target.path().get(0));
+        double traversed = 0.0;
+        for (int index = 1; index < target.path().size(); index++) {
+            EcefPoint start = target.path().get(index - 1);
+            EcefPoint end = target.path().get(index);
+            GeodeticPoint startGeo = Wgs84.toGeodetic(start);
+            GeodeticPoint endGeo = Wgs84.toGeodetic(end);
+            double segmentLength = Wgs84Geodesic.inverse(startGeo, endGeo).distanceMeters();
+            if (traversed + segmentLength >= wantedDistance) {
+                double fraction = segmentLength <= 1.0e-9
+                        ? 0.0
+                        : (wantedDistance - traversed) / segmentLength;
+                prefix.add(Wgs84.toEcef(Wgs84Geodesic.interpolate(
+                        startGeo, endGeo, fraction, 0.0)));
+                return List.copyOf(prefix);
+            }
+            prefix.add(end);
+            traversed += segmentLength;
+        }
+        return List.copyOf(prefix);
+    }
+
     private void addMapPoint(TargetTrajectory target, Point point) {
         target.addPathPoint(Wgs84.toEcef(toGeodetic(point).withAltitude(0.0)));
+    }
+
+    private void handleBlackoutClick(Point point) {
+        GeodeticPoint corner = toGeodetic(point).withAltitude(0.0);
+        if (blackoutFirstCorner == null) {
+            blackoutFirstCorner = corner;
+            mousePoint = point;
+            repaint();
+            return;
+        }
+        BlackoutRegion region = model.addUserBlackoutRegion(blackoutFirstCorner, corner);
+        blackoutDrawing = false;
+        blackoutFirstCorner = null;
+        onBlackoutRegionCreated.accept(region);
+        repaint();
     }
 
     private void updateMouse(MouseEvent event) {
@@ -898,6 +1082,13 @@ final class EarthMapCanvas extends JPanel {
                 || Math.abs(latitudeDelta) > visibleLatitudeSpan() / 2.0 + 1.0e-8) {
             return null;
         }
+        return toScreenUnclipped(point);
+    }
+
+    private Point toScreenUnclipped(GeodeticPoint point) {
+        double longitudeDelta = GeodeticPoint.normalizeLongitude(
+                point.longitudeDegrees() - centerLongitude);
+        double latitudeDelta = point.latitudeDegrees() - centerLatitude;
         Rectangle map = mapBounds();
         return new Point(
                 map.x + map.width / 2 + (int) Math.round(

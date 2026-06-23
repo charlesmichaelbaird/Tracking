@@ -47,6 +47,8 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                     () -> {
                     },
                     ignored -> {
+                    },
+                    ignored -> {
                     });
             TrackStitchingAnalysisPanel panel = new TrackStitchingAnalysisPanel(
                     scenario,

@@ -14,14 +14,23 @@ public enum ScenarioPreset {
     FOUR_WAY_CROSSING("4 targets — simultaneous crossing", 4),
     COORDINATED_SWITCHBACK("3 targets — coordinated switchbacks", 3),
     OVERTAKE_AND_SPLIT("3 targets — overtake and hard split", 3),
-    MERGE_AND_FAN("4 targets — merge, cluster, and fan out", 4);
+    MERGE_AND_FAN("4 targets — merge, cluster, and fan out", 4),
+    SINGLE_TARGET_BLACKOUT("1 target — straight through blackout", 1, 15 * 60),
+    MULTI_TARGET_BLACKOUT("5 targets — staggered blackout crossing", 5, 15 * 60),
+    AIRPORT_BLACKOUT("13 targets — airport hangar blackouts", 13, 20 * 60);
 
     private final String displayName;
     private final int targetCount;
+    private final int defaultDurationSeconds;
 
     ScenarioPreset(String displayName, int targetCount) {
+        this(displayName, targetCount, PresetScenarioParameters.MINIMUM_DURATION_SECONDS);
+    }
+
+    ScenarioPreset(String displayName, int targetCount, int defaultDurationSeconds) {
         this.displayName = displayName;
         this.targetCount = targetCount;
+        this.defaultDurationSeconds = defaultDurationSeconds;
     }
 
     public int targetCount() {
@@ -30,6 +39,10 @@ public enum ScenarioPreset {
 
     public boolean isUserGenerated() {
         return this == USER_GENERATED;
+    }
+
+    public int defaultDurationSeconds() {
+        return defaultDurationSeconds;
     }
 
     @Override

@@ -16,6 +16,8 @@ public final class ScenarioModel {
     };
 
     private final List<TargetTrajectory> targets = new ArrayList<>();
+    private final List<BlackoutRegion> blackoutRegions = new ArrayList<>();
+    private int nextTargetNumber = 1;
 
     public ScenarioModel() {
     }
@@ -24,8 +26,35 @@ public final class ScenarioModel {
         return Collections.unmodifiableList(targets);
     }
 
+    public List<BlackoutRegion> blackoutRegions() {
+        return Collections.unmodifiableList(blackoutRegions);
+    }
+
+    public void addBlackoutRegion(BlackoutRegion region) {
+        blackoutRegions.add(region);
+    }
+
+    public BlackoutRegion addUserBlackoutRegion(
+            GeodeticPoint firstCorner,
+            GeodeticPoint secondCorner) {
+        BlackoutRegion region = BlackoutRegion.fromOppositeCorners(
+                "BLK-%03d".formatted(blackoutRegions.size() + 1),
+                firstCorner,
+                secondCorner);
+        addBlackoutRegion(region);
+        return region;
+    }
+
+    public void clearBlackoutRegions() {
+        blackoutRegions.clear();
+    }
+
+    public boolean isInBlackout(EcefPoint point) {
+        return blackoutRegions.stream().anyMatch(region -> region.contains(point));
+    }
+
     public TargetTrajectory addTarget() {
-        int number = targets.size() + 1;
+        int number = nextTargetNumber++;
         TargetTrajectory target = new TargetTrajectory(
                 "TGT-%03d".formatted(number),
                 TARGET_COLORS[(number - 1) % TARGET_COLORS.length]);
@@ -33,12 +62,18 @@ public final class ScenarioModel {
         return target;
     }
 
+    public boolean removeTarget(TargetTrajectory target) {
+        return targets.remove(target);
+    }
+
     /** Replaces the scenario target set and returns the newly numbered targets. */
     public List<TargetTrajectory> replaceTargets(int targetCount) {
-        if (targetCount < 1) {
-            throw new IllegalArgumentException("A scenario requires at least one target");
+        if (targetCount < 0) {
+            throw new IllegalArgumentException("Target count cannot be negative");
         }
         targets.clear();
+        blackoutRegions.clear();
+        nextTargetNumber = 1;
         for (int index = 0; index < targetCount; index++) {
             addTarget();
         }

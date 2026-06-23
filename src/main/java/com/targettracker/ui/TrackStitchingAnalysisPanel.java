@@ -64,12 +64,21 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final TimeRangeControl newWindow;
     private final JCheckBox allowDeadTracks = new JCheckBox("Allow stitching to dead tracks");
     private final JTextField resolutionField = new JTextField("0.5", 7);
+    private final JTextField falseAlarmRateField = new JTextField("1e-6", 8);
+    private final JTextField birthRateField = new JTextField("1e-6", 8);
     private final JButton analyzeButton = new JButton("Run stitching analysis");
+    private final JToggleButton feasibilityButton = new JToggleButton("Feasibility", true);
+    private final JToggleButton alternativeButton = new JToggleButton("Alternative Hypothesis");
     private final JToggleButton showAllButton = new JToggleButton("All", true);
     private final JToggleButton showGreyedButton = new JToggleButton("Greyed");
     private final JToggleButton showOnlyButton = new JToggleButton("Only Stitched");
     private List<TrackStitchingAnalyzer.EventResult> events = List.of();
     private boolean active = true;
+
+    private enum ScoreMode {
+        FEASIBILITY,
+        ALTERNATIVE
+    }
 
     TrackStitchingAnalysisPanel(
             RecordedScenario scenario,
@@ -115,7 +124,17 @@ final class TrackStitchingAnalysisPanel extends JPanel {
 
         analyzeButton.addActionListener(event -> runAnalysis());
         resolutionField.addActionListener(event -> runAnalysis());
+        falseAlarmRateField.addActionListener(event -> runAnalysis());
+        birthRateField.addActionListener(event -> runAnalysis());
         allowDeadTracks.addActionListener(event -> runAnalysis());
+        feasibilityButton.addActionListener(event -> {
+            syncScoreModeButtons();
+            updateSelectedEvent();
+        });
+        alternativeButton.addActionListener(event -> {
+            syncScoreModeButtons();
+            updateSelectedEvent();
+        });
         showAllButton.addActionListener(event -> updateSelectedEvent());
         showGreyedButton.addActionListener(event -> updateSelectedEvent());
         showOnlyButton.addActionListener(event -> updateSelectedEvent());
@@ -154,13 +173,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         panel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createTitledBorder("Configuration"),
                 BorderFactory.createEmptyBorder(6, 10, 10, 10)));
-        panel.add(coastedWindow);
-        panel.add(Box.createVerticalStrut(8));
-        panel.add(newWindow);
-        panel.add(Box.createVerticalStrut(8));
-        allowDeadTracks.setOpaque(false);
-        allowDeadTracks.setAlignmentX(LEFT_ALIGNMENT);
-        panel.add(allowDeadTracks);
+        panel.add(createTimingAndAlternativePanel());
         panel.add(Box.createVerticalStrut(10));
         JPanel resolutionRow = new JPanel(new BorderLayout(8, 0));
         resolutionRow.setOpaque(false);
@@ -180,6 +193,44 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         statusLabel.setAlignmentX(LEFT_ALIGNMENT);
         panel.add(statusLabel);
         panel.add(Box.createVerticalGlue());
+        return panel;
+    }
+
+    private JPanel createTimingAndAlternativePanel() {
+        JPanel panel = new JPanel(new BorderLayout(12, 0));
+        panel.setOpaque(false);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 112));
+
+        JPanel timingPanel = new JPanel();
+        timingPanel.setLayout(new BoxLayout(timingPanel, BoxLayout.Y_AXIS));
+        timingPanel.setOpaque(false);
+        timingPanel.add(coastedWindow);
+        timingPanel.add(Box.createVerticalStrut(8));
+        timingPanel.add(newWindow);
+        timingPanel.add(Box.createVerticalStrut(5));
+        allowDeadTracks.setOpaque(false);
+        allowDeadTracks.setAlignmentX(LEFT_ALIGNMENT);
+        timingPanel.add(allowDeadTracks);
+
+        panel.add(timingPanel, BorderLayout.CENTER);
+        panel.add(createAlternativeHypothesisPanel(), BorderLayout.EAST);
+        return panel;
+    }
+
+    private JPanel createAlternativeHypothesisPanel() {
+        JPanel panel = new JPanel(new GridLayout(0, 2, 6, 5));
+        panel.setOpaque(false);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setPreferredSize(new Dimension(260, 86));
+        panel.setMaximumSize(new Dimension(280, 92));
+        panel.setBorder(BorderFactory.createTitledBorder("Alternative Hypothesis"));
+        falseAlarmRateField.setToolTipText("Expected false alarms per 1 km^3 innovation volume");
+        birthRateField.setToolTipText("Expected target births per 1 km^3 innovation volume");
+        panel.add(new JLabel("False alarms / km^3"));
+        panel.add(falseAlarmRateField);
+        panel.add(new JLabel("Target births / km^3"));
+        panel.add(birthRateField);
         return panel;
     }
 
@@ -219,14 +270,48 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         summaryPanel.setPreferredSize(new Dimension(0, 158));
         panel.add(summaryPanel, BorderLayout.NORTH);
 
+        JPanel metricsPanel = new JPanel(new BorderLayout(0, 4));
+        metricsPanel.setOpaque(false);
+        metricsPanel.add(createScoreModePanel(), BorderLayout.NORTH);
         JScrollPane metricsScroll = new JScrollPane(
                 metricsTable,
                 ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
                 ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         metricsScroll.setBorder(BorderFactory.createTitledBorder(
                 "Join time, NLL, and Mahalanobis metrics"));
-        panel.add(metricsScroll, BorderLayout.CENTER);
+        metricsPanel.add(metricsScroll, BorderLayout.CENTER);
+        panel.add(metricsPanel, BorderLayout.CENTER);
         return panel;
+    }
+
+    private JPanel createScoreModePanel() {
+        JPanel panel = new JPanel(new GridLayout(1, 2, 6, 0));
+        panel.setOpaque(false);
+        ButtonGroup group = new ButtonGroup();
+        group.add(feasibilityButton);
+        group.add(alternativeButton);
+        feasibilityButton.setToolTipText("Show Gaussian NLL and Mahalanobis feasibility scores");
+        alternativeButton.setToolTipText("Show static and learned spatial-density NLLR scores");
+        panel.add(feasibilityButton);
+        panel.add(alternativeButton);
+        syncScoreModeButtons();
+        return panel;
+    }
+
+    private void syncScoreModeButtons() {
+        styleScoreModeButton(feasibilityButton, feasibilityButton.isSelected());
+        styleScoreModeButton(alternativeButton, alternativeButton.isSelected());
+    }
+
+    private static void styleScoreModeButton(JToggleButton button, boolean selected) {
+        button.setOpaque(true);
+        if (selected) {
+            button.setBackground(new Color(48, 84, 128));
+            button.setForeground(Color.WHITE);
+        } else {
+            button.setBackground(new Color(222, 226, 232));
+            button.setForeground(new Color(98, 106, 116));
+        }
     }
 
     private static void configureOutputArea(JTextArea area) {
@@ -246,14 +331,23 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         metricsTable.getTableHeader().setReorderingAllowed(false);
         metricsTable.getTableHeader().setFont(
                 metricsTable.getTableHeader().getFont().deriveFont(Font.BOLD, 11.0f));
+        configureMetricColumnWidths();
+    }
+
+    private void configureMetricColumnWidths() {
+        if (metricsTable.getColumnModel().getColumnCount() < 4) {
+            return;
+        }
         metricsTable.getColumnModel().getColumn(0).setPreferredWidth(95);
         metricsTable.getColumnModel().getColumn(1).setPreferredWidth(210);
-        metricsTable.getColumnModel().getColumn(2).setPreferredWidth(95);
-        metricsTable.getColumnModel().getColumn(3).setPreferredWidth(105);
+        metricsTable.getColumnModel().getColumn(2).setPreferredWidth(120);
+        metricsTable.getColumnModel().getColumn(3).setPreferredWidth(135);
     }
 
     private void runAnalysis() {
         final double resolution;
+        final double falseAlarmRate;
+        final double birthRate;
         try {
             resolution = Double.parseDouble(resolutionField.getText().trim());
             if (!Double.isFinite(resolution) || resolution <= 0.0) {
@@ -265,6 +359,13 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             statusLabel.setText("Enter a positive time-bank resolution");
             return;
         }
+        try {
+            falseAlarmRate = parseNonNegative(falseAlarmRateField);
+            birthRate = parseNonNegative(birthRateField);
+        } catch (NumberFormatException exception) {
+            statusLabel.setText("Enter non-negative alternative-hypothesis densities");
+            return;
+        }
         TrackStitchingAnalyzer.Configuration configuration =
                 new TrackStitchingAnalyzer.Configuration(
                         coastedWindow.minimumSeconds(),
@@ -272,7 +373,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                         newWindow.minimumSeconds(),
                         newWindow.maximumSeconds(),
                         allowDeadTracks.isSelected(),
-                        resolution);
+                        resolution,
+                        falseAlarmRate,
+                        birthRate);
         analyzeButton.setEnabled(false);
         statusLabel.setText("Analyzing measurement times...");
         eventTabs.removeAll();
@@ -312,6 +415,20 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         worker.execute();
     }
 
+    private static double parseNonNegative(JTextField field) {
+        try {
+            double value = Double.parseDouble(field.getText().trim());
+            if (!Double.isFinite(value) || value < 0.0) {
+                throw new NumberFormatException();
+            }
+            field.setBackground(Color.WHITE);
+            return value;
+        } catch (NumberFormatException exception) {
+            field.setBackground(new Color(255, 224, 224));
+            throw exception;
+        }
+    }
+
     private void populateEventTabs() {
         eventTabs.removeAll();
         if (events.isEmpty()) {
@@ -341,7 +458,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         }
         TrackStitchingAnalyzer.EventResult event = events.get(index);
         summaryArea.setText(formatSummary(event));
-        assignmentArea.setText(formatAssignments(event));
+        assignmentArea.setText(formatAssignments(event, scoreMode()));
         populateMetricsTable(event);
         summaryArea.setCaretPosition(0);
         assignmentArea.setCaretPosition(0);
@@ -377,6 +494,10 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             return EarthMapCanvas.StitchingVisibilityMode.GREYED;
         }
         return EarthMapCanvas.StitchingVisibilityMode.ALL;
+    }
+
+    private ScoreMode scoreMode() {
+        return alternativeButton.isSelected() ? ScoreMode.ALTERNATIVE : ScoreMode.FEASIBILITY;
     }
 
     private static Set<String> candidateTrackIds(TrackStitchingAnalyzer.EventResult event) {
@@ -444,10 +565,20 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         return text.toString();
     }
 
-    private static String formatAssignments(TrackStitchingAnalyzer.EventResult event) {
+    private static String formatAssignments(
+            TrackStitchingAnalyzer.EventResult event,
+            ScoreMode mode) {
         StringBuilder text = new StringBuilder();
-        appendAssignments(text, "NLL optimum", event.nllAssignments());
-        appendAssignments(text, "Mahalanobis optimum", event.mahalanobisAssignments());
+        text.append("Learned null birth density:\n  ")
+                .append(formatScientific(event.learnedBirthDensityPerCubicKilometerSecond()))
+                .append(" births / km^3 / s\n\n");
+        if (mode == ScoreMode.ALTERNATIVE) {
+            appendAssignments(text, "Static/uniform NLLR optimum", event.staticNllrAssignments());
+            appendAssignments(text, "Learned spatial NLLR optimum", event.learnedNllrAssignments());
+        } else {
+            appendAssignments(text, "NLL optimum", event.nllAssignments());
+            appendAssignments(text, "Mahalanobis optimum", event.mahalanobisAssignments());
+        }
         return text.toString();
     }
 
@@ -478,6 +609,15 @@ final class TrackStitchingAnalysisPanel extends JPanel {
 
     private void populateMetricsTable(TrackStitchingAnalyzer.EventResult event) {
         metricsModel.setRowCount(0);
+        ScoreMode mode = scoreMode();
+        if (mode == ScoreMode.ALTERNATIVE) {
+            metricsModel.setColumnIdentifiers(new Object[]{
+                    "Pair", "Estimated join time", "Static/uniform NLLR", "Learned spatial NLLR"});
+        } else {
+            metricsModel.setColumnIdentifiers(new Object[]{
+                    "Pair", "Estimated join time", "NLL", "Mahalanobis"});
+        }
+        configureMetricColumnWidths();
         List<MetricRow> rows = new ArrayList<>();
         for (TrackStitchingAnalyzer.PairResult pair : event.pairs()) {
             String pairName = pair.oldTrackId() + " -> " + pair.newTrackId();
@@ -487,32 +627,48 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                     pairName,
                     "Simple midpoint",
                     "Simple midpoint @ " + formatTime(pair.simpleJoinTimeSeconds()),
-                    pair.simpleNegativeLogLikelihood(),
-                    pair.simpleMahalanobisDistance()));
+                    mode == ScoreMode.ALTERNATIVE
+                            ? pair.simpleStaticNegativeLogLikelihoodRatio()
+                            : pair.simpleNegativeLogLikelihood(),
+                    mode == ScoreMode.ALTERNATIVE
+                            ? pair.simpleLearnedNegativeLogLikelihoodRatio()
+                            : pair.simpleMahalanobisDistance()));
             rows.add(addMetricRow(
                     event,
                     pair,
                     pairName,
                     "Kinematic midpoint",
                     "Kinematic midpoint @ " + formatTime(pair.kinematicJoinTimeSeconds()),
-                    pair.kinematicNegativeLogLikelihood(),
-                    pair.kinematicMahalanobisDistance()));
+                    mode == ScoreMode.ALTERNATIVE
+                            ? pair.kinematicStaticNegativeLogLikelihoodRatio()
+                            : pair.kinematicNegativeLogLikelihood(),
+                    mode == ScoreMode.ALTERNATIVE
+                            ? pair.kinematicLearnedNegativeLogLikelihoodRatio()
+                            : pair.kinematicMahalanobisDistance()));
             rows.add(addMetricRow(
                     event,
                     pair,
                     pairName,
                     "Mahalanobis bank",
                     "Mahalanobis bank @ " + formatTime(pair.statisticalJoinTimeSeconds()),
-                    pair.statisticalNegativeLogLikelihood(),
-                    pair.statisticalMahalanobisDistance()));
+                    mode == ScoreMode.ALTERNATIVE
+                            ? pair.statisticalStaticNegativeLogLikelihoodRatio()
+                            : pair.statisticalNegativeLogLikelihood(),
+                    mode == ScoreMode.ALTERNATIVE
+                            ? pair.statisticalLearnedNegativeLogLikelihoodRatio()
+                            : pair.statisticalMahalanobisDistance()));
             rows.add(addMetricRow(
                     event,
                     pair,
                     pairName,
                     "Truth RMS",
                     "Truth RMS @ " + formatTime(pair.actualJoinTimeSeconds()),
-                    pair.actualNegativeLogLikelihood(),
-                    pair.actualMahalanobisDistance()));
+                    mode == ScoreMode.ALTERNATIVE
+                            ? pair.actualStaticNegativeLogLikelihoodRatio()
+                            : pair.actualNegativeLogLikelihood(),
+                    mode == ScoreMode.ALTERNATIVE
+                            ? pair.actualLearnedNegativeLogLikelihoodRatio()
+                            : pair.actualMahalanobisDistance()));
         }
         metricRows = List.copyOf(rows);
     }
@@ -531,11 +687,16 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 formatNumber(negativeLogLikelihood),
                 formatNumber(mahalanobisDistance)
         });
+        ScoreMode mode = scoreMode();
         return new MetricRow(
                 pairName,
                 variant,
-                isAssigned(event.nllAssignments(), pair, variant),
-                isAssigned(event.mahalanobisAssignments(), pair, variant));
+                isAssigned(mode == ScoreMode.ALTERNATIVE
+                        ? event.staticNllrAssignments()
+                        : event.nllAssignments(), pair, variant),
+                isAssigned(mode == ScoreMode.ALTERNATIVE
+                        ? event.learnedNllrAssignments()
+                        : event.mahalanobisAssignments(), pair, variant));
     }
 
     private static boolean isAssigned(
@@ -553,6 +714,13 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             return "-";
         }
         return String.format(Locale.ROOT, "%.3f", value);
+    }
+
+    private static String formatScientific(double value) {
+        if (!Double.isFinite(value)) {
+            return "-";
+        }
+        return String.format(Locale.ROOT, "%.3e", value);
     }
 
     private final class MetricCellRenderer extends DefaultTableCellRenderer {

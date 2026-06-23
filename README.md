@@ -168,8 +168,8 @@ candidate tracks/targets. Dead candidate tracks remain grey and labeled in the
 map. The configuration section supplies minimum and
 maximum coast/new-track windows, optional dead-track eligibility, and the
 prediction/retrodiction time-bank resolution. Pressing **Run stitching
-analysis** also computes separate Hungarian assignments for NLL and
-Mahalanobis costs.
+analysis** also computes separate Hungarian assignments for NLL, Mahalanobis,
+static/uniform NLLR, and learned-spatial NLLR costs.
 
 For every old/new segment pair, the analysis reports simple and kinematic
 midpoints, a full-state Mahalanobis time-bank estimate, and a truth-reference
@@ -184,8 +184,10 @@ At each candidate time, the full 9D innovation is `x_old - x_new` and its
 covariance is `P_old + P_new`. The time bank uses the canonical Mahalanobis
 distance, while each timing variant receives both the canonical multivariate
 Gaussian negative log likelihood and the corresponding Mahalanobis distance.
+Alternative Hypothesis mode compares the same Gaussian likelihood against a
+static extraneous spatial density and a learned target-birth spatial density.
 The scenario summary remains above a combined metrics table with one row per
-old/new pair and timing estimate. Optimal NLL and Mahalanobis assignments show
+old/new pair and timing estimate. Optimal assignments appear with their
 costs on the right. Each timestamp tab provides a locally focused Plate Carrée
 view driven by the main map and replay timeline.
 

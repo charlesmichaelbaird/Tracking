@@ -150,10 +150,13 @@ final class MeasurementEngine {
 
     private void makeLook(double lookTimeSeconds) {
         for (TargetTrajectory target : model.targets()) {
-            if (!target.isRunnable() || !detected()) {
+            if (!target.isRunnable()) {
                 continue;
             }
             EcefPoint truePosition = target.positionAt(lookTimeSeconds);
+            if (truePosition == null || model.isInBlackout(truePosition) || !detected()) {
+                continue;
+            }
             EcefVector trueVelocity = target.ecefVelocityAt(lookTimeSeconds);
             double positionSigma = activeParameters.positionStandardDeviationMeters();
             double velocitySigma = activeParameters.velocityStandardDeviationMetersPerSecond();

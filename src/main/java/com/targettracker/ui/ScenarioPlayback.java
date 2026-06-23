@@ -184,12 +184,9 @@ final class ScenarioPlayback {
             }
             Map<String, TrackRecord> latestRecords = new LinkedHashMap<>();
             recordsByTime.forEach((time, records) -> {
-                if (Math.abs(time - Math.rint(time)) <= TIME_EPSILON_SECONDS) {
-                    latestRecords.clear();
-                }
                 records.forEach(record -> latestRecords.put(record.trackId(), record));
                 List<TrackView> views = latestRecords.values().stream()
-                        .map(ScenarioPlayback::trackViewFromRecord)
+                        .map(record -> trackViewFromRecord(record, time))
                         .toList();
                 replayFrames.add(new ReplayFrame(time, List.copyOf(views)));
             });
@@ -197,9 +194,16 @@ final class ScenarioPlayback {
         if (replayFrames.get(replayFrames.size() - 1).timeSeconds()
                 < importedDurationSeconds - TIME_EPSILON_SECONDS) {
             ReplayFrame lastFrame = replayFrames.get(replayFrames.size() - 1);
-            List<TrackView> endingViews = importedDurationSeconds - lastFrame.timeSeconds() <= 1.0
-                    ? lastFrame.trackViews()
-                    : List.of();
+            List<TrackView> endingViews = lastFrame.trackViews().stream()
+                    .map(track -> new TrackView(
+                            track.id(),
+                            track.meanPosition(),
+                            track.positionCovariance(),
+                            List.of(),
+                            track.color(),
+                            true,
+                            track.uncertaintyRadiusMeters()))
+                    .toList();
             replayFrames.add(new ReplayFrame(importedDurationSeconds, endingViews));
         }
         replayReady = true;
@@ -613,7 +617,7 @@ final class ScenarioPlayback {
         return new EcefPoint(mean[0], mean[1], mean[2]);
     }
 
-    private static TrackView trackViewFromRecord(TrackRecord record) {
+    private static TrackView trackViewFromRecord(TrackRecord record, double frameTimeSeconds) {
         double[] state = record.state();
         double[][] covariance = record.covariance();
         double[][] positionCovariance = new double[3][3];
@@ -629,7 +633,7 @@ final class ScenarioPlayback {
                 positionCovariance,
                 List.of(),
                 trackColor(record.trackId()),
-                false,
+                frameTimeSeconds - record.timeSeconds() > 1.01,
                 radius);
     }
 

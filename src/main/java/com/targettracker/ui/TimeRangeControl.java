@@ -71,7 +71,8 @@ final class TimeRangeControl extends JPanel {
 
     private static void configure(JSlider slider, String tooltip) {
         slider.setAlignmentX(LEFT_ALIGNMENT);
-        slider.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        slider.setPreferredSize(new Dimension(360, 28));
+        slider.setMaximumSize(new Dimension(380, 34));
         slider.setToolTipText(tooltip);
     }
 

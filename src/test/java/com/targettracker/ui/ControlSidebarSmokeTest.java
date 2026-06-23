@@ -21,17 +21,15 @@ public final class ControlSidebarSmokeTest {
 
     private static void runChecks() {
         ControlSidebar sidebar = new ControlSidebar(
-                named("imm"), named("sensor"), named("motion"),
-                named("targets"), named("scenario"));
+                named("imm"), named("sensor"), named("targets"), named("scenario"));
         List<JToggleButton> buttons = new ArrayList<>();
         collectButtons(sidebar, buttons);
-        if (buttons.size() != 5) {
-            throw new AssertionError("Expected five embedded-section navigation buttons");
+        if (buttons.size() != 4) {
+            throw new AssertionError("Expected four embedded-section navigation buttons");
         }
         List<String> expected = List.of(
                 ControlSidebar.IMM,
                 ControlSidebar.SENSOR,
-                ControlSidebar.MOTION,
                 ControlSidebar.TARGETS,
                 ControlSidebar.SCENARIO);
         for (String name : expected) {

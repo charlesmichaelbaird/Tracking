@@ -11,7 +11,9 @@ import com.targettracker.tracking.ImmTracker;
 
 import javax.swing.SwingUtilities;
 import java.awt.Graphics2D;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Headless checks for deepest map zoom and rewind/pause playback behavior. */
 public final class EarthMapCanvasSmokeTest {
@@ -35,6 +37,7 @@ public final class EarthMapCanvasSmokeTest {
         ImmTracker immTracker = new ImmTracker(new ImmSettings());
         ScenarioPlayback playback = new ScenarioPlayback(model, () -> {
         }, measurementEngine, immTracker);
+        AtomicInteger blackoutCallbacks = new AtomicInteger();
         EarthMapCanvas canvas = new EarthMapCanvas(
                 model,
                 playback,
@@ -44,6 +47,7 @@ public final class EarthMapCanvasSmokeTest {
                 playback::isRunning,
                 () -> {
                 },
+                ignored -> blackoutCallbacks.incrementAndGet(),
                 ignored -> {
                 });
         canvas.setSize(900, 600);
@@ -69,6 +73,16 @@ public final class EarthMapCanvasSmokeTest {
             throw new AssertionError("Scenario extent focus should zoom into its local region");
         }
         canvas.resetView();
+        canvas.startBlackoutRegionDrawing();
+        click(canvas, 420, 280);
+        if (!model.blackoutRegions().isEmpty()) {
+            throw new AssertionError("First blackout click should only store the first corner");
+        }
+        click(canvas, 480, 335);
+        if (model.blackoutRegions().size() != 1 || blackoutCallbacks.get() != 1) {
+            throw new AssertionError("Second blackout click should create one user region");
+        }
+        model.clearBlackoutRegions();
 
         sensorSettings.setParameters(new SensorParameters(15.0, 0.0, 0.0, 0.0, 1.0, 5));
         if (!playback.precompute() || !playback.rewindReplayPaused()) {
@@ -93,5 +107,18 @@ public final class EarthMapCanvasSmokeTest {
             throw new AssertionError(
                     "Clear Path should reset active playback and erase the selected trajectory");
         }
+    }
+
+    private static void click(EarthMapCanvas canvas, int x, int y) {
+        canvas.dispatchEvent(new MouseEvent(
+                canvas,
+                MouseEvent.MOUSE_PRESSED,
+                System.currentTimeMillis(),
+                0,
+                x,
+                y,
+                1,
+                false,
+                MouseEvent.BUTTON1));
     }
 }

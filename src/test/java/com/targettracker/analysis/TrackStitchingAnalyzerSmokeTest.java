@@ -69,6 +69,24 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 || !events.get(0).nllAssignments().get(0).newTrackId().equals("TRK-002")) {
             throw new AssertionError("Expected Hungarian optimum for the single feasible pair");
         }
+        if (events.get(0).nllAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).mahalanobisAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).staticNllrAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).learnedNllrAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))) {
+            throw new AssertionError("Hungarian optima must not use truth-only timing variants");
+        }
+        if (events.get(0).staticNllrAssignments().size() != 1
+                || events.get(0).learnedNllrAssignments().size() != 1
+                || !Double.isFinite(pair.simpleStaticNegativeLogLikelihoodRatio())
+                || !Double.isFinite(pair.simpleLearnedNegativeLogLikelihoodRatio())
+                || !Double.isFinite(events.get(0)
+                .learnedBirthDensityPerCubicKilometerSecond())) {
+            throw new AssertionError("Alternative-hypothesis NLLR outputs should be available");
+        }
 
         List<TrackRecord> deadTrackRecords = tracks.stream()
                 .filter(record -> !record.trackId().equals("TRK-001")
@@ -88,6 +106,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
             throw new AssertionError("Dead old tracks should be eligible when enabled");
         }
         verifyEventLimitedJoinSeeds(analyzer);
+        verifyDeadTrackJoinSeeds(analyzer);
         System.out.println("TrackStitchingAnalyzerSmokeTest passed");
     }
 
@@ -129,6 +148,45 @@ public final class TrackStitchingAnalyzerSmokeTest {
         requireClose(2.5, secondSimple, "second event-limited midpoint");
         if (!Double.isFinite(secondPair.statisticalMahalanobisDistance())) {
             throw new AssertionError("Mahalanobis distance should be reported for each timing row");
+        }
+    }
+
+    private static void verifyDeadTrackJoinSeeds(TrackStitchingAnalyzer analyzer) {
+        List<TrackRecord> tracks = new ArrayList<>();
+        tracks.add(track("TRK-OLD", 0.0, 0.0, 10.0, true));
+        tracks.add(track("TRK-OLD", 1.0, 10.0, 10.0, false));
+        tracks.add(track("TRK-OLD", 2.0, 20.0, 10.0, false));
+        tracks.add(track("TRK-NEW", 3.0, 30.0, 10.0, true));
+        tracks.add(track("TRK-NEW", 4.0, 40.0, 10.0, false));
+        tracks.add(track("TRK-NEW", 5.0, 50.0, 10.0, false));
+
+        List<GroundTruthRecord> truth = new ArrayList<>();
+        for (int second = 0; second <= 5; second++) {
+            truth.add(new GroundTruthRecord(
+                    "TGT-001", second,
+                    new double[]{10.0 * second, 0, 0, 10, 0, 0, 0, 0, 0}));
+        }
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("dead_anchor_stitching_test"),
+                "Dead-anchor stitching test",
+                5.0,
+                tracks,
+                truth,
+                List.of(measurement("TRK-NEW", 5.0, 50.0)));
+        List<TrackStitchingAnalyzer.EventResult> events = analyzer.analyze(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(1.0, 10.0, 0.0, 3.0, true, 0.5));
+        if (events.size() != 1 || events.get(0).oldSegments().stream()
+                .noneMatch(TrackStitchingAnalyzer.Segment::deadAtEvent)) {
+            throw new AssertionError("Dead track should be eligible for stitching when enabled");
+        }
+        TrackStitchingAnalyzer.PairResult pair = pair(events.get(0), "TRK-OLD", "TRK-NEW");
+        requireClose(1.5, pair.simpleJoinTimeSeconds(), "dead-track midpoint seed");
+        requireClose(1.5, pair.kinematicJoinTimeSeconds(), "dead-track kinematic seed");
+        if (pair.statisticalJoinTimeSeconds() < 0.0
+                || pair.statisticalJoinTimeSeconds() > 3.0) {
+            throw new AssertionError(
+                    "Dead-track Mahalanobis bank should stay before the new tracklet formation");
         }
     }
 

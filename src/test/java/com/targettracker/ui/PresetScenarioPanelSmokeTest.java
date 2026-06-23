@@ -1,11 +1,16 @@
 package com.targettracker.ui;
 
 import com.targettracker.model.PresetScenarioParameters;
+import com.targettracker.model.SavedScenarioDefinition;
 import com.targettracker.model.ScenarioPreset;
 
 import javax.swing.JComboBox;
+import javax.swing.JButton;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
+import java.awt.Container;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -24,6 +29,8 @@ public final class PresetScenarioPanelSmokeTest {
     private static void runChecks() {
         AtomicReference<ScenarioPreset> generated = new AtomicReference<>();
         AtomicReference<PresetScenarioParameters> parameters = new AtomicReference<>();
+        AtomicReference<SavedScenarioDefinition> loadedSaved = new AtomicReference<>();
+        AtomicReference<String> savedName = new AtomicReference<>();
         AtomicInteger manualSelections = new AtomicInteger();
         PresetScenarioPanel panel = new PresetScenarioPanel(null, new PresetScenarioPanel.Listener() {
             @Override
@@ -35,8 +42,18 @@ public final class PresetScenarioPanelSmokeTest {
             }
 
             @Override
+            public void loadSavedScenario(SavedScenarioDefinition scenario) {
+                loadedSaved.set(scenario);
+            }
+
+            @Override
             public void selectUserGeneratedMode() {
                 manualSelections.incrementAndGet();
+            }
+
+            @Override
+            public void saveUserScenario(String scenarioName) {
+                savedName.set(scenarioName);
             }
         });
         panel.setSize(1_120, 40);
@@ -66,5 +83,38 @@ public final class PresetScenarioPanelSmokeTest {
         if (manualSelections.get() != 1) {
             throw new AssertionError("User-generated selection should restore manual mode");
         }
+        SavedScenarioDefinition savedScenario = new SavedScenarioDefinition(
+                "Saved smoke",
+                Path.of("saved_smoke.scenario"),
+                List.of(),
+                List.of());
+        panel.setSavedScenarios(List.of(savedScenario));
+        selector.setSelectedItem(savedScenario);
+        if (loadedSaved.get() != savedScenario) {
+            throw new AssertionError("Saved scenario selection should load from the dropdown");
+        }
+        JButton saveButton = findButton(panel, "Save user scenario");
+        if (saveButton == null) {
+            throw new AssertionError("Scenario save button is missing");
+        }
+        saveButton.doClick();
+        if (savedName.get() == null || savedName.get().isBlank()) {
+            throw new AssertionError("Save button should forward the scenario name");
+        }
+    }
+
+    private static JButton findButton(Container container, String text) {
+        for (Component child : container.getComponents()) {
+            if (child instanceof JButton button && text.equals(button.getText())) {
+                return button;
+            }
+            if (child instanceof Container nested) {
+                JButton result = findButton(nested, text);
+                if (result != null) {
+                    return result;
+                }
+            }
+        }
+        return null;
     }
 }

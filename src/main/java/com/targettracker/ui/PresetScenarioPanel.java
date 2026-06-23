@@ -1,6 +1,7 @@
 package com.targettracker.ui;
 
 import com.targettracker.model.PresetScenarioParameters;
+import com.targettracker.model.SavedScenarioDefinition;
 import com.targettracker.model.ScenarioPreset;
 
 import javax.swing.BorderFactory;
@@ -17,27 +18,34 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.util.List;
 
 /** Main-window controls for loading deterministic maneuver scenarios. */
 final class PresetScenarioPanel extends JPanel {
     interface Listener {
         void generatePreset(ScenarioPreset preset, PresetScenarioParameters parameters);
 
+        void loadSavedScenario(SavedScenarioDefinition scenario);
+
         void selectUserGeneratedMode();
+
+        void saveUserScenario(String scenarioName);
     }
 
     private final Component dialogParent;
     private final Listener listener;
-    private final JComboBox<ScenarioPreset> presetSelector =
-            new JComboBox<>(ScenarioPreset.values());
+    private final JComboBox<Object> presetSelector = new JComboBox<>();
     private final JTextField latitudeField = field("40.7000", 7);
     private final JTextField longitudeField = field("-74.0000", 8);
     private final JTextField speedField = field("100", 5);
     private final JTextField altitudeField = field("1000", 6);
     private final JTextField durationField = field("05:00", 5);
+    private final JTextField saveNameField = field("My scenario", 12);
     private final JButton applyButton = new JButton("Apply preset");
+    private final JButton saveButton = new JButton("Save user scenario");
     private final JLabel modeLabel = new JLabel("Manual editing");
     private boolean generationEnabled = true;
+    private boolean synchronizing;
 
     PresetScenarioPanel(Component dialogParent, Listener listener) {
         this.dialogParent = dialogParent;
@@ -67,6 +75,7 @@ final class PresetScenarioPanel extends JPanel {
         presetSelector.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
         presetSelector.setAlignmentX(LEFT_ALIGNMENT);
         presetSelector.setToolTipText("Choose User generated to unlock manual target editing");
+        setSavedScenarios(List.of());
         add(presetSelector);
         add(Box.createVerticalStrut(14));
 
@@ -95,6 +104,8 @@ final class PresetScenarioPanel extends JPanel {
         modeLabel.setForeground(new Color(91, 103, 115));
         modeLabel.setAlignmentX(LEFT_ALIGNMENT);
         add(modeLabel);
+        add(Box.createVerticalStrut(18));
+        add(createSavePanel());
 
         presetSelector.addActionListener(event -> presetSelectionChanged());
         latitudeField.addActionListener(event -> applySelectedPreset());
@@ -105,7 +116,18 @@ final class PresetScenarioPanel extends JPanel {
     }
 
     private void presetSelectionChanged() {
-        ScenarioPreset preset = (ScenarioPreset) presetSelector.getSelectedItem();
+        if (synchronizing) {
+            return;
+        }
+        Object selected = presetSelector.getSelectedItem();
+        if (selected instanceof SavedScenarioDefinition scenario) {
+            applyButton.setEnabled(false);
+            modeLabel.setText("Saved user scenario");
+            modeLabel.setForeground(new Color(44, 112, 62));
+            listener.loadSavedScenario(scenario);
+            return;
+        }
+        ScenarioPreset preset = selected instanceof ScenarioPreset value ? value : null;
         if (preset == null || preset.isUserGenerated()) {
             applyButton.setEnabled(false);
             modeLabel.setText("Manual editing");
@@ -113,6 +135,7 @@ final class PresetScenarioPanel extends JPanel {
             listener.selectUserGeneratedMode();
             return;
         }
+        durationField.setText(formatDuration(preset.defaultDurationSeconds()));
         applyButton.setEnabled(generationEnabled);
         applySelectedPreset();
     }
@@ -121,7 +144,8 @@ final class PresetScenarioPanel extends JPanel {
         if (!generationEnabled) {
             return;
         }
-        ScenarioPreset preset = (ScenarioPreset) presetSelector.getSelectedItem();
+        Object selected = presetSelector.getSelectedItem();
+        ScenarioPreset preset = selected instanceof ScenarioPreset value ? value : null;
         if (preset == null || preset.isUserGenerated()) {
             return;
         }
@@ -152,11 +176,17 @@ final class PresetScenarioPanel extends JPanel {
         speedField.setEnabled(enabled);
         altitudeField.setEnabled(enabled);
         durationField.setEnabled(enabled);
-        ScenarioPreset preset = (ScenarioPreset) presetSelector.getSelectedItem();
+        saveNameField.setEnabled(enabled);
+        saveButton.setEnabled(enabled);
+        Object selected = presetSelector.getSelectedItem();
+        ScenarioPreset preset = selected instanceof ScenarioPreset value ? value : null;
         applyButton.setEnabled(enabled && preset != null && !preset.isUserGenerated());
         if (!enabled) {
             modeLabel.setText("Disabled in Analysis Mode");
             modeLabel.setForeground(new Color(132, 74, 17));
+        } else if (selected instanceof SavedScenarioDefinition) {
+            modeLabel.setText("Saved user scenario");
+            modeLabel.setForeground(new Color(44, 112, 62));
         } else if (preset == null || preset.isUserGenerated()) {
             modeLabel.setText("Manual editing");
             modeLabel.setForeground(new Color(91, 103, 115));
@@ -164,6 +194,46 @@ final class PresetScenarioPanel extends JPanel {
             modeLabel.setText("Preset selected — press Apply");
             modeLabel.setForeground(new Color(132, 74, 17));
         }
+    }
+
+    void setSavedScenarios(List<SavedScenarioDefinition> scenarios) {
+        Object selected = presetSelector.getSelectedItem();
+        synchronizing = true;
+        presetSelector.removeAllItems();
+        for (ScenarioPreset preset : ScenarioPreset.values()) {
+            presetSelector.addItem(preset);
+        }
+        for (SavedScenarioDefinition scenario : scenarios) {
+            presetSelector.addItem(scenario);
+        }
+        if (selected != null) {
+            presetSelector.setSelectedItem(selected);
+        }
+        if (presetSelector.getSelectedItem() == null) {
+            presetSelector.setSelectedItem(ScenarioPreset.USER_GENERATED);
+        }
+        synchronizing = false;
+    }
+
+    private JPanel createSavePanel() {
+        JPanel panel = new JPanel();
+        panel.setOpaque(false);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        JLabel label = new JLabel("Save user-generated scenario");
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 14.0f));
+        label.setForeground(new Color(61, 73, 84));
+        label.setAlignmentX(LEFT_ALIGNMENT);
+        panel.add(label);
+        panel.add(Box.createVerticalStrut(6));
+        panel.add(labeled("Scenario name", saveNameField,
+                "Name used in the scenario dropdown and saved file"));
+        panel.add(Box.createVerticalStrut(8));
+        saveButton.setAlignmentX(LEFT_ALIGNMENT);
+        saveButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        saveButton.addActionListener(event -> listener.saveUserScenario(saveNameField.getText()));
+        panel.add(saveButton);
+        return panel;
     }
 
     private static JPanel labeled(String label, JTextField field, String tooltip) {
@@ -218,5 +288,9 @@ final class PresetScenarioPanel extends JPanel {
             throw new IllegalArgumentException(
                     "Enter duration as non-negative minutes and 00-59 seconds", exception);
         }
+    }
+
+    private static String formatDuration(int durationSeconds) {
+        return "%02d:%02d".formatted(durationSeconds / 60, durationSeconds % 60);
     }
 }

@@ -1,5 +1,7 @@
 package com.targettracker.ui;
 
+import com.targettracker.model.BlackoutRegion;
+import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.SensorParameters;
 import com.targettracker.model.SensorSettings;
 
@@ -9,6 +11,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
@@ -17,6 +20,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.GridLayout;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.util.List;
@@ -25,19 +29,27 @@ import java.util.function.DoublePredicate;
 /** Embedded editor for the omniscient sensor configuration. */
 final class SensorParametersPanel extends JPanel {
     private final SensorSettings sensorSettings;
+    private final ScenarioModel model;
     private final Runnable onParametersChanged;
+    private final Runnable onAddBlackoutRegionRequested;
     private final JTextField lookTimingField;
     private final JTextField lookOffsetField;
     private final JTextField positionStandardDeviationField;
     private final JTextField velocityStandardDeviationField;
     private final JTextField probabilityOfDetectionField;
-    private final JTextField previousMeasurementsField;
+    private final JPanel blackoutListPanel = new JPanel();
     private final JLabel validationLabel = new JLabel("Values apply immediately");
 
-    SensorParametersPanel(SensorSettings sensorSettings, Runnable onParametersChanged) {
+    SensorParametersPanel(
+            SensorSettings sensorSettings,
+            ScenarioModel model,
+            Runnable onParametersChanged,
+            Runnable onAddBlackoutRegionRequested) {
         super(new BorderLayout(0, 12));
         this.sensorSettings = sensorSettings;
+        this.model = model;
         this.onParametersChanged = onParametersChanged;
+        this.onAddBlackoutRegionRequested = onAddBlackoutRegionRequested;
         setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
         setBackground(new Color(246, 248, 251));
 
@@ -76,9 +88,7 @@ final class SensorParametersPanel extends JPanel {
         probabilityOfDetectionField = addField(form,
                 "Probability of detection (between 0 and 1)",
                 defaults.probabilityOfDetection());
-        previousMeasurementsField = addField(form,
-                "How many previous measurements to show (0 to 10)",
-                defaults.previousMeasurementsToShow());
+        form.add(createBlackoutRegionSection());
         add(form, BorderLayout.CENTER);
 
         DocumentListener inputListener = new DocumentListener() {
@@ -98,8 +108,7 @@ final class SensorParametersPanel extends JPanel {
             }
         };
         List.of(lookTimingField, lookOffsetField, positionStandardDeviationField,
-                        velocityStandardDeviationField, probabilityOfDetectionField,
-                        previousMeasurementsField)
+                        velocityStandardDeviationField, probabilityOfDetectionField)
                 .forEach(field -> field.getDocument().addDocumentListener(inputListener));
 
         JPanel footer = new JPanel(new BorderLayout(8, 0));
@@ -119,11 +128,8 @@ final class SensorParametersPanel extends JPanel {
         Double velocityDeviation = parseDouble(velocityStandardDeviationField, value -> value >= 0.0);
         Double probability = parseDouble(probabilityOfDetectionField,
                 value -> value >= 0.0 && value <= 1.0);
-        Integer previousMeasurements = parseInteger(previousMeasurementsField,
-                value -> value >= 0.0 && value <= 10.0);
         if (lookTiming == null || lookOffset == null || positionDeviation == null
-                || velocityDeviation == null || probability == null
-                || previousMeasurements == null) {
+                || velocityDeviation == null || probability == null) {
             validationLabel.setText("Correct the highlighted value(s)");
             validationLabel.setForeground(new Color(177, 43, 43));
             return false;
@@ -131,11 +137,65 @@ final class SensorParametersPanel extends JPanel {
 
         sensorSettings.setParameters(new SensorParameters(
                 lookTiming, lookOffset, positionDeviation, velocityDeviation,
-                probability, previousMeasurements));
+                probability, sensorSettings.parameters().previousMeasurementsToShow()));
         validationLabel.setText("Values applied immediately");
         validationLabel.setForeground(new Color(44, 112, 62));
         onParametersChanged.run();
         return true;
+    }
+
+    void refreshBlackoutRegions() {
+        blackoutListPanel.removeAll();
+        List<BlackoutRegion> regions = model.blackoutRegions();
+        if (regions.isEmpty()) {
+            JLabel empty = new JLabel("No blackout regions defined");
+            empty.setForeground(new Color(91, 103, 115));
+            blackoutListPanel.add(empty);
+        } else {
+            for (BlackoutRegion region : regions) {
+                JLabel row = new JLabel("<html><b>%s</b> &nbsp; %.2f km × %.2f km</html>"
+                        .formatted(
+                                region.name(),
+                                region.widthMeters() / 1_000.0,
+                                region.heightMeters() / 1_000.0));
+                row.setForeground(new Color(55, 65, 75));
+                blackoutListPanel.add(row);
+            }
+        }
+        blackoutListPanel.revalidate();
+        blackoutListPanel.repaint();
+    }
+
+    private JPanel createBlackoutRegionSection() {
+        JPanel panel = new JPanel(new BorderLayout(8, 8));
+        panel.setOpaque(false);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 150));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder("Blackout regions"),
+                BorderFactory.createEmptyBorder(4, 6, 6, 6)));
+
+        JLabel note = new JLabel("<html>Sensor looks are suppressed inside shaded regions.</html>");
+        note.setForeground(new Color(80, 92, 104));
+        JButton addButton = new JButton("+");
+        addButton.setToolTipText("Add a user-defined blackout rectangle with two map clicks");
+        addButton.addActionListener(event -> onAddBlackoutRegionRequested.run());
+        JPanel topRow = new JPanel(new BorderLayout(8, 0));
+        topRow.setOpaque(false);
+        topRow.add(note, BorderLayout.CENTER);
+        topRow.add(addButton, BorderLayout.EAST);
+        panel.add(topRow, BorderLayout.NORTH);
+
+        blackoutListPanel.setOpaque(false);
+        blackoutListPanel.setLayout(new GridLayout(0, 1, 0, 3));
+        JScrollPane scrollPane = new JScrollPane(blackoutListPanel);
+        scrollPane.setOpaque(false);
+        scrollPane.getViewport().setOpaque(false);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.setPreferredSize(new Dimension(1, 76));
+        panel.add(scrollPane, BorderLayout.CENTER);
+        refreshBlackoutRegions();
+        return panel;
     }
 
     private static JTextField addField(JPanel panel, String name, double value) {
@@ -162,18 +222,6 @@ final class SensorParametersPanel extends JPanel {
         try {
             double value = Double.parseDouble(field.getText().trim());
             boolean valid = Double.isFinite(value) && isValid.test(value);
-            field.setBackground(valid ? Color.WHITE : new Color(255, 224, 224));
-            return valid ? value : null;
-        } catch (NumberFormatException exception) {
-            field.setBackground(new Color(255, 224, 224));
-            return null;
-        }
-    }
-
-    private static Integer parseInteger(JTextField field, DoublePredicate isValid) {
-        try {
-            int value = Integer.parseInt(field.getText().trim());
-            boolean valid = isValid.test(value);
             field.setBackground(valid ? Color.WHITE : new Color(255, 224, 224));
             return valid ? value : null;
         } catch (NumberFormatException exception) {

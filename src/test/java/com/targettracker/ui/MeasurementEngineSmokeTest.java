@@ -3,6 +3,7 @@ package com.targettracker.ui;
 import com.targettracker.model.EcefPoint;
 import com.targettracker.model.EcefVector;
 import com.targettracker.model.GeodeticPoint;
+import com.targettracker.model.BlackoutRegion;
 import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.SensorParameters;
 import com.targettracker.model.SensorSettings;
@@ -77,7 +78,30 @@ public final class MeasurementEngineSmokeTest {
         engine.advanceTo(5.0);
         requireCount(0, engine.visibleMeasurements(), "zero requested history hides detections");
 
+        verifyBlackoutSuppression();
         System.out.println("MeasurementEngineSmokeTest passed");
+    }
+
+    private static void verifyBlackoutSuppression() {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory target = model.addTarget();
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(0.0, 0.0, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(0.0, 1.0, 0.0)));
+        model.addBlackoutRegion(new BlackoutRegion(
+                "Test blackout",
+                Wgs84.toGeodetic(target.positionAt(5.0)),
+                1_500.0,
+                1_500.0));
+        SensorSettings settings = new SensorSettings();
+        settings.setParameters(new SensorParameters(15.0, 5.0, 0.0, 0.0, 1.0, 10));
+        MeasurementEngine engine = new MeasurementEngine(model, settings, new Random(4321L));
+        engine.beginScenario();
+        engine.advanceTo(5.0);
+        requireCount(0, engine.visibleMeasurements(),
+                "blackout region suppresses measurement creation");
+        engine.advanceTo(20.0);
+        requireCount(1, engine.visibleMeasurements(),
+                "measurements resume after target leaves blackout");
     }
 
     private static void requireCount(int expected, List<TargetMeasurement> actual, String label) {

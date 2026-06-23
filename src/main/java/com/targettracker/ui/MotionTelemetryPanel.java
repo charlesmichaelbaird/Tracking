@@ -6,20 +6,30 @@ import com.targettracker.model.TargetTrajectory;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.GridLayout;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-/** Combined target telemetry and editable velocity/altitude profiles. */
+/** Combined target controls and editable velocity/altitude profiles. */
 final class MotionTelemetryPanel extends JPanel {
     private final TargetInspectorPanel inspector;
+    private final JButton newTargetButton = fullWidthButton("New target");
+    private final JButton removeTargetButton = fullWidthButton("Remove target");
+    private final JComboBox<String> drawingMode =
+            new JComboBox<>(new String[]{"Free-hand", "Segmented line"});
+    private final JButton finishPathButton = fullWidthButton("Finish path");
+    private final JButton clearPathButton = fullWidthButton("Clear path");
+    private final JLabel lockLabel = new JLabel("Manual target editing enabled");
     private final JLabel profileTargetLabel = new JLabel();
     private final ProfileEditor velocityEditor;
     private final ProfileEditor altitudeEditor;
@@ -31,15 +41,28 @@ final class MotionTelemetryPanel extends JPanel {
             ScenarioPlayback playback,
             BooleanSupplier editingLocked,
             Runnable onProfileChanged,
-            Consumer<TargetTrajectory> onSelectionChanged) {
+            Consumer<TargetTrajectory> onSelectionChanged,
+            Runnable onNewTarget,
+            Consumer<EarthMapCanvas.DrawingMode> onDrawingModeChanged,
+            Runnable onFinishPath,
+            Runnable onClearPath,
+            Runnable onRemoveTarget,
+            Consumer<Double> onProfileCursorChanged) {
         this.editingLocked = editingLocked;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(new Color(246, 248, 251));
 
         inspector = new TargetInspectorPanel(model, onSelectionChanged);
-        inspector.setMaximumSize(new Dimension(Integer.MAX_VALUE, 585));
+        inspector.setMaximumSize(new Dimension(Integer.MAX_VALUE, 116));
         add(inspector);
-        add(Box.createVerticalStrut(10));
+        add(Box.createVerticalStrut(8));
+        add(createTargetControls(
+                onNewTarget,
+                onDrawingModeChanged,
+                onFinishPath,
+                onClearPath,
+                onRemoveTarget));
+        add(Box.createVerticalStrut(8));
 
         JPanel profileHeader = new JPanel();
         profileHeader.setLayout(new BoxLayout(profileHeader, BoxLayout.Y_AXIS));
@@ -54,18 +77,81 @@ final class MotionTelemetryPanel extends JPanel {
         profileHeader.add(title);
         profileHeader.add(Box.createVerticalStrut(3));
         profileHeader.add(profileTargetLabel);
-        profileHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, 66));
+        profileHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, 62));
         add(profileHeader);
 
         velocityEditor = new ProfileEditor(
                 "Velocity magnitude", "m/s", selectedTarget,
-                TargetTrajectory::velocityProfile, playback, editingLocked, onProfileChanged);
+                TargetTrajectory::velocityProfile, playback, editingLocked,
+                onProfileChanged, onProfileCursorChanged);
         altitudeEditor = new ProfileEditor(
                 "WGS-84 ellipsoidal altitude", "m", selectedTarget,
-                TargetTrajectory::altitudeProfile, playback, editingLocked, onProfileChanged);
+                TargetTrajectory::altitudeProfile, playback, editingLocked,
+                onProfileChanged, onProfileCursorChanged);
         add(wrapChart(velocityEditor));
         add(Box.createVerticalStrut(10));
         add(wrapChart(altitudeEditor));
+    }
+
+    private JPanel createTargetControls(
+            Runnable onNewTarget,
+            Consumer<EarthMapCanvas.DrawingMode> onDrawingModeChanged,
+            Runnable onFinishPath,
+            Runnable onClearPath,
+            Runnable onRemoveTarget) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(Color.WHITE);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createEmptyBorder(0, 12, 0, 12),
+                BorderFactory.createLineBorder(new Color(214, 220, 227))));
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 206));
+
+        JPanel inner = new JPanel();
+        inner.setOpaque(false);
+        inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
+        inner.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        panel.add(inner);
+
+        JPanel buttonGrid = new JPanel(new GridLayout(1, 2, 8, 0));
+        buttonGrid.setOpaque(false);
+        buttonGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        newTargetButton.addActionListener(event -> onNewTarget.run());
+        removeTargetButton.addActionListener(event -> onRemoveTarget.run());
+        buttonGrid.add(newTargetButton);
+        buttonGrid.add(removeTargetButton);
+        inner.add(buttonGrid);
+        inner.add(Box.createVerticalStrut(10));
+
+        JLabel drawingLabel = new JLabel("Drawing type");
+        drawingLabel.setForeground(new Color(61, 73, 84));
+        drawingLabel.setAlignmentX(LEFT_ALIGNMENT);
+        inner.add(drawingLabel);
+        inner.add(Box.createVerticalStrut(4));
+        drawingMode.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        drawingMode.setAlignmentX(LEFT_ALIGNMENT);
+        drawingMode.addActionListener(event -> onDrawingModeChanged.accept(
+                drawingMode.getSelectedIndex() == 0
+                        ? EarthMapCanvas.DrawingMode.FREE_HAND
+                        : EarthMapCanvas.DrawingMode.SEGMENTED));
+        inner.add(drawingMode);
+        inner.add(Box.createVerticalStrut(10));
+
+        JPanel pathGrid = new JPanel(new GridLayout(1, 2, 8, 0));
+        pathGrid.setOpaque(false);
+        pathGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        finishPathButton.addActionListener(event -> onFinishPath.run());
+        clearPathButton.addActionListener(event -> onClearPath.run());
+        pathGrid.add(finishPathButton);
+        pathGrid.add(clearPathButton);
+        inner.add(pathGrid);
+        inner.add(Box.createVerticalStrut(10));
+
+        lockLabel.setForeground(new Color(44, 112, 62));
+        lockLabel.setAlignmentX(LEFT_ALIGNMENT);
+        inner.add(lockLabel);
+        return panel;
     }
 
     void targetAdded(TargetTrajectory target) {
@@ -82,6 +168,25 @@ final class MotionTelemetryPanel extends JPanel {
 
     TargetTrajectory selectedTarget() {
         return inspector.selectedTarget();
+    }
+
+    void setEditingState(boolean editingLocked, boolean presetScenarioActive) {
+        boolean enabled = !editingLocked;
+        newTargetButton.setEnabled(enabled && !presetScenarioActive);
+        removeTargetButton.setEnabled(enabled && !presetScenarioActive);
+        drawingMode.setEnabled(enabled);
+        finishPathButton.setEnabled(enabled);
+        clearPathButton.setEnabled(enabled && !presetScenarioActive);
+        if (presetScenarioActive) {
+            lockLabel.setText("Target structure locked by preset scenario");
+            lockLabel.setForeground(new Color(132, 74, 17));
+        } else if (editingLocked) {
+            lockLabel.setText("Target editing locked during scenario activity");
+            lockLabel.setForeground(new Color(132, 74, 17));
+        } else {
+            lockLabel.setText("Manual target editing enabled");
+            lockLabel.setForeground(new Color(44, 112, 62));
+        }
     }
 
     void refresh(TargetTrajectory target, ScenarioPlayback playback) {
@@ -106,5 +211,12 @@ final class MotionTelemetryPanel extends JPanel {
         wrapper.setPreferredSize(new Dimension(400, 230));
         wrapper.add(editor, BorderLayout.CENTER);
         return wrapper;
+    }
+
+    private static JButton fullWidthButton(String text) {
+        JButton button = new JButton(text);
+        button.setAlignmentX(LEFT_ALIGNMENT);
+        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        return button;
     }
 }

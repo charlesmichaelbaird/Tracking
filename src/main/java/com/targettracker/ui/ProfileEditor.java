@@ -16,6 +16,7 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -32,6 +33,7 @@ final class ProfileEditor extends JPanel {
     private final ScenarioPlayback playback;
     private final BooleanSupplier editingLocked;
     private final Runnable onProfileChanged;
+    private final Consumer<Double> onProfileCursorChanged;
 
     private int previousIndex = -1;
     private double previousValue;
@@ -43,7 +45,8 @@ final class ProfileEditor extends JPanel {
             Function<TargetTrajectory, ScalarProfile> profileGetter,
             ScenarioPlayback playback,
             BooleanSupplier editingLocked,
-            Runnable onProfileChanged) {
+            Runnable onProfileChanged,
+            Consumer<Double> onProfileCursorChanged) {
         this.title = title;
         this.unit = unit;
         this.selectedTarget = selectedTarget;
@@ -51,6 +54,7 @@ final class ProfileEditor extends JPanel {
         this.playback = playback;
         this.editingLocked = editingLocked;
         this.onProfileChanged = onProfileChanged;
+        this.onProfileCursorChanged = onProfileCursorChanged;
         setPreferredSize(new Dimension(390, 220));
         setMinimumSize(new Dimension(300, 180));
         setBackground(Color.WHITE);
@@ -62,12 +66,14 @@ final class ProfileEditor extends JPanel {
                     return;
                 }
                 previousIndex = -1;
+                updateProfileCursor(event);
                 applyPoint(event);
             }
 
             @Override
             public void mouseDragged(MouseEvent event) {
                 if (!editingLocked.getAsBoolean()) {
+                    updateProfileCursor(event);
                     applyPoint(event);
                 }
             }
@@ -75,6 +81,16 @@ final class ProfileEditor extends JPanel {
             @Override
             public void mouseReleased(MouseEvent event) {
                 previousIndex = -1;
+            }
+
+            @Override
+            public void mouseMoved(MouseEvent event) {
+                updateProfileCursor(event);
+            }
+
+            @Override
+            public void mouseExited(MouseEvent event) {
+                onProfileCursorChanged.accept(Double.NaN);
             }
         };
         addMouseListener(handler);
@@ -196,6 +212,17 @@ final class ProfileEditor extends JPanel {
         previousValue = value;
         onProfileChanged.run();
         repaint();
+    }
+
+    private void updateProfileCursor(MouseEvent event) {
+        TargetTrajectory target = selectedTarget.get();
+        if (target == null || editingLocked.getAsBoolean()) {
+            onProfileCursorChanged.accept(Double.NaN);
+            return;
+        }
+        double fraction = (double) (Math.max(LEFT, Math.min(LEFT + chartWidth(), event.getX())) - LEFT)
+                / chartWidth();
+        onProfileCursorChanged.accept(Math.max(0.0, Math.min(1.0, fraction)));
     }
 
     private int toX(int index, ScalarProfile profile) {

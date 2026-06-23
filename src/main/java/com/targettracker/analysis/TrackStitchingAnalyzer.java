@@ -19,10 +19,13 @@ public final class TrackStitchingAnalyzer {
     private static final double EPSILON = 1.0e-8;
     private static final double LIVE_SAMPLE_TOLERANCE_SECONDS = 1.01;
     private static final double PROCESS_NOISE_SPECTRAL_DENSITY = 1.0;
+    private static final double MINIMUM_LAMBDA_EX = 1.0e-300;
+    private static final double CUBIC_METERS_PER_CUBIC_KILOMETER = 1.0e9;
 
     public List<EventResult> analyze(RecordedScenario scenario, Configuration configuration) {
         Map<String, List<TrackRecord>> tracks = groupTracks(scenario.records());
         Map<String, List<GroundTruthRecord>> truth = groupTruth(scenario.groundTruth());
+        List<BirthPoint> birthPoints = birthPoints(tracks);
         Map<String, List<RecordedMeasurement>> measurementsByTrack =
                 associateMeasurements(tracks, scenario.measurements());
         TreeSet<Double> measurementTimes = new TreeSet<>();
@@ -58,6 +61,8 @@ public final class TrackStitchingAnalyzer {
                 }
             }
             allSegments.sort(Comparator.comparing(Segment::trackId));
+            double learnedBirthDensity = learnedBirthDensityPerCubicKilometerSecond(
+                    birthPoints, eventTime);
             oldSegments.sort(Comparator.comparing(Segment::trackId));
             newSegments.sort(Comparator.comparing(Segment::trackId));
             boolean hasDistinctPair = oldSegments.stream().anyMatch(oldSegment ->
@@ -76,7 +81,8 @@ public final class TrackStitchingAnalyzer {
                                 newSegment,
                                 truth,
                                 measurementsByTrack.getOrDefault(newSegment.trackId(), List.of()),
-                                configuration.resolutionSeconds()));
+                                configuration,
+                                learnedBirthDensity));
                     }
                 }
             }
@@ -87,7 +93,10 @@ public final class TrackStitchingAnalyzer {
                     List.copyOf(newSegments),
                     List.copyOf(pairs),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.NLL),
-                    optimalAssignments(oldSegments, newSegments, pairs, Metric.MAHALANOBIS)));
+                    optimalAssignments(oldSegments, newSegments, pairs, Metric.MAHALANOBIS),
+                    optimalAssignments(oldSegments, newSegments, pairs, Metric.STATIC_NLLR),
+                    optimalAssignments(oldSegments, newSegments, pairs, Metric.LEARNED_NLLR),
+                    learnedBirthDensity));
         }
         return List.copyOf(events);
     }
@@ -97,14 +106,15 @@ public final class TrackStitchingAnalyzer {
             Segment newSegment,
             Map<String, List<GroundTruthRecord>> truth,
             List<RecordedMeasurement> newTrackMeasurements,
-            double resolutionSeconds) {
+            Configuration configuration,
+            double learnedBirthDensityPerCubicKilometerSecond) {
         TrackRecord oldAnchor = oldSegment.lastUpdateRecord();
-        TrackRecord newAnchor = newSegment.mostFutureRecord();
+        TrackRecord newAnchor = joinTimingAnchor(oldSegment, newSegment);
         double oldTime = oldAnchor.timeSeconds();
         double newTime = newAnchor.timeSeconds();
         double bankStart = Math.min(oldTime, newTime);
         double bankEnd = Math.max(oldTime, newTime);
-        List<Double> timeBank = timeBank(bankStart, bankEnd, resolutionSeconds);
+        List<Double> timeBank = timeBank(bankStart, bankEnd, configuration.resolutionSeconds());
 
         double simpleTime = (oldTime + newTime) / 2.0;
         double kinematicTime = kinematicJoinTime(oldAnchor, newAnchor, bankStart, bankEnd);
@@ -130,14 +140,15 @@ public final class TrackStitchingAnalyzer {
                 .map(TruthScore::targetId)
                 .orElse("");
 
-        JoinMetrics simpleMetrics = joinMetrics(
-                oldAnchor, newSegment, newTrackMeasurements, simpleTime);
-        JoinMetrics kinematicMetrics = joinMetrics(
-                oldAnchor, newSegment, newTrackMeasurements, kinematicTime);
-        JoinMetrics statisticalMetrics = joinMetrics(
-                oldAnchor, newSegment, newTrackMeasurements, statisticalTime);
+        JoinMetrics simpleMetrics = joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
+                simpleTime, configuration, learnedBirthDensityPerCubicKilometerSecond);
+        JoinMetrics kinematicMetrics = joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
+                kinematicTime, configuration, learnedBirthDensityPerCubicKilometerSecond);
+        JoinMetrics statisticalMetrics = joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
+                statisticalTime, configuration, learnedBirthDensityPerCubicKilometerSecond);
         JoinMetrics actualMetrics = Double.isFinite(actualTime)
-                ? joinMetrics(oldAnchor, newSegment, newTrackMeasurements, actualTime)
+                ? joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
+                        actualTime, configuration, learnedBirthDensityPerCubicKilometerSecond)
                 : JoinMetrics.nan();
 
         return new PairResult(
@@ -155,7 +166,15 @@ public final class TrackStitchingAnalyzer {
                 simpleMetrics.mahalanobisDistance(),
                 kinematicMetrics.mahalanobisDistance(),
                 statisticalMetrics.mahalanobisDistance(),
-                actualMetrics.mahalanobisDistance());
+                actualMetrics.mahalanobisDistance(),
+                simpleMetrics.staticNegativeLogLikelihoodRatio(),
+                kinematicMetrics.staticNegativeLogLikelihoodRatio(),
+                statisticalMetrics.staticNegativeLogLikelihoodRatio(),
+                actualMetrics.staticNegativeLogLikelihoodRatio(),
+                simpleMetrics.learnedNegativeLogLikelihoodRatio(),
+                kinematicMetrics.learnedNegativeLogLikelihoodRatio(),
+                statisticalMetrics.learnedNegativeLogLikelihoodRatio(),
+                actualMetrics.learnedNegativeLogLikelihoodRatio());
     }
 
     private static List<OptimalAssignment> optimalAssignments(
@@ -234,11 +253,6 @@ public final class TrackStitchingAnalyzer {
                         pair.statisticalJoinTimeSeconds(),
                         pair.statisticalNegativeLogLikelihood(),
                         pair.statisticalMahalanobisDistance(),
-                        metric),
-                variant(pair, "Truth RMS",
-                        pair.actualJoinTimeSeconds(),
-                        pair.actualNegativeLogLikelihood(),
-                        pair.actualMahalanobisDistance(),
                         metric));
         return variants.stream()
                 .filter(score -> Double.isFinite(score.score()))
@@ -253,8 +267,30 @@ public final class TrackStitchingAnalyzer {
             double negativeLogLikelihood,
             double mahalanobisDistance,
             Metric metric) {
-        double score = metric == Metric.NLL ? negativeLogLikelihood : mahalanobisDistance;
+        double score = switch (metric) {
+            case NLL -> negativeLogLikelihood;
+            case MAHALANOBIS -> mahalanobisDistance;
+            case STATIC_NLLR -> switch (label) {
+                case "Simple midpoint" -> pair.simpleStaticNegativeLogLikelihoodRatio();
+                case "Kinematic midpoint" -> pair.kinematicStaticNegativeLogLikelihoodRatio();
+                case "Mahalanobis bank" -> pair.statisticalStaticNegativeLogLikelihoodRatio();
+                default -> pair.actualStaticNegativeLogLikelihoodRatio();
+            };
+            case LEARNED_NLLR -> switch (label) {
+                case "Simple midpoint" -> pair.simpleLearnedNegativeLogLikelihoodRatio();
+                case "Kinematic midpoint" -> pair.kinematicLearnedNegativeLogLikelihoodRatio();
+                case "Mahalanobis bank" -> pair.statisticalLearnedNegativeLogLikelihoodRatio();
+                default -> pair.actualLearnedNegativeLogLikelihoodRatio();
+            };
+        };
         return new VariantScore(label, joinTimeSeconds, score);
+    }
+
+    private static TrackRecord joinTimingAnchor(Segment oldSegment, Segment newSegment) {
+        if (oldSegment.deadAtEvent()) {
+            return newSegment.formationRecord();
+        }
+        return newSegment.mostFutureRecord();
     }
 
     private static int[] hungarian(double[][] cost) {
@@ -398,13 +434,51 @@ public final class TrackStitchingAnalyzer {
             TrackRecord oldAnchor,
             Segment newSegment,
             List<RecordedMeasurement> newTrackMeasurements,
-            double timeSeconds) {
+            double timeSeconds,
+            Configuration configuration,
+            double learnedBirthDensityPerCubicKilometerSecond) {
         InnovationScore score = innovationScore(
                 predictOld(oldAnchor, timeSeconds),
                 retrodictNew(newSegment, newTrackMeasurements, timeSeconds));
+        double nll = canonicalNegativeLogLikelihood(score);
+        double innovationVolume = innovationVolumeCubicKilometers(score.innovationCovariance());
+        double staticDensity = configuration.falseAlarmRatePerCubicKilometer()
+                + configuration.birthRatePerCubicKilometer();
+        double staticNllr = nll + Math.log(lambdaEx(staticDensity, innovationVolume));
+        double learnedNllr = nll + Math.log(lambdaEx(
+                learnedBirthDensityPerCubicKilometerSecond, innovationVolume));
         return new JoinMetrics(
-                canonicalNegativeLogLikelihood(score),
-                score.mahalanobisDistance());
+                nll,
+                score.mahalanobisDistance(),
+                innovationVolume,
+                staticNllr,
+                learnedNllr);
+    }
+
+    private static double lambdaEx(double densityPerCubicKilometer, double volumeCubicKilometers) {
+        return Math.max(MINIMUM_LAMBDA_EX,
+                Math.max(0.0, densityPerCubicKilometer)
+                        * Math.max(0.0, volumeCubicKilometers));
+    }
+
+    private static double innovationVolumeCubicKilometers(double[][] innovationCovariance) {
+        double[][] positionCovariance = new double[3][3];
+        for (int row = 0; row < 3; row++) {
+            System.arraycopy(innovationCovariance[row], 0, positionCovariance[row], 0, 3);
+        }
+        double determinant = determinant3(positionCovariance);
+        double volumeCubicMeters = 4.0 / 3.0 * Math.PI
+                * Math.sqrt(Math.max(0.0, determinant));
+        if (!Double.isFinite(volumeCubicMeters)) {
+            return 0.0;
+        }
+        return volumeCubicMeters / CUBIC_METERS_PER_CUBIC_KILOMETER;
+    }
+
+    private static double determinant3(double[][] matrix) {
+        return matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
+                - matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
+                + matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
     }
 
     static double canonicalNegativeLogLikelihood(InnovationScore score) {
@@ -627,6 +701,56 @@ public final class TrackStitchingAnalyzer {
                 .mapToDouble(TruthScore::timeSeconds)
                 .average()
                 .orElse(fallback);
+    }
+
+    private static List<BirthPoint> birthPoints(Map<String, List<TrackRecord>> tracks) {
+        List<BirthPoint> births = new ArrayList<>();
+        for (List<TrackRecord> records : tracks.values()) {
+            if (records.isEmpty()) {
+                continue;
+            }
+            TrackRecord birth = records.get(0);
+            double[] state = birth.state();
+            births.add(new BirthPoint(
+                    birth.timeSeconds(),
+                    state[0],
+                    state[1],
+                    state[2]));
+        }
+        births.sort(Comparator.comparingDouble(BirthPoint::timeSeconds));
+        return List.copyOf(births);
+    }
+
+    private static double learnedBirthDensityPerCubicKilometerSecond(
+            List<BirthPoint> births,
+            double eventTime) {
+        List<BirthPoint> observed = births.stream()
+                .filter(birth -> birth.timeSeconds() <= eventTime + EPSILON)
+                .toList();
+        if (observed.isEmpty()) {
+            return 0.0;
+        }
+        double minX = Double.POSITIVE_INFINITY;
+        double minY = Double.POSITIVE_INFINITY;
+        double minZ = Double.POSITIVE_INFINITY;
+        double maxX = Double.NEGATIVE_INFINITY;
+        double maxY = Double.NEGATIVE_INFINITY;
+        double maxZ = Double.NEGATIVE_INFINITY;
+        for (BirthPoint birth : observed) {
+            minX = Math.min(minX, birth.xMeters());
+            maxX = Math.max(maxX, birth.xMeters());
+            minY = Math.min(minY, birth.yMeters());
+            maxY = Math.max(maxY, birth.yMeters());
+            minZ = Math.min(minZ, birth.zMeters());
+            maxZ = Math.max(maxZ, birth.zMeters());
+        }
+        double widthKilometers = Math.max(1.0, (maxX - minX) / 1_000.0);
+        double heightKilometers = Math.max(1.0, (maxY - minY) / 1_000.0);
+        double depthKilometers = Math.max(1.0, (maxZ - minZ) / 1_000.0);
+        double volumeCubicKilometers = widthKilometers * heightKilometers * depthKilometers;
+        double firstTime = observed.get(0).timeSeconds();
+        double durationSeconds = Math.max(1.0, eventTime - firstTime + 1.0);
+        return observed.size() / (volumeCubicKilometers * durationSeconds);
     }
 
     private static Map<String, List<TrackRecord>> groupTracks(List<TrackRecord> records) {
@@ -865,7 +989,21 @@ public final class TrackStitchingAnalyzer {
             double newMinimumSeconds,
             double newMaximumSeconds,
             boolean allowDeadTracks,
-            double resolutionSeconds) {
+            double resolutionSeconds,
+            double falseAlarmRatePerCubicKilometer,
+            double birthRatePerCubicKilometer) {
+        public Configuration(
+                double coastedMinimumSeconds,
+                double coastedMaximumSeconds,
+                double newMinimumSeconds,
+                double newMaximumSeconds,
+                boolean allowDeadTracks,
+                double resolutionSeconds) {
+            this(coastedMinimumSeconds, coastedMaximumSeconds,
+                    newMinimumSeconds, newMaximumSeconds, allowDeadTracks,
+                    resolutionSeconds, 1.0e-6, 1.0e-6);
+        }
+
         public Configuration {
             if (!Double.isFinite(coastedMinimumSeconds)
                     || !Double.isFinite(coastedMaximumSeconds)
@@ -876,7 +1014,11 @@ public final class TrackStitchingAnalyzer {
                     || newMinimumSeconds < 0.0
                     || newMaximumSeconds < newMinimumSeconds
                     || !Double.isFinite(resolutionSeconds)
-                    || resolutionSeconds <= 0.0) {
+                    || resolutionSeconds <= 0.0
+                    || !Double.isFinite(falseAlarmRatePerCubicKilometer)
+                    || falseAlarmRatePerCubicKilometer < 0.0
+                    || !Double.isFinite(birthRatePerCubicKilometer)
+                    || birthRatePerCubicKilometer < 0.0) {
                 throw new IllegalArgumentException("Invalid stitching time-window configuration");
             }
         }
@@ -903,7 +1045,10 @@ public final class TrackStitchingAnalyzer {
             List<Segment> newSegments,
             List<PairResult> pairs,
             List<OptimalAssignment> nllAssignments,
-            List<OptimalAssignment> mahalanobisAssignments) {
+            List<OptimalAssignment> mahalanobisAssignments,
+            List<OptimalAssignment> staticNllrAssignments,
+            List<OptimalAssignment> learnedNllrAssignments,
+            double learnedBirthDensityPerCubicKilometerSecond) {
     }
 
     public record PairResult(
@@ -921,7 +1066,15 @@ public final class TrackStitchingAnalyzer {
             double simpleMahalanobisDistance,
             double kinematicMahalanobisDistance,
             double statisticalMahalanobisDistance,
-            double actualMahalanobisDistance) {
+            double actualMahalanobisDistance,
+            double simpleStaticNegativeLogLikelihoodRatio,
+            double kinematicStaticNegativeLogLikelihoodRatio,
+            double statisticalStaticNegativeLogLikelihoodRatio,
+            double actualStaticNegativeLogLikelihoodRatio,
+            double simpleLearnedNegativeLogLikelihoodRatio,
+            double kinematicLearnedNegativeLogLikelihoodRatio,
+            double statisticalLearnedNegativeLogLikelihoodRatio,
+            double actualLearnedNegativeLogLikelihoodRatio) {
     }
 
     public record OptimalAssignment(
@@ -952,7 +1105,9 @@ public final class TrackStitchingAnalyzer {
 
     private enum Metric {
         NLL("NLL"),
-        MAHALANOBIS("Mahalanobis");
+        MAHALANOBIS("Mahalanobis"),
+        STATIC_NLLR("Static/uniform NLLR"),
+        LEARNED_NLLR("Learned spatial NLLR");
 
         private final String displayName;
 
@@ -973,10 +1128,20 @@ public final class TrackStitchingAnalyzer {
 
     private record JoinMetrics(
             double negativeLogLikelihood,
-            double mahalanobisDistance) {
+            double mahalanobisDistance,
+            double innovationVolumeCubicKilometers,
+            double staticNegativeLogLikelihoodRatio,
+            double learnedNegativeLogLikelihoodRatio) {
         static JoinMetrics nan() {
-            return new JoinMetrics(Double.NaN, Double.NaN);
+            return new JoinMetrics(Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
         }
+    }
+
+    private record BirthPoint(
+            double timeSeconds,
+            double xMeters,
+            double yMeters,
+            double zMeters) {
     }
 
     private record CholeskyResult(double[][] lower, double logDeterminant) {

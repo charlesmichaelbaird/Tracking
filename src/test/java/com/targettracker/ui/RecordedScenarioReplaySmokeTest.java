@@ -57,6 +57,11 @@ public final class RecordedScenarioReplaySmokeTest {
         if (measurements.visibleMeasurementsAt(2.0).size() != 2) {
             throw new AssertionError("Associated measurements should be restored for display");
         }
+        playback.seekTo(4.0);
+        if (playback.currentTrackViews().size() != 1
+                || !playback.currentTrackViews().get(0).dead()) {
+            throw new AssertionError("Loaded replay should retain stale tracks as dead tracks");
+        }
         if (!playback.rewindReplayPaused() || !playback.isPaused()) {
             throw new AssertionError("Loaded scenario should support pause/resume replay controls");
         }

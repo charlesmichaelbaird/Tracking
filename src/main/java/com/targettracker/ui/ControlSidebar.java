@@ -19,7 +19,6 @@ import java.util.Map;
 final class ControlSidebar extends JPanel {
     static final String IMM = "IMM";
     static final String SENSOR = "Sensor Parameters";
-    static final String MOTION = "Motion Profiles + Target Telemetry";
     static final String TARGETS = "Targets";
     static final String SCENARIO = "Scenario";
 
@@ -30,7 +29,6 @@ final class ControlSidebar extends JPanel {
     ControlSidebar(
             JComponent immPanel,
             JComponent sensorPanel,
-            JComponent motionPanel,
             JComponent targetsPanel,
             JComponent scenarioPanel) {
         super(new BorderLayout());
@@ -45,18 +43,16 @@ final class ControlSidebar extends JPanel {
         ButtonGroup group = new ButtonGroup();
         addNavigationButton(navigation, group, IMM);
         addNavigationButton(navigation, group, SENSOR);
-        addNavigationButton(navigation, group, MOTION);
         addNavigationButton(navigation, group, TARGETS);
         addNavigationButton(navigation, group, SCENARIO);
         add(navigation, BorderLayout.NORTH);
 
         cards.add(scroll(immPanel), IMM);
         cards.add(scroll(sensorPanel), SENSOR);
-        cards.add(scroll(motionPanel), MOTION);
         cards.add(scroll(targetsPanel), TARGETS);
         cards.add(scroll(scenarioPanel), SCENARIO);
         add(cards, BorderLayout.CENTER);
-        showCard(MOTION);
+        showCard(TARGETS);
     }
 
     void showCard(String name) {
