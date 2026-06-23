@@ -57,6 +57,22 @@ final class EarthMapCanvas extends JPanel {
         ONLY_STITCHED
     }
 
+    record StitchingStateOverlay(
+            EcefPoint oldPosition,
+            double[][] oldPositionCovariance,
+            EcefPoint newPosition,
+            double[][] newPositionCovariance) {
+    }
+
+    record StitchingOverlay(
+            List<StitchingStateOverlay> stateOverlays,
+            List<EcefPoint> polynomialPoints) {
+        StitchingOverlay {
+            stateOverlays = stateOverlays == null ? List.of() : List.copyOf(stateOverlays);
+            polynomialPoints = polynomialPoints == null ? List.of() : List.copyOf(polynomialPoints);
+        }
+    }
+
     private static final int HORIZONTAL_MARGIN = 66;
     private static final int VERTICAL_MARGIN = 48;
     private static final double MIN_ZOOM = 1.0;
@@ -102,6 +118,7 @@ final class EarthMapCanvas extends JPanel {
     private Set<String> stitchingTrackIds = Set.of();
     private Set<String> stitchingTargetIds = Set.of();
     private List<TrackStitchingAnalyzer.Segment> stitchingSegments = List.of();
+    private List<StitchingOverlay> stitchingOverlays = List.of();
     private StitchingVisibilityMode stitchingVisibilityMode = StitchingVisibilityMode.ALL;
     private double profileHighlightNormalizedTime = Double.NaN;
 
@@ -364,10 +381,16 @@ final class EarthMapCanvas extends JPanel {
         repaint();
     }
 
+    void setStitchingOverlays(List<StitchingOverlay> overlays) {
+        stitchingOverlays = overlays == null ? List.of() : List.copyOf(overlays);
+        repaint();
+    }
+
     void clearStitchingFocus() {
         stitchingTrackIds = Set.of();
         stitchingTargetIds = Set.of();
         stitchingSegments = List.of();
+        stitchingOverlays = List.of();
         stitchingVisibilityMode = StitchingVisibilityMode.ALL;
         repaint();
     }
@@ -392,6 +415,7 @@ final class EarthMapCanvas extends JPanel {
             drawMeasurements(g);
             drawTracks(g);
             drawDeadStitchingSegments(g);
+            drawStitchingOverlays(g);
             drawCurrentTargets(g);
             drawSegmentPreview(g);
             drawViewBadge(g);
@@ -801,12 +825,106 @@ final class EarthMapCanvas extends JPanel {
         }
     }
 
+    private void drawStitchingOverlays(Graphics2D g) {
+        if (stitchingOverlays.isEmpty()) {
+            return;
+        }
+        Graphics2D overlay = (Graphics2D) g.create();
+        try {
+            overlay.clip(mapBounds());
+            overlay.setRenderingHint(
+                    RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            Color oldColor = new Color(0, 214, 255);
+            Color newColor = new Color(255, 145, 36);
+            Color curveColor = new Color(255, 232, 84, 178);
+            for (StitchingOverlay stitchingOverlay : stitchingOverlays) {
+                if (stitchingOverlay.polynomialPoints().size() >= 2) {
+                    overlay.setColor(curveColor);
+                    overlay.setStroke(new BasicStroke(
+                            1.45f,
+                            BasicStroke.CAP_ROUND,
+                            BasicStroke.JOIN_ROUND));
+                    drawEcefPath(overlay, stitchingOverlay.polynomialPoints());
+                }
+                for (StitchingStateOverlay state : stitchingOverlay.stateOverlays()) {
+                    drawPositionCovariance(
+                            overlay,
+                            state.oldPosition(),
+                            state.oldPositionCovariance(),
+                            oldColor,
+                            112,
+                            0.95f);
+                    drawPositionCovariance(
+                            overlay,
+                            state.newPosition(),
+                            state.newPositionCovariance(),
+                            newColor,
+                            112,
+                            0.95f);
+                    drawStitchingStateMarker(overlay, state.oldPosition(), oldColor, true);
+                    drawStitchingStateMarker(overlay, state.newPosition(), newColor, false);
+                }
+            }
+        } finally {
+            overlay.dispose();
+        }
+    }
+
+    private void drawStitchingStateMarker(
+            Graphics2D g,
+            EcefPoint position,
+            Color color,
+            boolean oldState) {
+        Point point = toScreen(Wgs84.toGeodetic(position));
+        if (point == null) {
+            return;
+        }
+        int radius = 4;
+        g.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.setColor(new Color(12, 18, 26, 170));
+        if (oldState) {
+            g.fillOval(point.x - radius - 2, point.y - radius - 2,
+                    radius * 2 + 4, radius * 2 + 4);
+            g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 220));
+            g.drawOval(point.x - radius, point.y - radius, radius * 2, radius * 2);
+        } else {
+            Polygon diamond = new Polygon(
+                    new int[]{point.x, point.x + radius + 2, point.x, point.x - radius - 2},
+                    new int[]{point.y - radius - 2, point.y, point.y + radius + 2, point.y},
+                    4);
+            g.fillPolygon(diamond);
+            Polygon inner = new Polygon(
+                    new int[]{point.x, point.x + radius, point.x, point.x - radius},
+                    new int[]{point.y - radius, point.y, point.y + radius, point.y},
+                    4);
+            g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 220));
+            g.drawPolygon(inner);
+        }
+    }
+
     private void drawTrackCovariance(
             Graphics2D g,
             TrackView track,
             Color color,
             boolean greyed) {
-        GeodeticPoint geodetic = Wgs84.toGeodetic(track.meanPosition());
+        drawPositionCovariance(
+                g,
+                track.meanPosition(),
+                track.positionCovariance(),
+                color,
+                track.dead() ? 75 : greyed ? 110 : 190,
+                track.dead() || greyed ? 1.2f : 1.8f);
+    }
+
+    private void drawPositionCovariance(
+            Graphics2D g,
+            EcefPoint meanPosition,
+            double[][] covariance,
+            Color color,
+            int alpha,
+            float strokeWidth) {
+        GeodeticPoint geodetic = Wgs84.toGeodetic(meanPosition);
         double latitude = Math.toRadians(geodetic.latitudeDegrees());
         double longitude = Math.toRadians(geodetic.longitudeDegrees());
         double[] eastUnit = {-Math.sin(longitude), Math.cos(longitude), 0.0};
@@ -815,7 +933,6 @@ final class EarthMapCanvas extends JPanel {
                 -Math.sin(latitude) * Math.sin(longitude),
                 Math.cos(latitude)
         };
-        double[][] covariance = track.positionCovariance();
         double eastVariance = projectedCovariance(eastUnit, covariance, eastUnit);
         double northVariance = projectedCovariance(northUnit, covariance, northUnit);
         double crossVariance = projectedCovariance(eastUnit, covariance, northUnit);
@@ -836,9 +953,8 @@ final class EarthMapCanvas extends JPanel {
 
         Point previous = null;
         Point first = null;
-        g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(),
-                track.dead() ? 75 : greyed ? 110 : 190));
-        g.setStroke(new BasicStroke(track.dead() || greyed ? 1.2f : 1.8f));
+        g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha));
+        g.setStroke(new BasicStroke(strokeWidth));
         for (int sample = 0; sample <= 48; sample++) {
             double phase = 2.0 * Math.PI * sample / 48.0;
             double major = majorSigma * Math.cos(phase);
@@ -846,9 +962,9 @@ final class EarthMapCanvas extends JPanel {
             double east = major * cosAngle - minor * sinAngle;
             double north = major * sinAngle + minor * cosAngle;
             EcefPoint ellipsePoint = new EcefPoint(
-                    track.meanPosition().x() + east * eastUnit[0] + north * northUnit[0],
-                    track.meanPosition().y() + east * eastUnit[1] + north * northUnit[1],
-                    track.meanPosition().z() + east * eastUnit[2] + north * northUnit[2]);
+                    meanPosition.x() + east * eastUnit[0] + north * northUnit[0],
+                    meanPosition.y() + east * eastUnit[1] + north * northUnit[1],
+                    meanPosition.z() + east * eastUnit[2] + north * northUnit[2]);
             Point point = toScreen(Wgs84.toGeodetic(ellipsePoint));
             if (sample == 0) {
                 first = point;

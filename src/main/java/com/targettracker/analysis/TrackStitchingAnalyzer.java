@@ -189,16 +189,25 @@ public final class TrackStitchingAnalyzer {
                 .map(TruthScore::targetId)
                 .orElse("");
 
-        JoinMetrics simpleMetrics = joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
+        List<JoinEvaluation> joinEvaluations = new ArrayList<>();
+        JoinEvaluation simpleEvaluation = joinEvaluation(
+                "Simple midpoint", oldAnchor, newSegment, newTrackMeasurements,
                 simpleTime, configuration, learnedBirthDensityField);
-        JoinMetrics kinematicMetrics = joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
+        JoinEvaluation kinematicEvaluation = joinEvaluation(
+                "Kinematic midpoint", oldAnchor, newSegment, newTrackMeasurements,
                 kinematicTime, configuration, learnedBirthDensityField);
-        JoinMetrics statisticalMetrics = joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
+        JoinEvaluation statisticalEvaluation = joinEvaluation(
+                "Mahalanobis bank", oldAnchor, newSegment, newTrackMeasurements,
                 statisticalTime, configuration, learnedBirthDensityField);
-        JoinMetrics actualMetrics = Double.isFinite(actualTime)
-                ? joinMetrics(oldAnchor, newSegment, newTrackMeasurements,
+        JoinEvaluation actualEvaluation = Double.isFinite(actualTime)
+                ? joinEvaluation(
+                        "Truth RMS", oldAnchor, newSegment, newTrackMeasurements,
                         actualTime, configuration, learnedBirthDensityField)
-                : JoinMetrics.nan();
+                : JoinEvaluation.nan("Truth RMS");
+        joinEvaluations.add(simpleEvaluation);
+        joinEvaluations.add(kinematicEvaluation);
+        joinEvaluations.add(statisticalEvaluation);
+        joinEvaluations.add(actualEvaluation);
 
         PairResult result = new PairResult(
                 oldSegment.trackId(),
@@ -208,23 +217,26 @@ public final class TrackStitchingAnalyzer {
                 kinematicTime,
                 statisticalTime,
                 actualTime,
-                simpleMetrics.negativeLogLikelihood(),
-                kinematicMetrics.negativeLogLikelihood(),
-                statisticalMetrics.negativeLogLikelihood(),
-                actualMetrics.negativeLogLikelihood(),
-                simpleMetrics.mahalanobisDistance(),
-                kinematicMetrics.mahalanobisDistance(),
-                statisticalMetrics.mahalanobisDistance(),
-                actualMetrics.mahalanobisDistance(),
-                simpleMetrics.staticNegativeLogLikelihoodRatio(),
-                kinematicMetrics.staticNegativeLogLikelihoodRatio(),
-                statisticalMetrics.staticNegativeLogLikelihoodRatio(),
-                actualMetrics.staticNegativeLogLikelihoodRatio(),
-                simpleMetrics.learnedNegativeLogLikelihoodRatio(),
-                kinematicMetrics.learnedNegativeLogLikelihoodRatio(),
-                statisticalMetrics.learnedNegativeLogLikelihoodRatio(),
-                actualMetrics.learnedNegativeLogLikelihoodRatio());
-        return new PairDiagnostics(result, List.copyOf(bankEvaluations));
+                simpleEvaluation.negativeLogLikelihood(),
+                kinematicEvaluation.negativeLogLikelihood(),
+                statisticalEvaluation.negativeLogLikelihood(),
+                actualEvaluation.negativeLogLikelihood(),
+                simpleEvaluation.mahalanobisDistance(),
+                kinematicEvaluation.mahalanobisDistance(),
+                statisticalEvaluation.mahalanobisDistance(),
+                actualEvaluation.mahalanobisDistance(),
+                simpleEvaluation.staticNegativeLogLikelihoodRatio(),
+                kinematicEvaluation.staticNegativeLogLikelihoodRatio(),
+                statisticalEvaluation.staticNegativeLogLikelihoodRatio(),
+                actualEvaluation.staticNegativeLogLikelihoodRatio(),
+                simpleEvaluation.learnedNegativeLogLikelihoodRatio(),
+                kinematicEvaluation.learnedNegativeLogLikelihoodRatio(),
+                statisticalEvaluation.learnedNegativeLogLikelihoodRatio(),
+                actualEvaluation.learnedNegativeLogLikelihoodRatio());
+        return new PairDiagnostics(
+                result,
+                List.copyOf(joinEvaluations),
+                List.copyOf(bankEvaluations));
     }
 
     private static List<OptimalAssignment> optimalAssignments(
@@ -531,7 +543,8 @@ public final class TrackStitchingAnalyzer {
                 nll + Math.log(learnedLambdaEx));
     }
 
-    private static JoinMetrics joinMetrics(
+    private static JoinEvaluation joinEvaluation(
+            String variant,
             TrackRecord oldAnchor,
             Segment newSegment,
             List<RecordedMeasurement> newTrackMeasurements,
@@ -552,9 +565,17 @@ public final class TrackStitchingAnalyzer {
                 innovationVolume);
         double learnedNllr = nll + Math.log(Math.max(
                 MINIMUM_LAMBDA_EX, learnedQuery.expectedBirths()));
-        return new JoinMetrics(
-                nll,
+        return new JoinEvaluation(
+                variant,
+                timeSeconds,
+                oldState.state(),
+                oldState.covariance(),
+                newState.state(),
+                newState.covariance(),
+                score.innovation(),
+                score.innovationCovariance(),
                 score.mahalanobisDistance(),
+                nll,
                 innovationVolume,
                 staticNllr,
                 learnedNllr);
@@ -1317,12 +1338,86 @@ public final class TrackStitchingAnalyzer {
 
     public record PairDiagnostics(
             PairResult result,
+            List<JoinEvaluation> joinEvaluations,
             List<BankEvaluation> bankEvaluations) {
         public PairDiagnostics {
             if (result == null) {
                 throw new IllegalArgumentException("Pair result is required");
             }
+            joinEvaluations = joinEvaluations == null ? List.of() : List.copyOf(joinEvaluations);
             bankEvaluations = bankEvaluations == null ? List.of() : List.copyOf(bankEvaluations);
+        }
+    }
+
+    public record JoinEvaluation(
+            String variant,
+            double timeSeconds,
+            double[] oldState,
+            double[][] oldCovariance,
+            double[] newState,
+            double[][] newCovariance,
+            double[] innovation,
+            double[][] innovationCovariance,
+            double mahalanobisDistance,
+            double negativeLogLikelihood,
+            double innovationVolumeCubicKilometers,
+            double staticNegativeLogLikelihoodRatio,
+            double learnedNegativeLogLikelihoodRatio) {
+        public JoinEvaluation {
+            variant = variant == null ? "" : variant;
+            oldState = copyVector(oldState, STATE_SIZE);
+            oldCovariance = copySquare(oldCovariance, STATE_SIZE);
+            newState = copyVector(newState, STATE_SIZE);
+            newCovariance = copySquare(newCovariance, STATE_SIZE);
+            innovation = copyVector(innovation, POSITION_SIZE);
+            innovationCovariance = copySquare(innovationCovariance, POSITION_SIZE);
+        }
+
+        static JoinEvaluation nan(String variant) {
+            return new JoinEvaluation(
+                    variant,
+                    Double.NaN,
+                    new double[STATE_SIZE],
+                    new double[STATE_SIZE][STATE_SIZE],
+                    new double[STATE_SIZE],
+                    new double[STATE_SIZE][STATE_SIZE],
+                    new double[POSITION_SIZE],
+                    new double[POSITION_SIZE][POSITION_SIZE],
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN);
+        }
+
+        @Override
+        public double[] oldState() {
+            return oldState.clone();
+        }
+
+        @Override
+        public double[][] oldCovariance() {
+            return copySquare(oldCovariance, STATE_SIZE);
+        }
+
+        @Override
+        public double[] newState() {
+            return newState.clone();
+        }
+
+        @Override
+        public double[][] newCovariance() {
+            return copySquare(newCovariance, STATE_SIZE);
+        }
+
+        @Override
+        public double[] innovation() {
+            return innovation.clone();
+        }
+
+        @Override
+        public double[][] innovationCovariance() {
+            return copySquare(innovationCovariance, POSITION_SIZE);
         }
     }
 
@@ -1456,17 +1551,6 @@ public final class TrackStitchingAnalyzer {
             String variant,
             double joinTimeSeconds,
             double score) {
-    }
-
-    private record JoinMetrics(
-            double negativeLogLikelihood,
-            double mahalanobisDistance,
-            double innovationVolumeCubicKilometers,
-            double staticNegativeLogLikelihoodRatio,
-            double learnedNegativeLogLikelihoodRatio) {
-        static JoinMetrics nan() {
-            return new JoinMetrics(Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
-        }
     }
 
     private record BirthPoint(

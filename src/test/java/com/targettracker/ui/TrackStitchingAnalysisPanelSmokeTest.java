@@ -6,7 +6,10 @@ import com.targettracker.recording.RecordedScenario;
 import com.targettracker.tracking.TrackRecord;
 
 import javax.swing.JTabbedPane;
+import javax.swing.JTable;
 import javax.swing.SwingUtilities;
+import java.awt.Component;
+import java.awt.Container;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +24,7 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
         System.setProperty("java.awt.headless", "true");
         AtomicReference<ScenarioPlayback> playbackReference = new AtomicReference<>();
         AtomicReference<JTabbedPane> tabsReference = new AtomicReference<>();
+        AtomicReference<JTable> tableReference = new AtomicReference<>();
         SwingUtilities.invokeAndWait(() -> {
             RecordedScenario scenario = scenario();
             var model = new com.targettracker.model.ScenarioModel();
@@ -61,6 +65,7 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                     });
             playbackReference.set(playback);
             tabsReference.set((JTabbedPane) panel.tabStrip());
+            tableReference.set(findTable(panel));
         });
 
         waitForAnalysis(tabsReference.get());
@@ -72,8 +77,37 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
             if (Math.abs(playbackReference.get().elapsedSeconds() - 5.0) > 1.0e-6) {
                 throw new AssertionError("Selecting the stitching tab should seek replay time");
             }
+            JTable table = tableReference.get();
+            if (table == null || table.getColumnCount() != 6) {
+                throw new AssertionError("Stitching metrics table should include overlay toggles");
+            }
+            if (!"State".equals(table.getColumnName(4))
+                    || !"Poly".equals(table.getColumnName(5))
+                    || table.getColumnClass(4) != Boolean.class
+                    || table.getColumnClass(5) != Boolean.class) {
+                throw new AssertionError("Overlay columns should be Boolean State/Poly toggles");
+            }
+            if (table.getRowCount() > 0) {
+                table.setValueAt(Boolean.TRUE, 0, 4);
+                table.setValueAt(Boolean.TRUE, 0, 5);
+            }
         });
         System.out.println("TrackStitchingAnalysisPanelSmokeTest passed");
+    }
+
+    private static JTable findTable(Container container) {
+        for (Component component : container.getComponents()) {
+            if (component instanceof JTable table) {
+                return table;
+            }
+            if (component instanceof Container child) {
+                JTable table = findTable(child);
+                if (table != null) {
+                    return table;
+                }
+            }
+        }
+        return null;
     }
 
     private static void waitForAnalysis(JTabbedPane tabs) throws Exception {

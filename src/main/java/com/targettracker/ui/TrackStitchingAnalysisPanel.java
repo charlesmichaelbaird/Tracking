@@ -2,8 +2,10 @@ package com.targettracker.ui;
 
 import com.targettracker.analysis.TrackStitchingAnalysisExporter;
 import com.targettracker.analysis.TrackStitchingAnalyzer;
+import com.targettracker.model.EcefPoint;
 import com.targettracker.recording.RecordedMeasurement;
 import com.targettracker.recording.RecordedScenario;
+import com.targettracker.tracking.TrackRecord;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -23,8 +25,10 @@ import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.SwingWorker;
 import javax.swing.border.Border;
+import javax.swing.event.TableModelEvent;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableCellRenderer;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -56,13 +60,20 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final JTextArea summaryArea = new JTextArea();
     private final JTextArea assignmentArea = new JTextArea();
     private final DefaultTableModel metricsModel = new DefaultTableModel(
-            new Object[]{"Pair", "Estimated join time", "NLL", "Mahalanobis"}, 0) {
+            new Object[]{"Pair", "Estimated join time", "NLL", "Mahalanobis",
+                    "State", "Poly"}, 0) {
         @Override
         public boolean isCellEditable(int row, int column) {
-            return false;
+            return column >= 4;
+        }
+
+        @Override
+        public Class<?> getColumnClass(int columnIndex) {
+            return columnIndex >= 4 ? Boolean.class : String.class;
         }
     };
     private final JTable metricsTable = new JTable(metricsModel);
+    private final Border metricEmptyBorder = BorderFactory.createEmptyBorder(1, 4, 1, 4);
     private List<MetricRow> metricRows = List.of();
     private final JLabel statusLabel = new JLabel("Ready");
     private final TimeRangeControl coastedWindow;
@@ -83,6 +94,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private TrackStitchingAnalyzer.AnalysisResult analysisResult =
             new TrackStitchingAnalyzer.AnalysisResult(List.of(), List.of());
     private TrackStitchingAnalyzer.Configuration latestConfiguration;
+    private boolean populatingMetricsTable;
     private boolean active = true;
 
     private enum ScoreMode {
@@ -390,20 +402,31 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         metricsTable.setRowHeight(23);
         metricsTable.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
         metricsTable.setDefaultRenderer(Object.class, new MetricCellRenderer());
+        metricsTable.setDefaultRenderer(Boolean.class, new MetricToggleRenderer());
         metricsTable.getTableHeader().setReorderingAllowed(false);
         metricsTable.getTableHeader().setFont(
                 metricsTable.getTableHeader().getFont().deriveFont(Font.BOLD, 11.0f));
         configureMetricColumnWidths();
+        metricsModel.addTableModelListener(event -> {
+            if (populatingMetricsTable
+                    || event.getType() != TableModelEvent.UPDATE
+                    || event.getColumn() < 4) {
+                return;
+            }
+            updateStitchingOverlays();
+        });
     }
 
     private void configureMetricColumnWidths() {
-        if (metricsTable.getColumnModel().getColumnCount() < 4) {
+        if (metricsTable.getColumnModel().getColumnCount() < 6) {
             return;
         }
-        metricsTable.getColumnModel().getColumn(0).setPreferredWidth(95);
-        metricsTable.getColumnModel().getColumn(1).setPreferredWidth(210);
-        metricsTable.getColumnModel().getColumn(2).setPreferredWidth(120);
-        metricsTable.getColumnModel().getColumn(3).setPreferredWidth(135);
+        metricsTable.getColumnModel().getColumn(0).setPreferredWidth(85);
+        metricsTable.getColumnModel().getColumn(1).setPreferredWidth(172);
+        metricsTable.getColumnModel().getColumn(2).setPreferredWidth(92);
+        metricsTable.getColumnModel().getColumn(3).setPreferredWidth(104);
+        metricsTable.getColumnModel().getColumn(4).setPreferredWidth(46);
+        metricsTable.getColumnModel().getColumn(5).setPreferredWidth(46);
     }
 
     private void runAnalysis() {
@@ -656,6 +679,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         assignmentArea.setText("");
         metricsModel.setRowCount(0);
         metricRows = List.of();
+        mapCanvas.setStitchingOverlays(List.of());
     }
 
     private static String formatSummary(TrackStitchingAnalyzer.EventResult event) {
@@ -729,14 +753,16 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     }
 
     private void populateMetricsTable(TrackStitchingAnalyzer.EventResult event) {
+        populatingMetricsTable = true;
         metricsModel.setRowCount(0);
         ScoreMode mode = scoreMode();
         if (mode == ScoreMode.ALTERNATIVE) {
             metricsModel.setColumnIdentifiers(new Object[]{
-                    "Pair", "Estimated join time", "Static/uniform NLLR", "Learned spatial NLLR"});
+                    "Pair", "Estimated join time", "Static/uniform NLLR",
+                    "Learned spatial NLLR", "State", "Poly"});
         } else {
             metricsModel.setColumnIdentifiers(new Object[]{
-                    "Pair", "Estimated join time", "NLL", "Mahalanobis"});
+                    "Pair", "Estimated join time", "NLL", "Mahalanobis", "State", "Poly"});
         }
         configureMetricColumnWidths();
         List<MetricRow> rows = new ArrayList<>();
@@ -792,6 +818,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                             : pair.actualMahalanobisDistance()));
         }
         metricRows = List.copyOf(rows);
+        populatingMetricsTable = false;
+        updateStitchingOverlays();
     }
 
     private MetricRow addMetricRow(
@@ -806,18 +834,190 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 pairName,
                 estimate,
                 formatNumber(negativeLogLikelihood),
-                formatNumber(mahalanobisDistance)
+                formatNumber(mahalanobisDistance),
+                false,
+                false
         });
         ScoreMode mode = scoreMode();
         return new MetricRow(
                 pairName,
                 variant,
+                pair,
+                diagnosticsFor(event, pair),
+                segmentFor(event.oldSegments(), pair.oldTrackId()),
+                segmentFor(event.newSegments(), pair.newTrackId()),
                 isAssigned(mode == ScoreMode.ALTERNATIVE
                         ? event.staticNllrAssignments()
                         : event.nllAssignments(), pair, variant),
                 isAssigned(mode == ScoreMode.ALTERNATIVE
                         ? event.learnedNllrAssignments()
                         : event.mahalanobisAssignments(), pair, variant));
+    }
+
+    private void updateStitchingOverlays() {
+        if (populatingMetricsTable || metricRows.isEmpty()) {
+            mapCanvas.setStitchingOverlays(List.of());
+            return;
+        }
+        List<EarthMapCanvas.StitchingOverlay> overlays = new ArrayList<>();
+        int rowCount = Math.min(metricRows.size(), metricsModel.getRowCount());
+        for (int row = 0; row < rowCount; row++) {
+            boolean showStates = Boolean.TRUE.equals(metricsModel.getValueAt(row, 4));
+            boolean showPolynomial = Boolean.TRUE.equals(metricsModel.getValueAt(row, 5));
+            if (!showStates && !showPolynomial) {
+                continue;
+            }
+            MetricRow metricRow = metricRows.get(row);
+            List<EarthMapCanvas.StitchingStateOverlay> stateOverlays =
+                    showStates ? stateOverlaysFor(metricRow) : List.of();
+            List<EcefPoint> polynomial =
+                    showPolynomial ? polynomialOverlayFor(metricRow) : List.of();
+            if (!stateOverlays.isEmpty() || polynomial.size() >= 2) {
+                overlays.add(new EarthMapCanvas.StitchingOverlay(stateOverlays, polynomial));
+            }
+        }
+        mapCanvas.setStitchingOverlays(overlays);
+    }
+
+    private static List<EarthMapCanvas.StitchingStateOverlay> stateOverlaysFor(
+            MetricRow row) {
+        if (row.diagnostics() == null) {
+            return List.of();
+        }
+        List<EarthMapCanvas.StitchingStateOverlay> overlays = new ArrayList<>();
+        if ("Mahalanobis bank".equals(row.variant())) {
+            for (TrackStitchingAnalyzer.BankEvaluation evaluation
+                    : row.diagnostics().bankEvaluations()) {
+                overlays.add(stateOverlay(
+                        evaluation.oldState(),
+                        evaluation.oldCovariance(),
+                        evaluation.newState(),
+                        evaluation.newCovariance()));
+            }
+            return List.copyOf(overlays);
+        }
+        TrackStitchingAnalyzer.JoinEvaluation evaluation = joinEvaluationFor(row);
+        if (evaluation == null || !Double.isFinite(evaluation.timeSeconds())) {
+            return List.of();
+        }
+        overlays.add(stateOverlay(
+                evaluation.oldState(),
+                evaluation.oldCovariance(),
+                evaluation.newState(),
+                evaluation.newCovariance()));
+        return List.copyOf(overlays);
+    }
+
+    private static EarthMapCanvas.StitchingStateOverlay stateOverlay(
+            double[] oldState,
+            double[][] oldCovariance,
+            double[] newState,
+            double[][] newCovariance) {
+        return new EarthMapCanvas.StitchingStateOverlay(
+                pointFromState(oldState),
+                positionCovariance(oldCovariance),
+                pointFromState(newState),
+                positionCovariance(newCovariance));
+    }
+
+    private static List<EcefPoint> polynomialOverlayFor(MetricRow row) {
+        if (row.oldSegment() == null || row.newSegment() == null) {
+            return List.of();
+        }
+        TrackStitchingAnalyzer.JoinEvaluation evaluation = joinEvaluationFor(row);
+        if (evaluation == null || !Double.isFinite(evaluation.timeSeconds())) {
+            return List.of();
+        }
+        TrackRecord oldHead = row.oldSegment().lastUpdateRecord();
+        TrackRecord newTail = row.newSegment().formationRecord();
+        double oldTime = oldHead.timeSeconds();
+        double joinTime = evaluation.timeSeconds();
+        double newTime = newTail.timeSeconds();
+        if (!(oldTime < joinTime && joinTime < newTime)) {
+            return List.of();
+        }
+        double[] joinPosition = averagePosition(evaluation.oldState(), evaluation.newState());
+        return quadraticInterpolation(
+                oldTime,
+                oldHead.state(),
+                joinTime,
+                joinPosition,
+                newTime,
+                newTail.state());
+    }
+
+    private static List<EcefPoint> quadraticInterpolation(
+            double time0,
+            double[] point0,
+            double time1,
+            double[] point1,
+            double time2,
+            double[] point2) {
+        List<EcefPoint> points = new ArrayList<>();
+        int samples = 72;
+        for (int sample = 0; sample <= samples; sample++) {
+            double time = time0 + (time2 - time0) * sample / samples;
+            double l0 = (time - time1) * (time - time2)
+                    / ((time0 - time1) * (time0 - time2));
+            double l1 = (time - time0) * (time - time2)
+                    / ((time1 - time0) * (time1 - time2));
+            double l2 = (time - time0) * (time - time1)
+                    / ((time2 - time0) * (time2 - time1));
+            points.add(new EcefPoint(
+                    l0 * point0[0] + l1 * point1[0] + l2 * point2[0],
+                    l0 * point0[1] + l1 * point1[1] + l2 * point2[1],
+                    l0 * point0[2] + l1 * point1[2] + l2 * point2[2]));
+        }
+        return List.copyOf(points);
+    }
+
+    private static double[] averagePosition(double[] oldState, double[] newState) {
+        return new double[]{
+                (oldState[0] + newState[0]) / 2.0,
+                (oldState[1] + newState[1]) / 2.0,
+                (oldState[2] + newState[2]) / 2.0};
+    }
+
+    private static EcefPoint pointFromState(double[] state) {
+        return new EcefPoint(state[0], state[1], state[2]);
+    }
+
+    private static double[][] positionCovariance(double[][] covariance) {
+        double[][] position = new double[3][3];
+        for (int row = 0; row < 3; row++) {
+            System.arraycopy(covariance[row], 0, position[row], 0, 3);
+        }
+        return position;
+    }
+
+    private static TrackStitchingAnalyzer.JoinEvaluation joinEvaluationFor(MetricRow row) {
+        if (row.diagnostics() == null) {
+            return null;
+        }
+        return row.diagnostics().joinEvaluations().stream()
+                .filter(evaluation -> evaluation.variant().equals(row.variant()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static TrackStitchingAnalyzer.PairDiagnostics diagnosticsFor(
+            TrackStitchingAnalyzer.EventResult event,
+            TrackStitchingAnalyzer.PairResult pair) {
+        return event.diagnostics().stream()
+                .filter(diagnostics ->
+                        diagnostics.result().oldTrackId().equals(pair.oldTrackId())
+                                && diagnostics.result().newTrackId().equals(pair.newTrackId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static TrackStitchingAnalyzer.Segment segmentFor(
+            List<TrackStitchingAnalyzer.Segment> segments,
+            String trackId) {
+        return segments.stream()
+                .filter(segment -> segment.trackId().equals(trackId))
+                .findFirst()
+                .orElse(null);
     }
 
     private static boolean isAssigned(
@@ -845,8 +1045,6 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     }
 
     private final class MetricCellRenderer extends DefaultTableCellRenderer {
-        private final Border emptyBorder = BorderFactory.createEmptyBorder(1, 4, 1, 4);
-
         @Override
         public Component getTableCellRendererComponent(
                 JTable table,
@@ -862,50 +1060,79 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             }
             MetricRow metricRow = metricRows.get(row);
             if (!isSelected) {
-                component.setBackground(rowBackground(metricRow));
+                component.setBackground(metricRowBackground(metricRow));
                 component.setForeground(new Color(25, 31, 37));
             }
             component.setFont(component.getFont().deriveFont(
                     column == 0 ? Font.BOLD : Font.PLAIN));
-            setBorder(groupBorder(row, column));
+            setBorder(metricGroupBorder(row, column));
             return component;
         }
+    }
 
-        private Color rowBackground(MetricRow row) {
-            if (row.nllOptimal() && row.mahalanobisOptimal()) {
-                return new Color(220, 246, 225);
-            }
-            if (row.nllOptimal()) {
-                return new Color(255, 244, 204);
-            }
-            if (row.mahalanobisOptimal()) {
-                return new Color(220, 239, 255);
-            }
-            return Color.WHITE;
+    private final class MetricToggleRenderer extends JCheckBox implements TableCellRenderer {
+        MetricToggleRenderer() {
+            setHorizontalAlignment(CENTER);
+            setOpaque(true);
         }
 
-        private Border groupBorder(int row, int column) {
-            boolean first = row == 0 || !metricRows.get(row).pairName()
-                    .equals(metricRows.get(row - 1).pairName());
-            boolean last = row == metricRows.size() - 1 || !metricRows.get(row).pairName()
-                    .equals(metricRows.get(row + 1).pairName());
-            int top = first ? 2 : 0;
-            int bottom = last ? 2 : 0;
-            int left = column == 0 ? 2 : 0;
-            int right = column == metricsTable.getColumnCount() - 1 ? 2 : 0;
-            if (top == 0 && bottom == 0 && left == 0 && right == 0) {
-                return emptyBorder;
+        @Override
+        public Component getTableCellRendererComponent(
+                JTable table,
+                Object value,
+                boolean isSelected,
+                boolean hasFocus,
+                int row,
+                int column) {
+            setSelected(Boolean.TRUE.equals(value));
+            if (row >= 0 && row < metricRows.size()) {
+                setBackground(isSelected
+                        ? table.getSelectionBackground()
+                        : metricRowBackground(metricRows.get(row)));
+                setBorder(metricGroupBorder(row, column));
             }
-            return BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(
-                            top, left, bottom, right, new Color(48, 56, 64)),
-                    emptyBorder);
+            return this;
         }
+    }
+
+    private Color metricRowBackground(MetricRow row) {
+        if (row.nllOptimal() && row.mahalanobisOptimal()) {
+            return new Color(220, 246, 225);
+        }
+        if (row.nllOptimal()) {
+            return new Color(255, 244, 204);
+        }
+        if (row.mahalanobisOptimal()) {
+            return new Color(220, 239, 255);
+        }
+        return Color.WHITE;
+    }
+
+    private Border metricGroupBorder(int row, int column) {
+        boolean first = row == 0 || !metricRows.get(row).pairName()
+                .equals(metricRows.get(row - 1).pairName());
+        boolean last = row == metricRows.size() - 1 || !metricRows.get(row).pairName()
+                .equals(metricRows.get(row + 1).pairName());
+        int top = first ? 2 : 0;
+        int bottom = last ? 2 : 0;
+        int left = column == 0 ? 2 : 0;
+        int right = column == metricsTable.getColumnCount() - 1 ? 2 : 0;
+        if (top == 0 && bottom == 0 && left == 0 && right == 0) {
+            return metricEmptyBorder;
+        }
+        return BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(
+                        top, left, bottom, right, new Color(48, 56, 64)),
+                metricEmptyBorder);
     }
 
     private record MetricRow(
             String pairName,
             String variant,
+            TrackStitchingAnalyzer.PairResult pair,
+            TrackStitchingAnalyzer.PairDiagnostics diagnostics,
+            TrackStitchingAnalyzer.Segment oldSegment,
+            TrackStitchingAnalyzer.Segment newSegment,
             boolean nllOptimal,
             boolean mahalanobisOptimal) {
     }
