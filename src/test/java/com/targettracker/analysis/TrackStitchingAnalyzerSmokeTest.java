@@ -147,11 +147,12 @@ public final class TrackStitchingAnalyzerSmokeTest {
             double x = index * spacingMeters;
             tracks.add(track(trackId, 1.0, x, 0.0, true));
             measurements.add(measurement(trackId, 1.0, x));
+            measurements.add(measurement(trackId, 3.0, x));
         }
         return new RecordedScenario(
                 Path.of(name),
                 name,
-                1.0,
+                3.0,
                 tracks,
                 List.of(),
                 measurements);

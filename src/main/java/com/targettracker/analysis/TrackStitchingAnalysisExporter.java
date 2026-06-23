@@ -307,6 +307,8 @@ public final class TrackStitchingAnalysisExporter {
                     "static_negative_log_likelihood_ratio",
                     "learned_birth_density_per_km3",
                     "learned_expected_births",
+                    "learned_exposure_scan_km3",
+                    "learned_reliability",
                     "learned_query_sigma_meters",
                     "learned_negative_log_likelihood_ratio"));
             writer.write(String.join(",", header));
@@ -338,6 +340,8 @@ public final class TrackStitchingAnalysisExporter {
                         row.add(evaluation.staticNegativeLogLikelihoodRatio());
                         row.add(evaluation.learnedBirthDensityPerCubicKilometer());
                         row.add(evaluation.learnedExpectedBirths());
+                        row.add(evaluation.learnedExposureScanCubicKilometers());
+                        row.add(evaluation.learnedReliability());
                         row.add(evaluation.learnedQuerySigmaMeters());
                         row.add(evaluation.learnedNegativeLogLikelihoodRatio());
                         writeCsvRow(writer, row.toArray());
@@ -355,10 +359,15 @@ public final class TrackStitchingAnalysisExporter {
                     "scenario_time_seconds",
                     "representative_density_per_km3",
                     "peak_density_per_km3",
-                    "total_component_weight",
-                    "active_component_count",
+                    "mean_density_per_km3",
+                    "total_birth_evidence",
+                    "total_exposure_scan_km3",
+                    "mean_reliability",
                     "prior_density_per_km3",
-                    "kernel_sigma_meters",
+                    "cell_meters",
+                    "x_cells",
+                    "y_cells",
+                    "z_cells",
                     "min_x_m",
                     "min_y_m",
                     "min_z_m",
@@ -371,10 +380,15 @@ public final class TrackStitchingAnalysisExporter {
                         snapshot.timeSeconds(),
                         snapshot.representativeDensityPerCubicKilometer(),
                         snapshot.peakDensityPerCubicKilometer(),
-                        snapshot.totalComponentWeight(),
-                        snapshot.activeComponentCount(),
+                        snapshot.meanDensityPerCubicKilometer(),
+                        snapshot.totalBirthEvidence(),
+                        snapshot.totalExposureScanCubicKilometers(),
+                        snapshot.meanReliability(),
                         snapshot.priorDensityPerCubicKilometer(),
-                        snapshot.kernelSigmaMeters(),
+                        snapshot.cellMeters(),
+                        snapshot.xCells(),
+                        snapshot.yCells(),
+                        snapshot.zCells(),
                         snapshot.minX(),
                         snapshot.minY(),
                         snapshot.minZ(),
@@ -418,9 +432,12 @@ public final class TrackStitchingAnalysisExporter {
                     + "state/covariance, innovation, innovation covariance, Mahalanobis distance, "
                     + "NLL, NLLR values, and learned-density query values.\n");
             writer.write("- `spatial_density/spatial_density_history.csv`: learned extraneous-track "
-                    + "birth intensity over the course of the scenario. The learned estimator is a "
-                    + "Gaussian mixture seeded only by each track's first associated measurement; "
-                    + "clustered first births produce higher local intensity.\n\n");
+                    + "birth density over the course of the scenario. The learned estimator is an "
+                    + "online evidence/exposure grid. Each cell stores birth evidence and "
+                    + "observation exposure in scan-km^3 units; only matured first measurements "
+                    + "from track starts add birth evidence, while every observable scan adds "
+                    + "exposure. Density is evidence divided by exposure, then smoothed, clamped, "
+                    + "and queried over the innovation volume.\n\n");
             writer.write("## MATLAB usage\n\n");
             writer.write("Use `readtable` on the CSVs. Example:\n\n");
             writer.write("```matlab\n");
