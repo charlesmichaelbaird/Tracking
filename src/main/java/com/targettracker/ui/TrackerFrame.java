@@ -70,6 +70,7 @@ public final class TrackerFrame extends JFrame {
             new JToggleButton("Scenario Generation", true);
     private final JToggleButton analysisModeButton = new JToggleButton("Analysis Mode");
     private TargetTrajectory selectedTarget;
+    private BlackoutRegion selectedBlackoutRegion;
     private boolean presetScenarioActive;
     private boolean analysisMode;
     private String currentScenarioName = "User generated";
@@ -127,7 +128,9 @@ public final class TrackerFrame extends JFrame {
                 measurementEngine,
                 displayHistorySettings,
                 () -> selectedTarget,
+                () -> selectedBlackoutRegion,
                 this::isScenarioEditingLocked,
+                this::moveBlackoutRegion,
                 this::onPathChanged,
                 this::onBlackoutRegionCreated,
                 this::onCursorChanged);
@@ -150,14 +153,17 @@ public final class TrackerFrame extends JFrame {
                 sensorSettings,
                 model,
                 this::onSensorParametersChanged,
-                this::beginBlackoutRegionDrawing);
+                this::beginBlackoutRegionDrawing,
+                this::selectBlackoutRegion,
+                this::removeBlackoutRegion);
         immParametersPanel = new ImmParametersPanel(
                 immSettings, this::onImmParametersChanged);
         controlSidebar = new ControlSidebar(
                 immParametersPanel,
                 sensorParametersPanel,
                 motionTelemetryPanel,
-                presetScenarioPanel);
+                presetScenarioPanel,
+                this::onSidebarCardChanged);
 
         setLayout(new BorderLayout());
         add(createHeader(), BorderLayout.NORTH);
@@ -296,6 +302,13 @@ public final class TrackerFrame extends JFrame {
         earthMapCanvas.repaint();
     }
 
+    private void onSidebarCardChanged(String cardName) {
+        boolean targetCard = ControlSidebar.TARGETS.equals(cardName);
+        boolean sensorCard = ControlSidebar.SENSOR.equals(cardName);
+        earthMapCanvas.setTargetDrawingEnabled(targetCard);
+        earthMapCanvas.setBlackoutEditingEnabled(sensorCard);
+    }
+
     private void clearSelectedPath() {
         if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
@@ -349,11 +362,53 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void onBlackoutRegionCreated(BlackoutRegion region) {
+        selectedBlackoutRegion = region;
         resetCompletedPlayback();
         sensorParametersPanel.refreshBlackoutRegions();
+        sensorParametersPanel.setSelectedBlackoutRegion(region);
         earthMapCanvas.repaint();
         timelinePanel.refresh();
         statusLabel.setText("Added blackout region");
+    }
+
+    private void selectBlackoutRegion(BlackoutRegion region) {
+        selectedBlackoutRegion = region;
+        earthMapCanvas.repaint();
+    }
+
+    private void removeBlackoutRegion(BlackoutRegion region) {
+        if (analysisMode || presetScenarioActive || playback.isRunning() || playback.isComputing()) {
+            statusLabel.setText("Blackout regions can be removed in idle user-generated scenarios");
+            return;
+        }
+        if (region == null) {
+            return;
+        }
+        resetCompletedPlayback();
+        if (model.removeBlackoutRegion(region)) {
+            selectedBlackoutRegion = model.blackoutRegions().isEmpty()
+                    ? null
+                    : model.blackoutRegions().get(0);
+            sensorParametersPanel.refreshBlackoutRegions();
+            sensorParametersPanel.setSelectedBlackoutRegion(selectedBlackoutRegion);
+            earthMapCanvas.repaint();
+            timelinePanel.refresh();
+            statusLabel.setText("Removed blackout region");
+        }
+    }
+
+    private BlackoutRegion moveBlackoutRegion(
+            BlackoutRegion region,
+            GeodeticPoint newCenter) {
+        if (analysisMode || presetScenarioActive || playback.isRunning() || playback.isComputing()) {
+            return region;
+        }
+        resetCompletedPlayback();
+        selectedBlackoutRegion = model.moveBlackoutRegion(region, newCenter);
+        sensorParametersPanel.refreshBlackoutRegions();
+        sensorParametersPanel.setSelectedBlackoutRegion(selectedBlackoutRegion);
+        timelinePanel.refresh();
+        return selectedBlackoutRegion;
     }
 
     private void loadPresetScenario(
@@ -367,8 +422,12 @@ public final class TrackerFrame extends JFrame {
         presetScenarioActive = true;
         currentScenarioName = preset.toString();
         selectedTarget = model.targets().get(0);
+        selectedBlackoutRegion = model.blackoutRegions().isEmpty()
+                ? null
+                : model.blackoutRegions().get(0);
         motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
         sensorParametersPanel.refreshBlackoutRegions();
+        sensorParametersPanel.setSelectedBlackoutRegion(selectedBlackoutRegion);
         updateStructuralEditingControls();
         earthMapCanvas.focusOnTargets();
         refreshTelemetry();
@@ -395,8 +454,12 @@ public final class TrackerFrame extends JFrame {
         presetScenarioActive = false;
         currentScenarioName = scenario.name();
         selectedTarget = model.targets().isEmpty() ? null : model.targets().get(0);
+        selectedBlackoutRegion = model.blackoutRegions().isEmpty()
+                ? null
+                : model.blackoutRegions().get(0);
         motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
         sensorParametersPanel.refreshBlackoutRegions();
+        sensorParametersPanel.setSelectedBlackoutRegion(selectedBlackoutRegion);
         updateStructuralEditingControls();
         earthMapCanvas.focusOnTargets();
         refreshTelemetry();
@@ -464,6 +527,7 @@ public final class TrackerFrame extends JFrame {
         presetScenarioActive = false;
         currentScenarioName = "User generated";
         selectedTarget = model.replaceTargets(1).get(0);
+        selectedBlackoutRegion = null;
         motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
         sensorParametersPanel.refreshBlackoutRegions();
         updateStructuralEditingControls();
@@ -501,7 +565,7 @@ public final class TrackerFrame extends JFrame {
                 : "Pre-computing sensor and tracker history…");
         statusLabel.paintImmediately(statusLabel.getBounds());
         try {
-            if (!playback.precompute(currentScenarioName)) {
+            if (!playback.precompute(scenarioNameForRecording())) {
                 String message = recorder.lastError() == null
                         ? "Draw or load at least one runnable target trajectory first."
                         : recorder.lastError();
@@ -528,6 +592,10 @@ public final class TrackerFrame extends JFrame {
             timelinePanel.refresh();
             updateStructuralEditingControls();
         }
+    }
+
+    private String scenarioNameForRecording() {
+        return presetScenarioPanel.scenarioNameForRecording(currentScenarioName);
     }
 
     private void replayScenario() {
@@ -708,6 +776,7 @@ public final class TrackerFrame extends JFrame {
             presetScenarioActive = false;
             currentScenarioName = "User generated";
             selectedTarget = model.replaceTargets(1).get(0);
+            selectedBlackoutRegion = null;
             motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
             sensorParametersPanel.refreshBlackoutRegions();
             dataModeLayout.show(dataModePanel, "analysis");
@@ -751,6 +820,13 @@ public final class TrackerFrame extends JFrame {
         try {
             RecordedScenario scenario = TrackCsvReader.read(scenarioFolder);
             loadedAnalysisScenario = scenario;
+            model.clearBlackoutRegions();
+            scenario.blackoutRegions().forEach(model::addBlackoutRegion);
+            selectedBlackoutRegion = model.blackoutRegions().isEmpty()
+                    ? null
+                    : model.blackoutRegions().get(0);
+            sensorParametersPanel.refreshBlackoutRegions();
+            sensorParametersPanel.setSelectedBlackoutRegion(selectedBlackoutRegion);
             playback.loadRecordedScenario(scenario);
             playback.rewindReplayPaused();
             earthMapCanvas.focusOnPoints(playback.scenarioExtentPoints());

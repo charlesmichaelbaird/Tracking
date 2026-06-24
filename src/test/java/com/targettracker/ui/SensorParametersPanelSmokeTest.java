@@ -29,12 +29,19 @@ public final class SensorParametersPanelSmokeTest {
         ScenarioModel model = new ScenarioModel();
         SensorSettings settings = new SensorSettings();
         AtomicInteger addRequests = new AtomicInteger();
+        AtomicInteger removeRequests = new AtomicInteger();
         SensorParametersPanel panel = new SensorParametersPanel(
                 settings,
                 model,
                 () -> {
                 },
-                addRequests::incrementAndGet);
+                addRequests::incrementAndGet,
+                ignored -> {
+                },
+                region -> {
+                    removeRequests.incrementAndGet();
+                    model.removeBlackoutRegion(region);
+                });
 
         List<String> labels = new ArrayList<>();
         collectLabels(panel, labels);
@@ -64,6 +71,15 @@ public final class SensorParametersPanelSmokeTest {
         }
         if (labels.stream().noneMatch(text -> text.contains("1.00 km"))) {
             throw new AssertionError("Blackout list should still show region dimensions");
+        }
+        JButton removeButton = findButton(panel, "Remove");
+        if (removeButton == null) {
+            throw new AssertionError("Blackout remove button is missing");
+        }
+        removeButton.doClick();
+        panel.refreshBlackoutRegions();
+        if (removeRequests.get() != 1 || !model.blackoutRegions().isEmpty()) {
+            throw new AssertionError("Blackout remove button should remove the selected region");
         }
     }
 

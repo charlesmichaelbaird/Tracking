@@ -122,7 +122,8 @@ public final class ImmTracker {
                 List.of(),
                 view.color(),
                 view.dead(),
-                view.uncertaintyRadiusMeters());
+                view.uncertaintyRadiusMeters(),
+                view.deadReason());
     }
 
     /** Returns and clears track snapshots produced by measurement updates. */
@@ -201,9 +202,13 @@ public final class ImmTracker {
         for (Track track : activeTracks) {
             FusedState prediction = track.fusedAt(timeSeconds, parameters);
             double radius = uncertaintyRadius(prediction.covariance());
-            if (timeSeconds - track.lastUpdateSeconds > parameters.timeoutSeconds()
+            double timeSinceUpdate = timeSeconds - track.lastUpdateSeconds;
+            if (timeSinceUpdate > parameters.timeoutSeconds()
                     || radius > parameters.uncertaintyRadiusMeters()) {
-                TrackView deadView = track.viewFrom(prediction, true, radius);
+                String reason = timeSinceUpdate > parameters.timeoutSeconds()
+                        ? "timeout"
+                        : "covariance radius";
+                TrackView deadView = track.viewFrom(prediction, true, radius, reason);
                 deadTrackViews.add(deadView);
                 broken.add(track);
             }
@@ -654,10 +659,10 @@ public final class ImmTracker {
 
         TrackView viewAt(double timeSeconds, ImmParameters parameters, boolean dead) {
             FusedState fused = fusedAt(timeSeconds, parameters);
-            return viewFrom(fused, dead, uncertaintyRadius(fused.covariance()));
+            return viewFrom(fused, dead, uncertaintyRadius(fused.covariance()), "");
         }
 
-        TrackView viewFrom(FusedState fused, boolean dead, double radius) {
+        TrackView viewFrom(FusedState fused, boolean dead, double radius, String deadReason) {
             double[][] positionCovariance = stateBlock(
                     fused.covariance(), POSITION_OFFSET, SPATIAL_DIMENSIONS);
             return new TrackView(
@@ -667,7 +672,8 @@ public final class ImmTracker {
                     readOnlyTail,
                     color,
                     dead,
-                    radius);
+                    radius,
+                    deadReason);
         }
 
         void appendTail(EcefPoint point) {

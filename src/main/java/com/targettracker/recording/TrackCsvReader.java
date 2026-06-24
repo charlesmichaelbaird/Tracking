@@ -1,5 +1,7 @@
 package com.targettracker.recording;
 
+import com.targettracker.model.BlackoutRegion;
+import com.targettracker.model.GeodeticPoint;
 import com.targettracker.tracking.AssociatedMeasurement;
 import com.targettracker.tracking.TrackRecord;
 
@@ -65,7 +67,8 @@ public final class TrackCsvReader {
                 ? folder.getFileName().toString()
                 : metadata.scenarioName();
         return new RecordedScenario(
-                folder, name, duration, records, groundTruth, measurements);
+                folder, name, duration, records,
+                groundTruth, measurements, metadata.blackoutRegions());
     }
 
     private static List<Path> csvFiles(Path folder) throws IOException {
@@ -289,10 +292,11 @@ public final class TrackCsvReader {
     private static Metadata readMetadata(Path folder) throws IOException {
         Path metadataFile = folder.resolve(METADATA_FILE);
         if (!Files.isRegularFile(metadataFile)) {
-            return new Metadata("", 0.0);
+            return new Metadata("", 0.0, List.of());
         }
         String name = "";
         double duration = 0.0;
+        Map<String, String> values = new HashMap<>();
         for (String line : Files.readAllLines(metadataFile, StandardCharsets.UTF_8)) {
             int equals = line.indexOf('=');
             if (equals < 0) {
@@ -300,6 +304,7 @@ public final class TrackCsvReader {
             }
             String key = line.substring(0, equals).trim();
             String value = line.substring(equals + 1).trim();
+            values.put(key, value);
             if ("scenario_name".equals(key)) {
                 name = value;
             } else if ("duration_seconds".equals(key)) {
@@ -310,7 +315,56 @@ public final class TrackCsvReader {
                 }
             }
         }
-        return new Metadata(name, duration);
+        return new Metadata(name, duration, parseBlackoutRegions(values));
+    }
+
+    private static List<BlackoutRegion> parseBlackoutRegions(Map<String, String> values)
+            throws IOException {
+        int count = parseOptionalInt(values.get("blackout.count"), 0);
+        if (count <= 0) {
+            return List.of();
+        }
+        List<BlackoutRegion> regions = new ArrayList<>();
+        for (int index = 0; index < count; index++) {
+            String prefix = "blackout." + index + ".";
+            String name = values.getOrDefault(prefix + "name", "Blackout");
+            try {
+                regions.add(new BlackoutRegion(
+                        name,
+                        new GeodeticPoint(
+                                parseRequiredDouble(values, prefix + "center_latitude_degrees"),
+                                parseRequiredDouble(values, prefix + "center_longitude_degrees"),
+                                0.0),
+                        parseRequiredDouble(values, prefix + "width_meters"),
+                        parseRequiredDouble(values, prefix + "height_meters")));
+            } catch (IllegalArgumentException exception) {
+                throw new IOException("Invalid blackout geometry in " + METADATA_FILE, exception);
+            }
+        }
+        return List.copyOf(regions);
+    }
+
+    private static int parseOptionalInt(String value, int fallback) throws IOException {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            throw new IOException("Invalid blackout count in " + METADATA_FILE, exception);
+        }
+    }
+
+    private static double parseRequiredDouble(Map<String, String> values, String key) {
+        String value = values.get(key);
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Missing " + key);
+        }
+        double parsed = Double.parseDouble(value);
+        if (!Double.isFinite(parsed)) {
+            throw new IllegalArgumentException("Non-finite " + key);
+        }
+        return parsed;
     }
 
     private static void requireColumn(Map<String, Integer> columns, String name, Path file)
@@ -398,6 +452,9 @@ public final class TrackCsvReader {
         return values;
     }
 
-    private record Metadata(String scenarioName, double durationSeconds) {
+    private record Metadata(
+            String scenarioName,
+            double durationSeconds,
+            List<BlackoutRegion> blackoutRegions) {
     }
 }

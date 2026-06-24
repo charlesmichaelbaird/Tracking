@@ -42,6 +42,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -94,7 +95,9 @@ final class EarthMapCanvas extends JPanel {
     private final MeasurementEngine measurementEngine;
     private final DisplayHistorySettings displaySettings;
     private final Supplier<TargetTrajectory> selectedTarget;
+    private final Supplier<BlackoutRegion> selectedBlackoutRegion;
     private final BooleanSupplier editingLocked;
+    private final BiFunction<BlackoutRegion, GeodeticPoint, BlackoutRegion> onBlackoutRegionMoved;
     private final Runnable onPathChanged;
     private final Consumer<BlackoutRegion> onBlackoutRegionCreated;
     private final Consumer<GeodeticPoint> onCursorChanged;
@@ -104,10 +107,16 @@ final class EarthMapCanvas extends JPanel {
     private DrawingMode drawingMode = DrawingMode.FREE_HAND;
     private boolean freeHandDrawing;
     private boolean blackoutDrawing;
+    private boolean blackoutDragging;
+    private boolean targetDrawingEnabled = true;
+    private boolean blackoutEditingEnabled;
     private boolean panning;
     private TargetTrajectory finishedSegmentedTarget;
     private Point mousePoint;
     private GeodeticPoint blackoutFirstCorner;
+    private GeodeticPoint blackoutDragAnchor;
+    private GeodeticPoint blackoutDragStartCenter;
+    private BlackoutRegion draggedBlackoutRegion;
     private Point panAnchor;
     private double panStartLongitude;
     private double panStartLatitude;
@@ -129,7 +138,9 @@ final class EarthMapCanvas extends JPanel {
             MeasurementEngine measurementEngine,
             DisplayHistorySettings displaySettings,
             Supplier<TargetTrajectory> selectedTarget,
+            Supplier<BlackoutRegion> selectedBlackoutRegion,
             BooleanSupplier editingLocked,
+            BiFunction<BlackoutRegion, GeodeticPoint, BlackoutRegion> onBlackoutRegionMoved,
             Runnable onPathChanged,
             Consumer<BlackoutRegion> onBlackoutRegionCreated,
             Consumer<GeodeticPoint> onCursorChanged) {
@@ -138,7 +149,9 @@ final class EarthMapCanvas extends JPanel {
         this.measurementEngine = measurementEngine;
         this.displaySettings = displaySettings;
         this.selectedTarget = selectedTarget;
+        this.selectedBlackoutRegion = selectedBlackoutRegion;
         this.editingLocked = editingLocked;
+        this.onBlackoutRegionMoved = onBlackoutRegionMoved;
         this.onPathChanged = onPathChanged;
         this.onBlackoutRegionCreated = onBlackoutRegionCreated;
         this.onCursorChanged = onCursorChanged;
@@ -168,6 +181,21 @@ final class EarthMapCanvas extends JPanel {
                 }
                 if (blackoutDrawing) {
                     handleBlackoutClick(event.getPoint());
+                    return;
+                }
+                if (blackoutEditingEnabled && displaySettings.blackoutRegionsVisible()) {
+                    BlackoutRegion region = selectedBlackoutRegion.get();
+                    GeodeticPoint point = toGeodetic(event.getPoint()).withAltitude(0.0);
+                    if (region != null && region.contains(point)) {
+                        blackoutDragging = true;
+                        draggedBlackoutRegion = region;
+                        blackoutDragAnchor = point;
+                        blackoutDragStartCenter = region.center();
+                        setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+                        return;
+                    }
+                }
+                if (!targetDrawingEnabled) {
                     return;
                 }
                 TargetTrajectory target = selectedTarget.get();
@@ -208,7 +236,21 @@ final class EarthMapCanvas extends JPanel {
                     repaint();
                     return;
                 }
-                if (!freeHandDrawing || editingLocked.getAsBoolean()) {
+                if (blackoutDragging) {
+                    GeodeticPoint current = toGeodetic(event.getPoint()).withAltitude(0.0);
+                    Wgs84Geodesic.GeodesicData offset =
+                            Wgs84Geodesic.inverse(blackoutDragAnchor, current);
+                    GeodeticPoint newCenter = Wgs84Geodesic.direct(
+                            blackoutDragStartCenter,
+                            offset.initialBearingRadians(),
+                            offset.distanceMeters(),
+                            0.0);
+                    draggedBlackoutRegion =
+                            onBlackoutRegionMoved.apply(draggedBlackoutRegion, newCenter);
+                    repaint();
+                    return;
+                }
+                if (!targetDrawingEnabled || !freeHandDrawing || editingLocked.getAsBoolean()) {
                     return;
                 }
                 TargetTrajectory target = selectedTarget.get();
@@ -224,6 +266,13 @@ final class EarthMapCanvas extends JPanel {
                 if (panning) {
                     panning = false;
                     panAnchor = null;
+                    setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+                }
+                if (blackoutDragging) {
+                    blackoutDragging = false;
+                    draggedBlackoutRegion = null;
+                    blackoutDragAnchor = null;
+                    blackoutDragStartCenter = null;
                     setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
                 }
                 if (freeHandDrawing) {
@@ -259,6 +308,26 @@ final class EarthMapCanvas extends JPanel {
         blackoutDrawing = false;
         blackoutFirstCorner = null;
         finishedSegmentedTarget = null;
+        repaint();
+    }
+
+    void setTargetDrawingEnabled(boolean enabled) {
+        targetDrawingEnabled = enabled;
+        if (!enabled) {
+            freeHandDrawing = false;
+            finishedSegmentedTarget = null;
+        }
+        repaint();
+    }
+
+    void setBlackoutEditingEnabled(boolean enabled) {
+        blackoutEditingEnabled = enabled;
+        if (!enabled) {
+            blackoutDrawing = false;
+            blackoutDragging = false;
+            blackoutFirstCorner = null;
+            draggedBlackoutRegion = null;
+        }
         repaint();
     }
 
@@ -506,10 +575,11 @@ final class EarthMapCanvas extends JPanel {
     }
 
     private void drawBlackoutRegions(Graphics2D g) {
-        if (model.blackoutRegions().isEmpty()) {
+        if (!displaySettings.blackoutRegionsVisible() || model.blackoutRegions().isEmpty()) {
             return;
         }
         Rectangle map = mapBounds();
+        BlackoutRegion selected = selectedBlackoutRegion.get();
         for (BlackoutRegion region : model.blackoutRegions()) {
             Polygon polygon = new Polygon();
             for (GeodeticPoint corner : region.corners()) {
@@ -535,8 +605,15 @@ final class EarthMapCanvas extends JPanel {
                 zone.dispose();
             }
             g.setColor(new Color(60, 65, 72, 180));
-            g.setStroke(new BasicStroke(1.4f));
+            g.setStroke(new BasicStroke(region == selected ? 3.0f : 1.4f));
             g.drawPolygon(polygon);
+            if (region == selected) {
+                g.setColor(new Color(255, 255, 255, 205));
+                g.setStroke(new BasicStroke(
+                        1.2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL,
+                        10.0f, new float[]{5.0f, 4.0f}, 0.0f));
+                g.drawPolygon(polygon);
+            }
         }
     }
 
@@ -786,6 +863,12 @@ final class EarthMapCanvas extends JPanel {
                     : new Color(25, 31, 37));
             String label = track.dead() ? track.id() + " (dead)" : track.id();
             g.drawString(label, point.x + radius + 5, point.y - radius - 2);
+            if (track.dead() && !track.deadReason().isBlank()) {
+                Font previousFont = g.getFont();
+                g.setFont(g.getFont().deriveFont(Font.PLAIN, 10.0f));
+                g.drawString(track.deadReason(), point.x + radius + 5, point.y + radius + 10);
+                g.setFont(previousFont);
+            }
         }
     }
 
@@ -990,7 +1073,8 @@ final class EarthMapCanvas extends JPanel {
     }
 
     private void drawSegmentPreview(Graphics2D g) {
-        if (drawingMode != DrawingMode.SEGMENTED || mousePoint == null || editingLocked.getAsBoolean()) {
+        if (!targetDrawingEnabled || drawingMode != DrawingMode.SEGMENTED
+                || mousePoint == null || editingLocked.getAsBoolean()) {
             return;
         }
         TargetTrajectory target = selectedTarget.get();

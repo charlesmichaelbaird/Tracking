@@ -1,5 +1,7 @@
 package com.targettracker.recording;
 
+import com.targettracker.model.BlackoutRegion;
+import com.targettracker.model.GeodeticPoint;
 import com.targettracker.tracking.AssociatedMeasurement;
 import com.targettracker.tracking.TrackRecord;
 
@@ -23,7 +25,11 @@ public final class TrackCsvReaderSmokeTest {
                     Instant.parse("2026-06-22T15:04:05.123Z"), ZoneOffset.UTC));
             recorder.setOutputParent(parent);
             recorder.setArmed(true);
-            recorder.beginRun("1 target — hard left turn", 20.0);
+            recorder.beginRun("1 target — hard left turn", 20.0, List.of(new BlackoutRegion(
+                    "BLK-001",
+                    new GeodeticPoint(40.0, -75.0, 0.0),
+                    1_000.0,
+                    2_000.0)));
             recorder.recordSamples(List.of(
                     record(5.0, true),
                     record(6.0, false)));
@@ -41,7 +47,9 @@ public final class TrackCsvReaderSmokeTest {
                     || loaded.durationSeconds() != 20.0
                     || loaded.records().size() != 2
                     || loaded.groundTruth().size() != 1
-                    || loaded.measurements().size() != 1) {
+                    || loaded.measurements().size() != 1
+                    || loaded.blackoutRegions().size() != 1
+                    || loaded.blackoutRegions().get(0).widthMeters() != 1_000.0) {
                 throw new AssertionError("Recorded scenario metadata did not round-trip");
             }
             TrackRecord update = loaded.records().get(0);

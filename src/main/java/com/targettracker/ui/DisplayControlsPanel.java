@@ -31,6 +31,14 @@ final class DisplayControlsPanel extends JPanel {
         });
         add(gridButton);
 
+        JToggleButton blackoutsButton = new JToggleButton("Blackouts", true);
+        blackoutsButton.setToolTipText("Show or hide sensor blackout regions");
+        blackoutsButton.addActionListener(event -> {
+            settings.setBlackoutRegionsVisible(blackoutsButton.isSelected());
+            onChanged.run();
+        });
+        add(blackoutsButton);
+
         JToggleButton truthButton = new JToggleButton("Ground truth", true);
         truthButton.setToolTipText("Show or hide ground-truth paths and target markers");
         truthButton.addActionListener(event -> {

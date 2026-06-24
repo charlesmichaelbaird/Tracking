@@ -5,6 +5,7 @@ import com.targettracker.model.EcefVector;
 import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.TargetMeasurement;
 import com.targettracker.model.TargetTrajectory;
+import com.targettracker.model.Wgs84;
 import com.targettracker.recording.GroundTruthRecord;
 import com.targettracker.recording.RecordedScenario;
 import com.targettracker.recording.RecordedMeasurement;
@@ -101,7 +102,7 @@ final class ScenarioPlayback {
         recentHistory.clear();
         immTracker.reset();
         measurementEngine.beginScenario();
-        if (!recorder.beginRun(scenarioName, duration)) {
+        if (!recorder.beginRun(scenarioName, duration, model.blackoutRegions())) {
             computing = false;
             onUpdate.run();
             return false;
@@ -175,6 +176,8 @@ final class ScenarioPlayback {
             scenario.measurements().forEach(
                     measurement -> extent.add(pointFromMean(measurement.mean())));
         }
+        scenario.blackoutRegions().forEach(region ->
+                region.corners().forEach(corner -> extent.add(Wgs84.toEcef(corner))));
         scenarioExtentPoints = List.copyOf(extent);
         if (recordsByTime.isEmpty()) {
             replayFrames.add(new ReplayFrame(0.0, List.of()));
@@ -202,7 +205,8 @@ final class ScenarioPlayback {
                             List.of(),
                             track.color(),
                             true,
-                            track.uncertaintyRadiusMeters()))
+                            track.uncertaintyRadiusMeters(),
+                            track.deadReason().isBlank() ? "timeout" : track.deadReason()))
                     .toList();
             replayFrames.add(new ReplayFrame(importedDurationSeconds, endingViews));
         }
@@ -466,7 +470,8 @@ final class ScenarioPlayback {
                     List.copyOf(tailsByTrack.getOrDefault(track.id(), List.of())),
                     track.color(),
                     track.dead(),
-                    track.uncertaintyRadiusMeters()));
+                    track.uncertaintyRadiusMeters(),
+                    track.deadReason()));
         }
         replayTrackViews = List.copyOf(views);
         rebuildTargetHistory(frameIndex);
@@ -592,7 +597,8 @@ final class ScenarioPlayback {
                     List.of(),
                     track.color(),
                     track.dead(),
-                    track.uncertaintyRadiusMeters()));
+                    track.uncertaintyRadiusMeters(),
+                    track.deadReason()));
         }
         return List.copyOf(compact);
     }
@@ -634,7 +640,8 @@ final class ScenarioPlayback {
                 List.of(),
                 trackColor(record.trackId()),
                 frameTimeSeconds - record.timeSeconds() > 1.01,
-                radius);
+                radius,
+                frameTimeSeconds - record.timeSeconds() > 1.01 ? "timeout" : "");
     }
 
     private static Color trackColor(String trackId) {

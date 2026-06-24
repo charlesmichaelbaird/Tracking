@@ -80,6 +80,15 @@ public final class TrackCsvRecorderSmokeTest {
                 throw new AssertionError("Repeated timestamps must still produce unique run folders");
             }
             recorder.finishRun();
+
+            if (!recorder.beginRun("Long User Scenario Name", 120.0)) {
+                throw new AssertionError("A named armed run should start");
+            }
+            if (!recorder.runDirectory().getFileName().toString()
+                    .startsWith("long_user_scenario_name_2026-06-22_15-04-05_123")) {
+                throw new AssertionError("Run directory should include the safe scenario name");
+            }
+            recorder.finishRun();
             System.out.println("TrackCsvRecorderSmokeTest passed");
         } finally {
             try (var paths = Files.walk(parent)) {

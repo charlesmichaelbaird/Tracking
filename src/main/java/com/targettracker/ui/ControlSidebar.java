@@ -14,6 +14,7 @@ import java.awt.Dimension;
 import java.awt.GridLayout;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /** Single-window card console that replaces the former auxiliary dialogs. */
 final class ControlSidebar extends JPanel {
@@ -25,13 +26,25 @@ final class ControlSidebar extends JPanel {
     private final CardLayout cardLayout = new CardLayout();
     private final JPanel cards = new JPanel(cardLayout);
     private final Map<String, JToggleButton> navigationButtons = new LinkedHashMap<>();
+    private final Consumer<String> onCardChanged;
 
     ControlSidebar(
             JComponent immPanel,
             JComponent sensorPanel,
             JComponent targetsPanel,
             JComponent scenarioPanel) {
+        this(immPanel, sensorPanel, targetsPanel, scenarioPanel, ignored -> {
+        });
+    }
+
+    ControlSidebar(
+            JComponent immPanel,
+            JComponent sensorPanel,
+            JComponent targetsPanel,
+            JComponent scenarioPanel,
+            Consumer<String> onCardChanged) {
         super(new BorderLayout());
+        this.onCardChanged = onCardChanged;
         setPreferredSize(new Dimension(430, 0));
         setMinimumSize(new Dimension(360, 0));
         setBackground(new Color(246, 248, 251));
@@ -61,6 +74,7 @@ final class ControlSidebar extends JPanel {
         if (button != null) {
             button.setSelected(true);
         }
+        onCardChanged.accept(name);
     }
 
     private void addNavigationButton(JPanel navigation, ButtonGroup group, String name) {

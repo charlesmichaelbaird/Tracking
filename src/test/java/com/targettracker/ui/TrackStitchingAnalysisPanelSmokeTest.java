@@ -47,7 +47,9 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                     measurements,
                     new DisplayHistorySettings(),
                     () -> null,
+                    () -> null,
                     () -> true,
+                    (region, center) -> region,
                     () -> {
                     },
                     ignored -> {

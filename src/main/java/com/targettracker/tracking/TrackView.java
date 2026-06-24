@@ -12,5 +12,11 @@ public record TrackView(
         List<EcefPoint> tail,
         Color color,
         boolean dead,
-        double uncertaintyRadiusMeters) {
+        double uncertaintyRadiusMeters,
+        String deadReason) {
+    public TrackView {
+        if (deadReason == null) {
+            deadReason = "";
+        }
+    }
 }

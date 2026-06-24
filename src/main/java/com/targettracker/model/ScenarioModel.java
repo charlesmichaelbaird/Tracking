@@ -4,6 +4,7 @@ import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Function;
 
 public final class ScenarioModel {
     private static final Color[] TARGET_COLORS = {
@@ -17,7 +18,6 @@ public final class ScenarioModel {
 
     private final List<TargetTrajectory> targets = new ArrayList<>();
     private final List<BlackoutRegion> blackoutRegions = new ArrayList<>();
-    private int nextTargetNumber = 1;
 
     public ScenarioModel() {
     }
@@ -37,12 +37,33 @@ public final class ScenarioModel {
     public BlackoutRegion addUserBlackoutRegion(
             GeodeticPoint firstCorner,
             GeodeticPoint secondCorner) {
+        int number = nextAvailableNumber(blackoutRegions, BlackoutRegion::name, "BLK-");
         BlackoutRegion region = BlackoutRegion.fromOppositeCorners(
-                "BLK-%03d".formatted(blackoutRegions.size() + 1),
+                "BLK-%03d".formatted(number),
                 firstCorner,
                 secondCorner);
         addBlackoutRegion(region);
         return region;
+    }
+
+    public boolean removeBlackoutRegion(BlackoutRegion region) {
+        return blackoutRegions.remove(region);
+    }
+
+    public BlackoutRegion moveBlackoutRegion(
+            BlackoutRegion region,
+            GeodeticPoint newCenter) {
+        int index = blackoutRegions.indexOf(region);
+        if (index < 0) {
+            return region;
+        }
+        BlackoutRegion moved = new BlackoutRegion(
+                region.name(),
+                newCenter,
+                region.widthMeters(),
+                region.heightMeters());
+        blackoutRegions.set(index, moved);
+        return moved;
     }
 
     public void clearBlackoutRegions() {
@@ -54,7 +75,7 @@ public final class ScenarioModel {
     }
 
     public TargetTrajectory addTarget() {
-        int number = nextTargetNumber++;
+        int number = nextAvailableNumber(targets, TargetTrajectory::id, "TGT-");
         TargetTrajectory target = new TargetTrajectory(
                 "TGT-%03d".formatted(number),
                 TARGET_COLORS[(number - 1) % TARGET_COLORS.length]);
@@ -73,7 +94,6 @@ public final class ScenarioModel {
         }
         targets.clear();
         blackoutRegions.clear();
-        nextTargetNumber = 1;
         for (int index = 0; index < targetCount; index++) {
             addTarget();
         }
@@ -86,5 +106,30 @@ public final class ScenarioModel {
                 .mapToDouble(TargetTrajectory::durationSeconds)
                 .max()
                 .orElse(0.0);
+    }
+
+    private static <T> int nextAvailableNumber(
+            List<T> values,
+            Function<T, String> idExtractor,
+            String prefix) {
+        int number = 1;
+        while (containsNumber(values, idExtractor, prefix, number)) {
+            number++;
+        }
+        return number;
+    }
+
+    private static <T> boolean containsNumber(
+            List<T> values,
+            Function<T, String> idExtractor,
+            String prefix,
+            int number) {
+        String wanted = "%s%03d".formatted(prefix, number);
+        for (T value : values) {
+            if (wanted.equals(idExtractor.apply(value))) {
+                return true;
+            }
+        }
+        return false;
     }
 }

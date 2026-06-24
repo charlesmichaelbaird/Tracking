@@ -40,7 +40,7 @@ final class PresetScenarioPanel extends JPanel {
     private final JTextField speedField = field("100", 5);
     private final JTextField altitudeField = field("1000", 6);
     private final JTextField durationField = field("05:00", 5);
-    private final JTextField saveNameField = field("My scenario", 12);
+    private final JTextField saveNameField = field("My scenario", 28);
     private final JButton applyButton = new JButton("Apply preset");
     private final JButton saveButton = new JButton("Save user scenario");
     private final JLabel modeLabel = new JLabel("Manual editing");
@@ -215,6 +215,18 @@ final class PresetScenarioPanel extends JPanel {
         synchronizing = false;
     }
 
+    String scenarioNameForRecording(String fallback) {
+        Object selected = presetSelector.getSelectedItem();
+        ScenarioPreset preset = selected instanceof ScenarioPreset value ? value : null;
+        if (preset != null && preset.isUserGenerated()) {
+            String typedName = saveNameField.getText().trim();
+            if (!typedName.isBlank()) {
+                return typedName;
+            }
+        }
+        return fallback == null || fallback.isBlank() ? "scenario" : fallback;
+    }
+
     private JPanel createSavePanel() {
         JPanel panel = new JPanel();
         panel.setOpaque(false);
@@ -244,8 +256,9 @@ final class PresetScenarioPanel extends JPanel {
         JLabel text = new JLabel(label);
         text.setToolTipText(tooltip);
         field.setToolTipText(tooltip);
-        field.setPreferredSize(new Dimension(105, 28));
-        field.setMaximumSize(new Dimension(105, 28));
+        int width = Math.max(105, field.getPreferredSize().width);
+        field.setPreferredSize(new Dimension(width, 28));
+        field.setMaximumSize(new Dimension(width, 28));
         panel.add(text, BorderLayout.CENTER);
         panel.add(field, BorderLayout.EAST);
         return panel;

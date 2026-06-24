@@ -8,8 +8,11 @@ import com.targettracker.model.SensorSettings;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
@@ -24,6 +27,7 @@ import java.awt.GridLayout;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.DoublePredicate;
 
 /** Embedded editor for the omniscient sensor configuration. */
@@ -32,24 +36,34 @@ final class SensorParametersPanel extends JPanel {
     private final ScenarioModel model;
     private final Runnable onParametersChanged;
     private final Runnable onAddBlackoutRegionRequested;
+    private final Consumer<BlackoutRegion> onBlackoutRegionSelected;
+    private final Consumer<BlackoutRegion> onRemoveBlackoutRegionRequested;
     private final JTextField lookTimingField;
     private final JTextField lookOffsetField;
     private final JTextField positionStandardDeviationField;
     private final JTextField velocityStandardDeviationField;
     private final JTextField probabilityOfDetectionField;
     private final JPanel blackoutListPanel = new JPanel();
+    private final JComboBox<BlackoutRegion> blackoutSelector = new JComboBox<>();
+    private final JLabel blackoutDetailsLabel = new JLabel("No blackout regions defined");
+    private final JButton removeBlackoutButton = new JButton("Remove");
     private final JLabel validationLabel = new JLabel("Values apply immediately");
+    private boolean synchronizingBlackouts;
 
     SensorParametersPanel(
             SensorSettings sensorSettings,
             ScenarioModel model,
             Runnable onParametersChanged,
-            Runnable onAddBlackoutRegionRequested) {
+            Runnable onAddBlackoutRegionRequested,
+            Consumer<BlackoutRegion> onBlackoutRegionSelected,
+            Consumer<BlackoutRegion> onRemoveBlackoutRegionRequested) {
         super(new BorderLayout(0, 12));
         this.sensorSettings = sensorSettings;
         this.model = model;
         this.onParametersChanged = onParametersChanged;
         this.onAddBlackoutRegionRequested = onAddBlackoutRegionRequested;
+        this.onBlackoutRegionSelected = onBlackoutRegionSelected;
+        this.onRemoveBlackoutRegionRequested = onRemoveBlackoutRegionRequested;
         setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
         setBackground(new Color(246, 248, 251));
 
@@ -145,6 +159,9 @@ final class SensorParametersPanel extends JPanel {
     }
 
     void refreshBlackoutRegions() {
+        if (refreshBlackoutSelector()) {
+            return;
+        }
         blackoutListPanel.removeAll();
         List<BlackoutRegion> regions = model.blackoutRegions();
         if (regions.isEmpty()) {
@@ -164,6 +181,11 @@ final class SensorParametersPanel extends JPanel {
                         region.heightMeters() / 1_000.0));
                 row.setForeground(new Color(55, 65, 75));
                 blackoutListPanel.add(row);
+                JButton removeButton = new JButton("Remove");
+                removeButton.setToolTipText("Remove this blackout region");
+                removeButton.addActionListener(event ->
+                        onRemoveBlackoutRegionRequested.accept(region));
+                blackoutListPanel.add(removeButton);
             }
         }
         blackoutListPanel.revalidate();
@@ -191,15 +213,101 @@ final class SensorParametersPanel extends JPanel {
         panel.add(topRow, BorderLayout.NORTH);
 
         blackoutListPanel.setOpaque(false);
-        blackoutListPanel.setLayout(new GridLayout(0, 1, 0, 3));
-        JScrollPane scrollPane = new JScrollPane(blackoutListPanel);
-        scrollPane.setOpaque(false);
-        scrollPane.getViewport().setOpaque(false);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.setPreferredSize(new Dimension(1, 76));
-        panel.add(scrollPane, BorderLayout.CENTER);
+        blackoutListPanel.setLayout(new BoxLayout(blackoutListPanel, BoxLayout.Y_AXIS));
+        blackoutSelector.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        blackoutSelector.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public java.awt.Component getListCellRendererComponent(
+                    JList<?> list,
+                    Object value,
+                    int index,
+                    boolean isSelected,
+                    boolean cellHasFocus) {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (value instanceof BlackoutRegion region) {
+                    setText(blackoutLabel(region));
+                }
+                return this;
+            }
+        });
+        blackoutSelector.addActionListener(event -> {
+            if (!synchronizingBlackouts) {
+                updateBlackoutSelection();
+            }
+        });
+        blackoutListPanel.add(blackoutSelector);
+        blackoutListPanel.add(Box.createVerticalStrut(6));
+        blackoutDetailsLabel.setForeground(new Color(55, 65, 75));
+        blackoutDetailsLabel.setAlignmentX(LEFT_ALIGNMENT);
+        blackoutListPanel.add(blackoutDetailsLabel);
+        blackoutListPanel.add(Box.createVerticalStrut(6));
+        removeBlackoutButton.setAlignmentX(LEFT_ALIGNMENT);
+        removeBlackoutButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        removeBlackoutButton.addActionListener(event -> {
+            BlackoutRegion selected = selectedBlackoutRegion();
+            if (selected != null) {
+                onRemoveBlackoutRegionRequested.accept(selected);
+            }
+        });
+        blackoutListPanel.add(removeBlackoutButton);
+        panel.add(blackoutListPanel, BorderLayout.CENTER);
         refreshBlackoutRegions();
         return panel;
+    }
+
+    void setSelectedBlackoutRegion(BlackoutRegion region) {
+        synchronizingBlackouts = true;
+        blackoutSelector.setSelectedItem(region);
+        synchronizingBlackouts = false;
+        updateBlackoutSelection();
+    }
+
+    private boolean refreshBlackoutSelector() {
+        List<BlackoutRegion> regions = model.blackoutRegions();
+        BlackoutRegion previous = selectedBlackoutRegion();
+        synchronizingBlackouts = true;
+        blackoutSelector.removeAllItems();
+        for (BlackoutRegion region : regions) {
+            blackoutSelector.addItem(region);
+        }
+        if (previous != null && regions.contains(previous)) {
+            blackoutSelector.setSelectedItem(previous);
+        } else if (!regions.isEmpty()) {
+            blackoutSelector.setSelectedIndex(0);
+        }
+        synchronizingBlackouts = false;
+        updateBlackoutSelection();
+        blackoutListPanel.revalidate();
+        blackoutListPanel.repaint();
+        return true;
+    }
+
+    private BlackoutRegion selectedBlackoutRegion() {
+        return (BlackoutRegion) blackoutSelector.getSelectedItem();
+    }
+
+    private void updateBlackoutSelection() {
+        BlackoutRegion selected = selectedBlackoutRegion();
+        blackoutSelector.setEnabled(selected != null);
+        removeBlackoutButton.setEnabled(selected != null);
+        if (selected == null) {
+            blackoutDetailsLabel.setText("No blackout regions defined");
+        } else {
+            blackoutDetailsLabel.setText("<html>%.2f km by %.2f km &nbsp; center %.5f°, %.5f°</html>"
+                    .formatted(
+                            selected.widthMeters() / 1_000.0,
+                            selected.heightMeters() / 1_000.0,
+                            selected.center().latitudeDegrees(),
+                            selected.center().longitudeDegrees()));
+        }
+        onBlackoutRegionSelected.accept(selected);
+    }
+
+    private String blackoutLabel(BlackoutRegion region) {
+        int index = model.blackoutRegions().indexOf(region);
+        return index < 0
+                ? "Blackout region"
+                : "Region %d".formatted(index + 1);
     }
 
     private static JTextField addField(JPanel panel, String name, double value) {

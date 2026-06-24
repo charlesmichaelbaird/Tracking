@@ -1,5 +1,6 @@
 package com.targettracker.recording;
 
+import com.targettracker.model.BlackoutRegion;
 import com.targettracker.tracking.AssociatedMeasurement;
 import com.targettracker.tracking.TrackRecord;
 
@@ -100,6 +101,14 @@ public final class TrackCsvRecorder implements AutoCloseable {
 
     /** Starts a named run with three dedicated data subdirectories. */
     public boolean beginRun(String scenarioName, double durationSeconds) {
+        return beginRun(scenarioName, durationSeconds, List.of());
+    }
+
+    /** Starts a named run with three dedicated data subdirectories. */
+    public boolean beginRun(
+            String scenarioName,
+            double durationSeconds,
+            List<BlackoutRegion> blackoutRegions) {
         finishRun();
         if (!armed) {
             return true;
@@ -116,7 +125,7 @@ public final class TrackCsvRecorder implements AutoCloseable {
             trackDirectory = Files.createDirectory(runDirectory.resolve(TRACK_DIRECTORY));
             measurementDirectory = Files.createDirectory(
                     runDirectory.resolve(MEASUREMENT_DIRECTORY));
-            writeMetadata(scenarioName, durationSeconds);
+            writeMetadata(scenarioName, durationSeconds, blackoutRegions);
             writeReadme(scenarioName, durationSeconds);
             active = true;
             lastError = null;
@@ -295,12 +304,35 @@ public final class TrackCsvRecorder implements AutoCloseable {
         return candidate;
     }
 
-    private void writeMetadata(String scenarioName, double durationSeconds) throws IOException {
-        String text = "format_version=4\n"
+    private void writeMetadata(
+            String scenarioName,
+            double durationSeconds,
+            List<BlackoutRegion> blackoutRegions) throws IOException {
+        StringBuilder text = new StringBuilder("format_version=5\n"
                 + "scenario_name=" + scenarioName.replace("\n", " ").replace("\r", " ") + "\n"
-                + "duration_seconds=" + durationSeconds + "\n";
+                + "duration_seconds=" + durationSeconds + "\n"
+                + "blackout.count=" + (blackoutRegions == null ? 0 : blackoutRegions.size()) + "\n");
+        if (blackoutRegions != null) {
+            for (int index = 0; index < blackoutRegions.size(); index++) {
+                BlackoutRegion region = blackoutRegions.get(index);
+                String prefix = "blackout." + index + ".";
+                text.append(prefix).append("name=").append(
+                                region.name().replace("\n", " ").replace("\r", " "))
+                        .append('\n');
+                text.append(prefix).append("center_latitude_degrees=")
+                        .append(region.center().latitudeDegrees()).append('\n');
+                text.append(prefix).append("center_longitude_degrees=")
+                        .append(region.center().longitudeDegrees()).append('\n');
+                text.append(prefix).append("width_meters=")
+                        .append(region.widthMeters()).append('\n');
+                text.append(prefix).append("height_meters=")
+                        .append(region.heightMeters()).append('\n');
+            }
+        }
         Files.writeString(
-                runDirectory.resolve("scenario_metadata.properties"), text, StandardCharsets.UTF_8);
+                runDirectory.resolve("scenario_metadata.properties"),
+                text.toString(),
+                StandardCharsets.UTF_8);
     }
 
     private void writeReadme(String scenarioName, double durationSeconds) throws IOException {

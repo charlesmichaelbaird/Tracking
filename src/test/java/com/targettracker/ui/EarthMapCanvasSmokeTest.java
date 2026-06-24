@@ -13,6 +13,7 @@ import javax.swing.SwingUtilities;
 import java.awt.Graphics2D;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Headless checks for deepest map zoom and rewind/pause playback behavior. */
@@ -38,16 +39,28 @@ public final class EarthMapCanvasSmokeTest {
         ScenarioPlayback playback = new ScenarioPlayback(model, () -> {
         }, measurementEngine, immTracker);
         AtomicInteger blackoutCallbacks = new AtomicInteger();
+        AtomicReference<com.targettracker.model.BlackoutRegion> selectedBlackout =
+                new AtomicReference<>();
         EarthMapCanvas canvas = new EarthMapCanvas(
                 model,
                 playback,
                 measurementEngine,
                 new DisplayHistorySettings(),
                 () -> target,
+                selectedBlackout::get,
                 playback::isRunning,
+                (region, center) -> {
+                    com.targettracker.model.BlackoutRegion moved =
+                            model.moveBlackoutRegion(region, center);
+                    selectedBlackout.set(moved);
+                    return moved;
+                },
                 () -> {
                 },
-                ignored -> blackoutCallbacks.incrementAndGet(),
+                region -> {
+                    selectedBlackout.set(region);
+                    blackoutCallbacks.incrementAndGet();
+                },
                 ignored -> {
                 });
         canvas.setSize(900, 600);
@@ -70,6 +83,12 @@ public final class EarthMapCanvasSmokeTest {
         }
         target.clearPath();
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.SEGMENTED);
+        canvas.setTargetDrawingEnabled(false);
+        click(canvas, 420, 280);
+        if (!target.path().isEmpty()) {
+            throw new AssertionError("Target clicks should be ignored outside the Targets panel");
+        }
+        canvas.setTargetDrawingEnabled(true);
         click(canvas, 420, 280);
         click(canvas, 480, 335);
         if (target.path().size() != 2) {
