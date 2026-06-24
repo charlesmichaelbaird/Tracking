@@ -18,6 +18,7 @@ public final class ScenarioModel {
 
     private final List<TargetTrajectory> targets = new ArrayList<>();
     private final List<BlackoutRegion> blackoutRegions = new ArrayList<>();
+    private Double scenarioLengthSeconds;
 
     public ScenarioModel() {
     }
@@ -28,6 +29,25 @@ public final class ScenarioModel {
 
     public List<BlackoutRegion> blackoutRegions() {
         return Collections.unmodifiableList(blackoutRegions);
+    }
+
+    public boolean hasScenarioLength() {
+        return scenarioLengthSeconds != null;
+    }
+
+    public Double explicitScenarioLengthSeconds() {
+        return scenarioLengthSeconds;
+    }
+
+    public void setScenarioLengthSeconds(Double seconds) {
+        if (seconds == null) {
+            scenarioLengthSeconds = null;
+            return;
+        }
+        if (!Double.isFinite(seconds) || seconds <= 0.0) {
+            throw new IllegalArgumentException("Scenario length must be greater than zero seconds");
+        }
+        scenarioLengthSeconds = seconds;
     }
 
     public void addBlackoutRegion(BlackoutRegion region) {
@@ -94,6 +114,7 @@ public final class ScenarioModel {
         }
         targets.clear();
         blackoutRegions.clear();
+        scenarioLengthSeconds = null;
         for (int index = 0; index < targetCount; index++) {
             addTarget();
         }
@@ -101,6 +122,9 @@ public final class ScenarioModel {
     }
 
     public double durationSeconds() {
+        if (scenarioLengthSeconds != null) {
+            return scenarioLengthSeconds;
+        }
         return targets.stream()
                 .filter(TargetTrajectory::isRunnable)
                 .mapToDouble(TargetTrajectory::durationSeconds)

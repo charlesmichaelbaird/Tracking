@@ -41,6 +41,7 @@ public final class PresetScenarioGenerator {
             double wantedLength = target.velocityProfile().average() * parameters.durationSeconds();
             buildScaledPath(target, parameters.origin(), plan.path(), wantedLength);
         }
+        model.setScenarioLengthSeconds((double) parameters.durationSeconds());
         configureBlackoutRegions(model, preset, parameters);
         return targets;
     }

@@ -62,6 +62,12 @@ final class EarthMapCanvas extends JPanel {
         ONLY_STITCHED
     }
 
+    private enum DirectionPlacementPhase {
+        NONE,
+        START,
+        DIRECTION
+    }
+
     record StitchingStateOverlay(
             EcefPoint oldPosition,
             double[][] oldPositionCovariance,
@@ -78,6 +84,15 @@ final class EarthMapCanvas extends JPanel {
         }
     }
 
+    private record PathSnap(
+            EcefPoint point,
+            int segmentIndex,
+            double fraction,
+            double distanceAlongMeters,
+            double tangentAngleRadians,
+            double screenDistancePixels) {
+    }
+
     private static final int HORIZONTAL_MARGIN = 66;
     private static final int VERTICAL_MARGIN = 48;
     private static final double MIN_ZOOM = 1.0;
@@ -92,6 +107,7 @@ final class EarthMapCanvas extends JPanel {
             10.0f, new float[]{9.0f, 5.0f}, 0.0f);
     private static final Stroke HISTORY_STROKE = new BasicStroke(
             5.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+    private static final Color OVERRUN_COLOR = new Color(0, 0, 0, 230);
 
     private final ScenarioModel model;
     private final ScenarioPlayback playback;
@@ -125,6 +141,10 @@ final class EarthMapCanvas extends JPanel {
     private GeodeticPoint trajectoryDragAnchor;
     private TargetTrajectory draggedTarget;
     private GeodeticPoint shapeAnchor;
+    private DirectionPlacementPhase directionPlacementPhase = DirectionPlacementPhase.NONE;
+    private TargetTrajectory directionPlacementTarget;
+    private List<EcefPoint> directionPlacementPath = List.of();
+    private PathSnap directionStartSnap;
     private Point panAnchor;
     private double panStartLongitude;
     private double panStartLatitude;
@@ -189,6 +209,10 @@ final class EarthMapCanvas extends JPanel {
                 }
                 if (blackoutDrawing) {
                     handleBlackoutClick(event.getPoint());
+                    return;
+                }
+                if (directionPlacementPhase != DirectionPlacementPhase.NONE) {
+                    handleDirectionPlacementClick(event.getPoint());
                     return;
                 }
                 if (moveToolEnabled && displaySettings.blackoutRegionsVisible()) {
@@ -401,6 +425,10 @@ final class EarthMapCanvas extends JPanel {
     }
 
     void finishPath() {
+        if (directionPlacementTarget != null
+                && directionPlacementTarget.path().isEmpty()) {
+            clearDirectionPlacement();
+        }
         freeHandDrawing = false;
         blackoutDrawing = false;
         blackoutFirstCorner = null;
@@ -414,6 +442,10 @@ final class EarthMapCanvas extends JPanel {
         mousePoint = null;
         onPathChanged.run();
         repaint();
+    }
+
+    boolean hasPendingPathDirectionSelection() {
+        return directionPlacementPhase != DirectionPlacementPhase.NONE;
     }
 
     void startBlackoutRegionDrawing() {
@@ -559,6 +591,7 @@ final class EarthMapCanvas extends JPanel {
             drawCurrentTargets(g);
             drawSegmentPreview(g);
             drawShapePreview(g);
+            drawDirectionPlacement(g);
             drawViewBadge(g);
             drawScenarioTimer(g);
         } finally {
@@ -763,11 +796,34 @@ final class EarthMapCanvas extends JPanel {
             int alpha = greyed ? 70 : target == selected ? 215 : 130;
             g.setColor(withAlpha(color, alpha));
             g.setStroke(target == selected ? SELECTED_PLANNED_STROKE : PLANNED_STROKE);
-            drawEcefPath(g, sampledGeodesicPath(target.path()));
+            drawPlannedTargetPath(g, target, withAlpha(color, alpha));
             if (target == selected && Double.isFinite(profileHighlightNormalizedTime)) {
                 drawProfileHighlight(g, target, color);
             }
         }
+    }
+
+    private void drawPlannedTargetPath(
+            Graphics2D g,
+            TargetTrajectory target,
+            Color pathColor) {
+        if (model.hasScenarioLength()
+                && target.durationSeconds() > model.explicitScenarioLengthSeconds() + 1.0e-6) {
+            double normalizedTime = target.normalizedTimeAt(model.explicitScenarioLengthSeconds());
+            List<EcefPoint> prefix = trajectoryPrefix(target, normalizedTime);
+            List<EcefPoint> overrun = trajectorySuffix(target, normalizedTime);
+            if (prefix.size() >= 2) {
+                g.setColor(pathColor);
+                drawEcefPath(g, sampledGeodesicPath(prefix));
+            }
+            if (overrun.size() >= 2) {
+                g.setColor(OVERRUN_COLOR);
+                drawEcefPath(g, sampledGeodesicPath(overrun));
+            }
+            return;
+        }
+        g.setColor(pathColor);
+        drawEcefPath(g, sampledGeodesicPath(target.path()));
     }
 
     private void drawProfileHighlight(Graphics2D g, TargetTrajectory target, Color color) {
@@ -1206,6 +1262,80 @@ final class EarthMapCanvas extends JPanel {
         g.setStroke(previousStroke);
     }
 
+    private void drawDirectionPlacement(Graphics2D g) {
+        if (directionPlacementPhase == DirectionPlacementPhase.NONE
+                || directionPlacementTarget == null
+                || directionPlacementPath.size() < 2
+                || editingLocked.getAsBoolean()) {
+            return;
+        }
+        PathSnap hoverSnap = mousePoint == null || !mapBounds().contains(mousePoint)
+                ? null
+                : nearestLoopSnap(loopPointsForDirectionPlacement(), mousePoint);
+        if (directionPlacementPhase == DirectionPlacementPhase.START) {
+            if (hoverSnap == null) {
+                return;
+            }
+            Point point = toScreen(Wgs84.toGeodetic(hoverSnap.point()));
+            if (point == null) {
+                return;
+            }
+            drawArrowIndicator(
+                    g, point, hoverSnap.tangentAngleRadians(),
+                    directionPlacementTarget.color());
+            drawInstructionBubble(g, point, "Click start point");
+            return;
+        }
+        if (directionStartSnap == null) {
+            return;
+        }
+        Point startPoint = toScreen(Wgs84.toGeodetic(directionStartSnap.point()));
+        if (startPoint == null) {
+            return;
+        }
+        double angle = directionStartSnap.tangentAngleRadians();
+        if (hoverSnap != null && !isForwardDirection(directionStartSnap, hoverSnap)) {
+            angle += Math.PI;
+        }
+        drawArrowIndicator(g, startPoint, angle, directionPlacementTarget.color());
+        drawInstructionBubble(g, startPoint, "Click direction");
+    }
+
+    private void drawInstructionBubble(Graphics2D g, Point point, String text) {
+        g.setFont(g.getFont().deriveFont(Font.BOLD, 11.0f));
+        FontMetrics metrics = g.getFontMetrics();
+        int width = metrics.stringWidth(text) + 16;
+        int x = point.x + 13;
+        int y = point.y - 34;
+        g.setColor(new Color(255, 255, 255, 230));
+        g.fillRoundRect(x, y, width, 23, 9, 9);
+        g.setColor(new Color(45, 52, 60));
+        g.drawString(text, x + 8, y + 16);
+    }
+
+    private void drawArrowIndicator(Graphics2D g, Point center, double angle, Color color) {
+        AffineTransform original = g.getTransform();
+        Stroke originalStroke = g.getStroke();
+        try {
+            g.translate(center.x, center.y);
+            g.rotate(angle);
+            Polygon arrow = new Polygon(
+                    new int[]{-16, -3, -3, 16, -3, -3},
+                    new int[]{-7, -7, -13, 0, 13, 7},
+                    6);
+            g.setColor(new Color(255, 255, 255, 235));
+            g.fillPolygon(arrow);
+            g.setColor(withAlpha(color, 235));
+            g.fillPolygon(arrow);
+            g.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.setColor(new Color(31, 39, 47, 220));
+            g.drawPolygon(arrow);
+        } finally {
+            g.setTransform(original);
+            g.setStroke(originalStroke);
+        }
+    }
+
     private void drawViewBadge(Graphics2D g) {
         Rectangle map = mapBounds();
         String source = detailLayerActive
@@ -1341,6 +1471,47 @@ final class EarthMapCanvas extends JPanel {
         return List.copyOf(prefix);
     }
 
+    private static List<EcefPoint> trajectorySuffix(
+            TargetTrajectory target,
+            double normalizedTime) {
+        if (target.path().size() < 2) {
+            return List.of();
+        }
+        double wantedDistance = target.surfaceLengthMeters()
+                * target.velocityProfile().normalizedIntegralAt(normalizedTime);
+        if (wantedDistance <= 1.0e-6) {
+            return List.copyOf(target.path());
+        }
+        List<EcefPoint> suffix = new ArrayList<>();
+        double traversed = 0.0;
+        for (int index = 1; index < target.path().size(); index++) {
+            EcefPoint start = target.path().get(index - 1);
+            EcefPoint end = target.path().get(index);
+            GeodeticPoint startGeo = Wgs84.toGeodetic(start);
+            GeodeticPoint endGeo = Wgs84.toGeodetic(end);
+            double segmentLength = Wgs84Geodesic.inverse(startGeo, endGeo).distanceMeters();
+            if (traversed + segmentLength >= wantedDistance) {
+                double fraction = segmentLength <= 1.0e-9
+                        ? 0.0
+                        : (wantedDistance - traversed) / segmentLength;
+                suffix.add(Wgs84.toEcef(Wgs84Geodesic.interpolate(
+                        startGeo, endGeo, fraction, 0.0)));
+                for (int remaining = index; remaining < target.path().size(); remaining++) {
+                    suffix.add(target.path().get(remaining));
+                }
+                return List.copyOf(suffix);
+            }
+            traversed += segmentLength;
+        }
+        return List.of(target.path().get(target.path().size() - 1));
+    }
+
+    private static double surfaceDistance(EcefPoint start, EcefPoint end) {
+        return Wgs84Geodesic.inverse(
+                Wgs84.toGeodetic(start),
+                Wgs84.toGeodetic(end)).distanceMeters();
+    }
+
     private void addMapPoint(TargetTrajectory target, Point point) {
         target.addPathPoint(Wgs84.toEcef(toGeodetic(point).withAltitude(0.0)));
     }
@@ -1356,12 +1527,187 @@ final class EarthMapCanvas extends JPanel {
         List<EcefPoint> shape = buildShapePath(shapeAnchor, geodetic, drawingMode);
         if (shape.size() >= 2) {
             target.replacePath(shape);
+            beginDirectionPlacement(target);
             finishedSegmentedTarget = null;
             onPathChanged.run();
         }
         shapeAnchor = null;
+        mousePoint = directionPlacementPhase == DirectionPlacementPhase.NONE ? null : point;
+        repaint();
+    }
+
+    private void beginDirectionPlacement(TargetTrajectory target) {
+        directionPlacementTarget = target;
+        directionPlacementPath = List.copyOf(target.path());
+        directionPlacementPhase = DirectionPlacementPhase.START;
+        directionStartSnap = null;
+    }
+
+    private void clearDirectionPlacement() {
+        directionPlacementPhase = DirectionPlacementPhase.NONE;
+        directionPlacementTarget = null;
+        directionPlacementPath = List.of();
+        directionStartSnap = null;
+    }
+
+    private void handleDirectionPlacementClick(Point point) {
+        if (directionPlacementTarget == null || directionPlacementPath.size() < 2) {
+            clearDirectionPlacement();
+            repaint();
+            return;
+        }
+        List<EcefPoint> loop = loopPointsForDirectionPlacement();
+        PathSnap snap = nearestLoopSnap(loop, point);
+        if (snap == null || snap.screenDistancePixels() > 26.0) {
+            repaint();
+            return;
+        }
+        if (directionPlacementPhase == DirectionPlacementPhase.START) {
+            directionStartSnap = snap;
+            directionPlacementPhase = DirectionPlacementPhase.DIRECTION;
+            mousePoint = point;
+            repaint();
+            return;
+        }
+        boolean forward = directionStartSnap == null || isForwardDirection(directionStartSnap, snap);
+        List<EcefPoint> oriented = orderedLoop(loop, directionStartSnap, forward);
+        if (oriented.size() >= 2) {
+            directionPlacementTarget.replacePath(oriented);
+            onPathChanged.run();
+        }
+        clearDirectionPlacement();
         mousePoint = null;
         repaint();
+    }
+
+    private List<EcefPoint> loopPointsForDirectionPlacement() {
+        if (directionPlacementPath.size() < 2) {
+            return List.of();
+        }
+        List<EcefPoint> sampled = sampledGeodesicPath(directionPlacementPath);
+        if (sampled.size() > 2
+                && surfaceDistance(sampled.get(0), sampled.get(sampled.size() - 1)) <= 1.0) {
+            sampled = new ArrayList<>(sampled.subList(0, sampled.size() - 1));
+        }
+        return sampled;
+    }
+
+    private PathSnap nearestLoopSnap(List<EcefPoint> loop, Point point) {
+        if (loop.size() < 2) {
+            return null;
+        }
+        double totalDistance = loopDistance(loop);
+        double bestDistance = Double.POSITIVE_INFINITY;
+        PathSnap bestSnap = null;
+        double traversed = 0.0;
+        for (int index = 0; index < loop.size(); index++) {
+            int nextIndex = nextLoopIndex(loop, index);
+            EcefPoint start = loop.get(index);
+            EcefPoint end = loop.get(nextIndex);
+            Point startScreen = toScreen(Wgs84.toGeodetic(start));
+            Point endScreen = toScreen(Wgs84.toGeodetic(end));
+            if (startScreen == null || endScreen == null
+                    || Math.abs(endScreen.x - startScreen.x) >= mapBounds().width / 2) {
+                traversed += surfaceDistance(start, end);
+                continue;
+            }
+            double dx = endScreen.x - startScreen.x;
+            double dy = endScreen.y - startScreen.y;
+            double lengthSquared = dx * dx + dy * dy;
+            double fraction = lengthSquared <= 1.0e-9
+                    ? 0.0
+                    : ((point.x - startScreen.x) * dx + (point.y - startScreen.y) * dy)
+                    / lengthSquared;
+            fraction = Math.max(0.0, Math.min(1.0, fraction));
+            double projectedX = startScreen.x + dx * fraction;
+            double projectedY = startScreen.y + dy * fraction;
+            double screenDistance = Point.distance(point.x, point.y, projectedX, projectedY);
+            if (screenDistance < bestDistance) {
+                GeodeticPoint snapped = Wgs84Geodesic.interpolate(
+                        Wgs84.toGeodetic(start),
+                        Wgs84.toGeodetic(end),
+                        fraction,
+                        0.0);
+                double segmentLength = surfaceDistance(start, end);
+                bestDistance = screenDistance;
+                bestSnap = new PathSnap(
+                        Wgs84.toEcef(snapped),
+                        index,
+                        fraction,
+                        Math.min(totalDistance, traversed + segmentLength * fraction),
+                        Math.atan2(dy, dx),
+                        screenDistance);
+            }
+            traversed += surfaceDistance(start, end);
+        }
+        return bestSnap;
+    }
+
+    private boolean isForwardDirection(PathSnap start, PathSnap direction) {
+        double totalDistance = loopDistance(loopPointsForDirectionPlacement());
+        if (totalDistance <= 1.0e-6) {
+            return true;
+        }
+        double forwardDistance = direction.distanceAlongMeters() - start.distanceAlongMeters();
+        while (forwardDistance < 0.0) {
+            forwardDistance += totalDistance;
+        }
+        while (forwardDistance >= totalDistance) {
+            forwardDistance -= totalDistance;
+        }
+        return forwardDistance <= totalDistance / 2.0;
+    }
+
+    private static List<EcefPoint> orderedLoop(
+            List<EcefPoint> loop,
+            PathSnap start,
+            boolean forward) {
+        if (loop.size() < 2 || start == null) {
+            return List.of();
+        }
+        List<EcefPoint> ordered = new ArrayList<>(loop.size() + 2);
+        ordered.add(start.point());
+        if (forward) {
+            int index = nextLoopIndex(loop, start.segmentIndex());
+            while (true) {
+                ordered.add(loop.get(index));
+                if (index == start.segmentIndex()) {
+                    break;
+                }
+                index = nextLoopIndex(loop, index);
+            }
+        } else {
+            int stopIndex = nextLoopIndex(loop, start.segmentIndex());
+            int index = start.segmentIndex();
+            while (true) {
+                ordered.add(loop.get(index));
+                if (index == stopIndex) {
+                    break;
+                }
+                index = previousLoopIndex(loop, index);
+            }
+        }
+        ordered.add(start.point());
+        return List.copyOf(ordered);
+    }
+
+    private static int nextLoopIndex(List<EcefPoint> loop, int index) {
+        return (index + 1) % loop.size();
+    }
+
+    private static int previousLoopIndex(List<EcefPoint> loop, int index) {
+        return (index - 1 + loop.size()) % loop.size();
+    }
+
+    private static double loopDistance(List<EcefPoint> loop) {
+        if (loop.size() < 2) {
+            return 0.0;
+        }
+        double distance = 0.0;
+        for (int index = 0; index < loop.size(); index++) {
+            distance += surfaceDistance(loop.get(index), loop.get(nextLoopIndex(loop, index)));
+        }
+        return distance;
     }
 
     private List<EcefPoint> buildShapePath(

@@ -31,6 +31,7 @@ public final class PresetScenarioPanelSmokeTest {
         AtomicReference<PresetScenarioParameters> parameters = new AtomicReference<>();
         AtomicReference<SavedScenarioDefinition> loadedSaved = new AtomicReference<>();
         AtomicReference<String> savedName = new AtomicReference<>();
+        AtomicReference<Double> manualLength = new AtomicReference<>();
         AtomicInteger manualSelections = new AtomicInteger();
         PresetScenarioPanel panel = new PresetScenarioPanel(null, new PresetScenarioPanel.Listener() {
             @Override
@@ -54,6 +55,11 @@ public final class PresetScenarioPanelSmokeTest {
             @Override
             public void saveUserScenario(String scenarioName) {
                 savedName.set(scenarioName);
+            }
+
+            @Override
+            public void setUserScenarioLength(Double durationSeconds) {
+                manualLength.set(durationSeconds);
             }
         });
         panel.setSize(1_120, 40);
@@ -83,6 +89,10 @@ public final class PresetScenarioPanelSmokeTest {
         if (manualSelections.get() != 1) {
             throw new AssertionError("User-generated selection should restore manual mode");
         }
+        JButton setLengthButton = findButton(panel, "Set length");
+        if (setLengthButton == null) {
+            throw new AssertionError("Manual scenario length button is missing");
+        }
         if (!"My scenario".equals(panel.scenarioNameForRecording("fallback"))) {
             throw new AssertionError("Manual recording should use the typed scenario name");
         }
@@ -95,6 +105,11 @@ public final class PresetScenarioPanelSmokeTest {
         selector.setSelectedItem(savedScenario);
         if (loadedSaved.get() != savedScenario) {
             throw new AssertionError("Saved scenario selection should load from the dropdown");
+        }
+        setLengthButton = findButton(panel, "Set length");
+        setLengthButton.doClick();
+        if (manualLength.get() != null) {
+            throw new AssertionError("Blank manual scenario length should clear the override");
         }
         if (!"Saved smoke".equals(panel.scenarioNameForRecording("Saved smoke"))) {
             throw new AssertionError("Saved scenarios should keep their loaded scenario name");

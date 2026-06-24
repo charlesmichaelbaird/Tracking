@@ -52,6 +52,10 @@ public final class SavedScenarioRepository {
         Path path = uniquePath(name);
         Properties properties = new Properties();
         properties.setProperty("name", name);
+        if (model.hasScenarioLength()) {
+            properties.setProperty("scenario.length.seconds",
+                    Double.toString(model.explicitScenarioLengthSeconds()));
+        }
         properties.setProperty("target.count", Integer.toString(model.targets().size()));
         for (int targetIndex = 0; targetIndex < model.targets().size(); targetIndex++) {
             TargetTrajectory target = model.targets().get(targetIndex);
@@ -92,6 +96,7 @@ public final class SavedScenarioRepository {
 
     public void loadInto(SavedScenarioDefinition scenario, ScenarioModel model) {
         List<TargetTrajectory> targets = model.replaceTargets(scenario.targets().size());
+        model.setScenarioLengthSeconds(scenario.scenarioLengthSeconds());
         for (int index = 0; index < targets.size(); index++) {
             TargetTrajectory target = targets.get(index);
             SavedScenarioDefinition.TargetData data = scenario.targets().get(index);
@@ -112,6 +117,8 @@ public final class SavedScenarioRepository {
             properties.load(reader);
         }
         String name = properties.getProperty("name", baseName(path));
+        Double scenarioLengthSeconds = parseOptionalDouble(
+                properties, "scenario.length.seconds");
         int targetCount = parseInt(properties, "target.count", 0);
         List<SavedScenarioDefinition.TargetData> targets = new ArrayList<>();
         for (int targetIndex = 0; targetIndex < targetCount; targetIndex++) {
@@ -149,7 +156,7 @@ public final class SavedScenarioRepository {
                         Double.parseDouble(properties.getProperty(prefix + "height", "1000"))));
             }
         }
-        return new SavedScenarioDefinition(name, path, targets, regions);
+        return new SavedScenarioDefinition(name, path, scenarioLengthSeconds, targets, regions);
     }
 
     private Path uniquePath(String name) {
@@ -195,6 +202,15 @@ public final class SavedScenarioRepository {
     private static int parseInt(Properties properties, String key, int fallback) {
         String value = properties.getProperty(key);
         return value == null ? fallback : Integer.parseInt(value);
+    }
+
+    private static Double parseOptionalDouble(Properties properties, String key) {
+        String value = properties.getProperty(key);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        double parsed = Double.parseDouble(value);
+        return Double.isFinite(parsed) && parsed > 0.0 ? parsed : null;
     }
 
     private static String sanitizeDisplayName(String text) {

@@ -94,7 +94,8 @@ final class ScenarioPlayback {
     /** Computes and optionally records a complete named scenario. */
     boolean precompute(String scenarioName) {
         double duration = model.durationSeconds();
-        if (duration <= 0.0 || computing) {
+        boolean hasRunnableTarget = model.targets().stream().anyMatch(TargetTrajectory::isRunnable);
+        if (duration <= 0.0 || !hasRunnableTarget || computing) {
             return false;
         }
 
@@ -411,8 +412,7 @@ final class ScenarioPlayback {
         }
         List<GroundTruthRecord> records = new ArrayList<>();
         for (TargetTrajectory target : model.targets()) {
-            if (!target.isRunnable()
-                    || timeSeconds > target.durationSeconds() + TIME_EPSILON_SECONDS) {
+            if (!target.isRunnable()) {
                 continue;
             }
             EcefPoint position = target.positionAt(timeSeconds);

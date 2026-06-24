@@ -7,11 +7,24 @@ import java.util.List;
 public record SavedScenarioDefinition(
         String name,
         Path path,
+        Double scenarioLengthSeconds,
         List<TargetData> targets,
         List<BlackoutRegion> blackoutRegions) {
     public SavedScenarioDefinition {
+        if (scenarioLengthSeconds != null
+                && (!Double.isFinite(scenarioLengthSeconds) || scenarioLengthSeconds <= 0.0)) {
+            scenarioLengthSeconds = null;
+        }
         targets = targets == null ? List.of() : List.copyOf(targets);
         blackoutRegions = blackoutRegions == null ? List.of() : List.copyOf(blackoutRegions);
+    }
+
+    public SavedScenarioDefinition(
+            String name,
+            Path path,
+            List<TargetData> targets,
+            List<BlackoutRegion> blackoutRegions) {
+        this(name, path, null, targets, blackoutRegions);
     }
 
     @Override

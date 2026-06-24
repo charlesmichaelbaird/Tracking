@@ -128,6 +128,11 @@ public final class TrackerFrame extends JFrame {
             public void saveUserScenario(String scenarioName) {
                 saveUserGeneratedScenario(scenarioName);
             }
+
+            @Override
+            public void setUserScenarioLength(Double durationSeconds) {
+                updateUserScenarioLength(durationSeconds);
+            }
         });
         refreshSavedScenarioChoices();
         earthMapCanvas = new EarthMapCanvas(
@@ -157,6 +162,7 @@ public final class TrackerFrame extends JFrame {
                 this::clearSelectedPath,
                 this::smoothSelectedPath,
                 this::undoSmoothSelectedPath,
+                this::toggleSelectedExtrapolation,
                 this::removeSelectedTarget,
                 earthMapCanvas::setProfileHighlightNormalizedTime);
         sensorParametersPanel = new SensorParametersPanel(
@@ -417,6 +423,33 @@ public final class TrackerFrame extends JFrame {
         }
     }
 
+    private void toggleSelectedExtrapolation() {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
+            return;
+        }
+        TargetTrajectory target = motionTelemetryPanel.selectedTarget();
+        if (target == null) {
+            return;
+        }
+        selectedTarget = target;
+        resetCompletedPlayback();
+        if (target.extrapolatedToScenarioLength()) {
+            if (target.removeExtrapolation()) {
+                statusLabel.setText("Removed extrapolation for %s".formatted(target.id()));
+            }
+        } else if (!model.hasScenarioLength()) {
+            statusLabel.setText("Set a scenario length before extrapolating a path");
+        } else if (target.extrapolateToDuration(model.explicitScenarioLengthSeconds())) {
+            statusLabel.setText("%s extrapolated to %.1f s".formatted(
+                    target.id(), model.explicitScenarioLengthSeconds()));
+        } else {
+            statusLabel.setText("%s already reaches the scenario length".formatted(target.id()));
+        }
+        refreshTelemetry();
+        timelinePanel.refresh();
+        earthMapCanvas.repaint();
+    }
+
     private void removeSelectedTarget() {
         if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
@@ -559,6 +592,42 @@ public final class TrackerFrame extends JFrame {
                 .formatted(scenario.name()));
     }
 
+    private void updateUserScenarioLength(Double durationSeconds) {
+        if (analysisMode || presetScenarioActive) {
+            return;
+        }
+        try {
+            model.setScenarioLengthSeconds(durationSeconds);
+        } catch (IllegalArgumentException exception) {
+            statusLabel.setText(exception.getMessage());
+            return;
+        }
+        resetCompletedPlayback();
+        reconcileActiveExtrapolations();
+        refreshTelemetry();
+        timelinePanel.refresh();
+        earthMapCanvas.repaint();
+        scenarioTimeLabel.setText(model.hasScenarioLength()
+                ? "t = 0.0 / %.1f s".formatted(model.durationSeconds())
+                : "t = 0.0 s");
+        statusLabel.setText(model.hasScenarioLength()
+                ? "Scenario length set to %.1f s".formatted(model.durationSeconds())
+                : "Scenario length cleared");
+    }
+
+    private void reconcileActiveExtrapolations() {
+        for (TargetTrajectory target : model.targets()) {
+            if (!target.extrapolatedToScenarioLength()) {
+                continue;
+            }
+            if (model.hasScenarioLength()) {
+                target.extrapolateToDuration(model.explicitScenarioLengthSeconds());
+            } else {
+                target.removeExtrapolation();
+            }
+        }
+    }
+
     private void saveUserGeneratedScenario(String scenarioName) {
         if (analysisMode || presetScenarioActive) {
             JOptionPane.showMessageDialog(
@@ -656,6 +725,14 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         earthMapCanvas.finishPath();
+        if (earthMapCanvas.hasPendingPathDirectionSelection()) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Click the generated trajectory to choose its start point, then click again to choose its starting direction.",
+                    "Trajectory direction required",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
         setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
         statusLabel.setText(recorder.isArmed()
                 ? "Pre-computing tracker history and writing one-second samples…"
