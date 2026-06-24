@@ -630,15 +630,14 @@ public final class TrackStitchingAnalyzer {
                         + newState.covariance()[row][column];
             }
         }
-        LinearAlgebra.SpdInverse inverse = LinearAlgebra.inverseSpd(covariance);
-        double[] solved = LinearAlgebra.multiply(inverse.inverse(), innovation);
-        double innovationQuadratic = Math.max(0.0, LinearAlgebra.dot(innovation, solved));
+        LinearAlgebra.GaussianLikelihood likelihood =
+                LinearAlgebra.gaussianLikelihood(innovation, covariance);
         return new InnovationScore(
                 innovation,
                 covariance,
-                Math.sqrt(innovationQuadratic),
-                innovationQuadratic,
-                inverse.logDeterminant());
+                likelihood.mahalanobisDistance(),
+                likelihood.squaredMahalanobisDistance(),
+                likelihood.logDeterminant());
     }
 
     private static PropagatedState predictOld(TrackRecord record, double wantedTime) {

@@ -10,6 +10,8 @@ import org.ejml.interfaces.decomposition.EigenDecomposition_F64;
 
 /** Thin array-compatible wrapper around EJML for dense tracker math. */
 public final class LinearAlgebra {
+    private static final double LOG_TWO_PI = Math.log(2.0 * Math.PI);
+
     private LinearAlgebra() {
     }
 
@@ -36,6 +38,18 @@ public final class LinearAlgebra {
     public static double[][] add(double[][] first, double[][] second) {
         DMatrixRMaj result = new DMatrixRMaj(first.length, first[0].length);
         CommonOps_DDRM.add(toMatrix(first), toMatrix(second), result);
+        return toArray(result);
+    }
+
+    public static double[] scale(double scalar, double[] vector) {
+        DMatrixRMaj result = column(vector);
+        CommonOps_DDRM.scale(scalar, result);
+        return toVector(result);
+    }
+
+    public static double[][] scale(double scalar, double[][] matrix) {
+        DMatrixRMaj result = toMatrix(matrix);
+        CommonOps_DDRM.scale(scalar, result);
         return toArray(result);
     }
 
@@ -72,11 +86,6 @@ public final class LinearAlgebra {
         return toArray(result);
     }
 
-    public static double quadraticForm(double[] vector, double[][] matrix) {
-        double[] product = multiply(matrix, vector);
-        return dot(vector, product);
-    }
-
     public static double bilinearForm(double[] left, double[][] matrix, double[] right) {
         return dot(left, multiply(matrix, right));
     }
@@ -87,6 +96,57 @@ public final class LinearAlgebra {
 
     public static double determinant(double[][] matrix) {
         return CommonOps_DDRM.det(toMatrix(matrix));
+    }
+
+    /**
+     * Solves {@code matrix * x = rhs} for symmetric positive-definite matrices.
+     *
+     * <p>This is the numerically preferred form for Mahalanobis-style terms:
+     * compute {@code C^-1 v} by solving the covariance system instead of
+     * explicitly forming {@code C^-1} at the call site.</p>
+     */
+    public static SpdSolve solveSpd(double[][] matrix, double[] rhs) {
+        SpdFactorization factorization = factorSpd(matrix);
+        if (rhs.length != factorization.matrix().numRows) {
+            throw new IllegalArgumentException("Right-hand side length must match matrix size");
+        }
+        DMatrixRMaj solution = new DMatrixRMaj(rhs.length, 1);
+        if (!CommonOps_DDRM.solve(
+                factorization.matrix().copy(),
+                column(rhs),
+                solution)) {
+            throw new IllegalArgumentException("SPD linear solve failed");
+        }
+        return new SpdSolve(toVector(solution), factorization.logDeterminant());
+    }
+
+    public static double squaredMahalanobisDistance(
+            double[] innovation,
+            double[][] covariance) {
+        SpdSolve solve = solveSpd(covariance, innovation);
+        return Math.max(0.0, dot(innovation, solve.solution()));
+    }
+
+    public static double mahalanobisDistance(
+            double[] innovation,
+            double[][] covariance) {
+        return Math.sqrt(squaredMahalanobisDistance(innovation, covariance));
+    }
+
+    public static GaussianLikelihood gaussianLikelihood(
+            double[] innovation,
+            double[][] covariance) {
+        SpdSolve solve = solveSpd(covariance, innovation);
+        double squaredMahalanobisDistance = Math.max(0.0, dot(innovation, solve.solution()));
+        double negativeLogLikelihood = 0.5 * (
+                innovation.length * LOG_TWO_PI
+                        + solve.logDeterminant()
+                        + squaredMahalanobisDistance);
+        return new GaussianLikelihood(
+                squaredMahalanobisDistance,
+                Math.sqrt(squaredMahalanobisDistance),
+                solve.logDeterminant(),
+                negativeLogLikelihood);
     }
 
     public static double[][] symmetrized(double[][] matrix, double minimumDiagonal) {
@@ -103,30 +163,16 @@ public final class LinearAlgebra {
     }
 
     public static SpdInverse inverseSpd(double[][] matrix) {
-        double jitter = 0.0;
-        for (int attempt = 0; attempt < 8; attempt++) {
-            DMatrixRMaj adjusted = toMatrix(matrix);
-            for (int index = 0; index < adjusted.numRows; index++) {
-                adjusted.add(index, index, jitter);
-            }
-            CholeskyDecomposition_F64<DMatrixRMaj> cholesky =
-                    DecompositionFactory_DDRM.chol(adjusted.numRows, true);
-            if (cholesky.decompose(adjusted.copy())) {
-                DMatrixRMaj inverse = new DMatrixRMaj(adjusted.numRows, adjusted.numCols);
-                if (CommonOps_DDRM.invert(adjusted, inverse)) {
-                    DMatrixRMaj lower = cholesky.getT(null);
-                    double logDeterminant = 0.0;
-                    for (int index = 0; index < lower.numRows; index++) {
-                        logDeterminant += 2.0 * Math.log(lower.get(index, index));
-                    }
-                    return new SpdInverse(
-                            symmetrized(toArray(inverse), 0.0),
-                            logDeterminant);
-                }
-            }
-            jitter = jitter == 0.0 ? 1.0e-9 : jitter * 100.0;
+        SpdFactorization factorization = factorSpd(matrix);
+        DMatrixRMaj inverse = new DMatrixRMaj(
+                factorization.matrix().numRows,
+                factorization.matrix().numCols);
+        if (!CommonOps_DDRM.invert(factorization.matrix().copy(), inverse)) {
+            throw new IllegalArgumentException("SPD inverse failed");
         }
-        throw new IllegalArgumentException("Matrix is not positive definite");
+        return new SpdInverse(
+                symmetrized(toArray(inverse), 0.0),
+                factorization.logDeterminant());
     }
 
     public static double largestEigenvalueSymmetric(double[][] matrix) {
@@ -191,6 +237,44 @@ public final class LinearAlgebra {
         return result;
     }
 
+    private static SpdFactorization factorSpd(double[][] matrix) {
+        double jitter = 0.0;
+        for (int attempt = 0; attempt < 8; attempt++) {
+            DMatrixRMaj adjusted = toMatrix(matrix);
+            if (adjusted.numRows != adjusted.numCols) {
+                throw new IllegalArgumentException("SPD matrix must be square");
+            }
+            for (int index = 0; index < adjusted.numRows; index++) {
+                adjusted.add(index, index, jitter);
+            }
+            CholeskyDecomposition_F64<DMatrixRMaj> cholesky =
+                    DecompositionFactory_DDRM.chol(adjusted.numRows, true);
+            if (cholesky.decompose(adjusted.copy())) {
+                DMatrixRMaj lower = cholesky.getT(null);
+                double logDeterminant = 0.0;
+                for (int index = 0; index < lower.numRows; index++) {
+                    logDeterminant += 2.0 * Math.log(lower.get(index, index));
+                }
+                return new SpdFactorization(adjusted, logDeterminant);
+            }
+            jitter = jitter == 0.0 ? 1.0e-9 : jitter * 100.0;
+        }
+        throw new IllegalArgumentException("Matrix is not positive definite");
+    }
+
     public record SpdInverse(double[][] inverse, double logDeterminant) {
+    }
+
+    public record SpdSolve(double[] solution, double logDeterminant) {
+    }
+
+    public record GaussianLikelihood(
+            double squaredMahalanobisDistance,
+            double mahalanobisDistance,
+            double logDeterminant,
+            double negativeLogLikelihood) {
+    }
+
+    private record SpdFactorization(DMatrixRMaj matrix, double logDeterminant) {
     }
 }

@@ -7,7 +7,11 @@ public record AssociatedMeasurement(
         String targetId,
         double[] mean,
         double[][] covariance) {
-    private static final int SIZE = 6;
+    private static final int SPATIAL_DIMENSIONS = 3;
+    private static final int MEASUREMENT_DERIVATIVE_COUNT = 2;
+    private static final int POSITION_OFFSET = 0;
+    private static final int VELOCITY_OFFSET = POSITION_OFFSET + SPATIAL_DIMENSIONS;
+    private static final int SIZE = SPATIAL_DIMENSIONS * MEASUREMENT_DERIVATIVE_COUNT;
 
     public AssociatedMeasurement {
         if (targetId == null) {
@@ -30,9 +34,10 @@ public record AssociatedMeasurement(
                 measurement.measuredVelocity().z()
         };
         double[][] covariance = new double[SIZE][SIZE];
-        for (int axis = 0; axis < 3; axis++) {
-            covariance[axis][axis] = measurement.positionVarianceMetersSquared();
-            covariance[axis + 3][axis + 3] =
+        for (int axis = 0; axis < SPATIAL_DIMENSIONS; axis++) {
+            covariance[POSITION_OFFSET + axis][POSITION_OFFSET + axis] =
+                    measurement.positionVarianceMetersSquared();
+            covariance[VELOCITY_OFFSET + axis][VELOCITY_OFFSET + axis] =
                     measurement.velocityVarianceMetersSquaredPerSecondSquared();
         }
         return new AssociatedMeasurement(measurement.targetId(), mean, covariance);

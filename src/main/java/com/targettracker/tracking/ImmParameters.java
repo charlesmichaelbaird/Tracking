@@ -2,6 +2,14 @@ package com.targettracker.tracking;
 
 import java.util.List;
 
+/**
+ * User-configurable IMM parameters.
+ *
+ * <p>The transition-probability matrix is the fixed Markov-model prior
+ * {@code P(model_j | model_i)} for one IMM step. Per-track posterior model
+ * probabilities are stored and evolved inside {@link ImmTracker} from the
+ * measurement likelihood evidence.</p>
+ */
 public record ImmParameters(
         List<ImmModel> enabledModels,
         double cvProcessNoise,

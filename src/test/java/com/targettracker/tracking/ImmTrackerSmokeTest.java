@@ -21,6 +21,7 @@ public final class ImmTrackerSmokeTest {
         verifyUpdateRecordsExcludeCoasts();
         verifyFullLifeTail();
         verifyUncertaintyBreak();
+        verifyModelProbabilitiesUpdate();
         verifySquareTransitionValidation();
         System.out.println("ImmTrackerSmokeTest passed");
     }
@@ -123,6 +124,32 @@ public final class ImmTrackerSmokeTest {
         tracker.advanceTo(1.0);
         if (tracker.currentViews().size() != 1 || !tracker.currentViews().get(0).dead()) {
             throw new AssertionError("Uncertainty threshold should retire an expanding track");
+        }
+    }
+
+    private static void verifyModelProbabilitiesUpdate() {
+        ImmSettings settings = new ImmSettings();
+        settings.setParameters(new ImmParameters(
+                List.of(ImmModel.CV, ImmModel.CA),
+                0.05,
+                0.05,
+                1_000.0,
+                1_000.0,
+                1.0e9,
+                new double[][]{{0.95, 0.05}, {0.05, 0.95}}));
+        ImmTracker tracker = new ImmTracker(settings);
+        tracker.processMeasurements(List.of(measurement(0.0, 0.0, 0.0)));
+        tracker.processMeasurements(List.of(measurement(1.0, 80.0, 80.0)));
+        List<double[]> probabilities = tracker.activeModelProbabilities();
+        if (probabilities.size() != 1 || probabilities.get(0).length != 2) {
+            throw new AssertionError("IMM should retain one model-probability vector per live track");
+        }
+        double[] modelProbabilities = probabilities.get(0);
+        requireClose(1.0, modelProbabilities[0] + modelProbabilities[1],
+                "model probabilities should stay normalized");
+        if (Math.abs(modelProbabilities[0] - 0.5) < 1.0e-9
+                && Math.abs(modelProbabilities[1] - 0.5) < 1.0e-9) {
+            throw new AssertionError("Model probabilities should update from likelihood evidence");
         }
     }
 

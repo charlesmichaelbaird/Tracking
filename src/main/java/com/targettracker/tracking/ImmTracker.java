@@ -15,9 +15,19 @@ import java.util.TreeMap;
 
 /** ECEF interacting-multiple-model tracker with greedy Mahalanobis association. */
 public final class ImmTracker {
-    private static final int STATE_SIZE = 9;
-    private static final int MEASUREMENT_SIZE = 6;
-    private static final double LOG_TWO_PI = Math.log(2.0 * Math.PI);
+    private static final int SPATIAL_DIMENSIONS = 3;
+    private static final int STATE_DERIVATIVE_COUNT = 3;
+    private static final int MEASUREMENT_DERIVATIVE_COUNT = 2;
+    private static final int POSITION_OFFSET = 0;
+    private static final int VELOCITY_OFFSET = POSITION_OFFSET + SPATIAL_DIMENSIONS;
+    private static final int ACCELERATION_OFFSET = VELOCITY_OFFSET + SPATIAL_DIMENSIONS;
+    private static final int STATE_SIZE = SPATIAL_DIMENSIONS * STATE_DERIVATIVE_COUNT;
+    private static final int MEASUREMENT_SIZE = SPATIAL_DIMENSIONS * MEASUREMENT_DERIVATIVE_COUNT;
+    private static final int MEASUREMENT_POSITION_OFFSET = 0;
+    private static final int MEASUREMENT_VELOCITY_OFFSET =
+            MEASUREMENT_POSITION_OFFSET + SPATIAL_DIMENSIONS;
+    private static final double MINIMUM_PROBABILITY = 1.0e-300;
+    private static final double[][] OBSERVATION_MATRIX = observationMatrix();
     private static final Color[] TRACK_COLORS = {
             new Color(255, 214, 10),
             new Color(255, 92, 166),
@@ -96,6 +106,12 @@ public final class ImmTracker {
 
     public List<TrackView> currentViews() {
         return currentViews;
+    }
+
+    List<double[]> activeModelProbabilities() {
+        return activeTracks.stream()
+                .map(track -> track.modelProbabilities.clone())
+                .toList();
     }
 
     private static TrackView withoutTail(TrackView view) {
@@ -199,47 +215,75 @@ public final class ImmTracker {
             FusedState prediction,
             TargetMeasurement measurement) {
         double[] measurementVector = measurementVector(measurement);
-        double[] residual = new double[MEASUREMENT_SIZE];
-        for (int i = 0; i < MEASUREMENT_SIZE; i++) {
-            residual[i] = measurementVector[i] - prediction.mean()[i];
-        }
-        double[][] innovation = new double[MEASUREMENT_SIZE][MEASUREMENT_SIZE];
-        for (int row = 0; row < MEASUREMENT_SIZE; row++) {
-            System.arraycopy(prediction.covariance()[row], 0,
-                    innovation[row], 0, MEASUREMENT_SIZE);
-        }
-        addMeasurementVariance(innovation, measurement);
-        double squared = LinearAlgebra.quadraticForm(
-                residual, LinearAlgebra.inverseSpd(innovation).inverse());
-        return Math.sqrt(Math.max(0.0, squared));
+        double[] predictedMeasurement =
+                LinearAlgebra.multiply(OBSERVATION_MATRIX, prediction.mean());
+        double[] residual = LinearAlgebra.subtract(measurementVector, predictedMeasurement);
+        double[][] innovation = innovationCovariance(prediction.covariance(), measurement);
+        return LinearAlgebra.mahalanobisDistance(residual, innovation);
     }
 
     private static double uncertaintyRadius(double[][] covariance) {
-        double[][] positionCovariance = new double[3][3];
-        for (int row = 0; row < 3; row++) {
-            System.arraycopy(covariance[row], 0, positionCovariance[row], 0, 3);
-        }
+        double[][] positionCovariance = stateBlock(
+                covariance, POSITION_OFFSET, SPATIAL_DIMENSIONS);
         return Math.sqrt(LinearAlgebra.largestEigenvalueSymmetric3(positionCovariance));
     }
 
     private static double[] measurementVector(TargetMeasurement measurement) {
-        return new double[]{
+        double[] vector = new double[MEASUREMENT_SIZE];
+        double[] position = {
                 measurement.measuredPosition().x(),
                 measurement.measuredPosition().y(),
-                measurement.measuredPosition().z(),
+                measurement.measuredPosition().z()};
+        double[] velocity = {
                 measurement.measuredVelocity().x(),
                 measurement.measuredVelocity().y(),
-                measurement.measuredVelocity().z()
-        };
+                measurement.measuredVelocity().z()};
+        for (int axis = 0; axis < SPATIAL_DIMENSIONS; axis++) {
+            vector[MEASUREMENT_POSITION_OFFSET + axis] = position[axis];
+            vector[MEASUREMENT_VELOCITY_OFFSET + axis] = velocity[axis];
+        }
+        return vector;
     }
 
-    private static void addMeasurementVariance(
-            double[][] matrix,
-            TargetMeasurement measurement) {
-        for (int i = 0; i < 3; i++) {
-            matrix[i][i] += measurement.positionVarianceMetersSquared();
-            matrix[i + 3][i + 3] += measurement.velocityVarianceMetersSquaredPerSecondSquared();
+    private static double[][] measurementCovariance(TargetMeasurement measurement) {
+        double[][] covariance = new double[MEASUREMENT_SIZE][MEASUREMENT_SIZE];
+        for (int axis = 0; axis < SPATIAL_DIMENSIONS; axis++) {
+            covariance[MEASUREMENT_POSITION_OFFSET + axis][MEASUREMENT_POSITION_OFFSET + axis] =
+                    measurement.positionVarianceMetersSquared();
+            covariance[MEASUREMENT_VELOCITY_OFFSET + axis][MEASUREMENT_VELOCITY_OFFSET + axis] =
+                    measurement.velocityVarianceMetersSquaredPerSecondSquared();
         }
+        return covariance;
+    }
+
+    private static double[][] innovationCovariance(
+            double[][] stateCovariance,
+            TargetMeasurement measurement) {
+        return LinearAlgebra.add(
+                LinearAlgebra.multiply(
+                        LinearAlgebra.multiply(OBSERVATION_MATRIX, stateCovariance),
+                        LinearAlgebra.transpose(OBSERVATION_MATRIX)),
+                measurementCovariance(measurement));
+    }
+
+    private static double[][] observationMatrix() {
+        double[][] matrix = new double[MEASUREMENT_SIZE][STATE_SIZE];
+        for (int axis = 0; axis < SPATIAL_DIMENSIONS; axis++) {
+            matrix[MEASUREMENT_POSITION_OFFSET + axis][POSITION_OFFSET + axis] = 1.0;
+            matrix[MEASUREMENT_VELOCITY_OFFSET + axis][VELOCITY_OFFSET + axis] = 1.0;
+        }
+        return matrix;
+    }
+
+    private static double[][] stateBlock(
+            double[][] matrix,
+            int offset,
+            int size) {
+        double[][] block = new double[size][size];
+        for (int row = 0; row < size; row++) {
+            System.arraycopy(matrix[offset + row], offset, block[row], 0, size);
+        }
+        return block;
     }
 
     private static ModelState predict(
@@ -261,35 +305,25 @@ public final class ImmTracker {
 
     private static UpdateResult updateModel(ModelState prediction, TargetMeasurement measurement) {
         double[] measurementVector = measurementVector(measurement);
-        double[] residual = new double[MEASUREMENT_SIZE];
-        for (int i = 0; i < MEASUREMENT_SIZE; i++) {
-            residual[i] = measurementVector[i] - prediction.mean()[i];
-        }
-        double[][] innovation = new double[MEASUREMENT_SIZE][MEASUREMENT_SIZE];
-        for (int row = 0; row < MEASUREMENT_SIZE; row++) {
-            System.arraycopy(prediction.covariance()[row], 0,
-                    innovation[row], 0, MEASUREMENT_SIZE);
-        }
-        addMeasurementVariance(innovation, measurement);
+        double[] predictedMeasurement =
+                LinearAlgebra.multiply(OBSERVATION_MATRIX, prediction.mean());
+        double[] residual = LinearAlgebra.subtract(measurementVector, predictedMeasurement);
+        double[][] innovation = innovationCovariance(prediction.covariance(), measurement);
         LinearAlgebra.SpdInverse inverse = LinearAlgebra.inverseSpd(innovation);
+        LinearAlgebra.GaussianLikelihood likelihood =
+                LinearAlgebra.gaussianLikelihood(residual, innovation);
 
-        double[][] crossCovariance = new double[STATE_SIZE][MEASUREMENT_SIZE];
-        for (int row = 0; row < STATE_SIZE; row++) {
-            System.arraycopy(prediction.covariance()[row], 0,
-                    crossCovariance[row], 0, MEASUREMENT_SIZE);
-        }
+        double[][] crossCovariance = LinearAlgebra.multiply(
+                prediction.covariance(), LinearAlgebra.transpose(OBSERVATION_MATRIX));
         double[][] gain = LinearAlgebra.multiply(crossCovariance, inverse.inverse());
         double[] updatedMean = LinearAlgebra.add(
                 prediction.mean(), LinearAlgebra.multiply(gain, residual));
 
-        double[][] identityMinusKh = LinearAlgebra.identity(STATE_SIZE);
-        for (int row = 0; row < STATE_SIZE; row++) {
-            for (int column = 0; column < MEASUREMENT_SIZE; column++) {
-                identityMinusKh[row][column] -= gain[row][column];
-            }
-        }
-        double[][] measurementCovariance = new double[MEASUREMENT_SIZE][MEASUREMENT_SIZE];
-        addMeasurementVariance(measurementCovariance, measurement);
+        double[][] gainObservation = LinearAlgebra.multiply(gain, OBSERVATION_MATRIX);
+        double[][] identityMinusKh = LinearAlgebra.subtract(
+                LinearAlgebra.identity(STATE_SIZE),
+                gainObservation);
+        double[][] measurementCovariance = measurementCovariance(measurement);
         double[][] updatedCovariance = LinearAlgebra.add(
                 LinearAlgebra.multiply(
                         LinearAlgebra.multiply(identityMinusKh, prediction.covariance()),
@@ -298,21 +332,22 @@ public final class ImmTracker {
                         LinearAlgebra.multiply(gain, measurementCovariance),
                         LinearAlgebra.transpose(gain)));
         updatedCovariance = LinearAlgebra.symmetrized(updatedCovariance, 1.0e-12);
-        double squaredDistance = LinearAlgebra.quadraticForm(residual, inverse.inverse());
-        double logLikelihood = -0.5
-                * (squaredDistance + inverse.logDeterminant() + MEASUREMENT_SIZE * LOG_TWO_PI);
+        double logLikelihood = -likelihood.negativeLogLikelihood();
         return new UpdateResult(new ModelState(updatedMean, updatedCovariance), logLikelihood);
     }
 
     private static double[][] transition(ImmModel model, double dt) {
         double[][] transition = LinearAlgebra.identity(STATE_SIZE);
-        for (int axis = 0; axis < 3; axis++) {
-            transition[axis][axis + 3] = dt;
+        for (int axis = 0; axis < SPATIAL_DIMENSIONS; axis++) {
+            int position = POSITION_OFFSET + axis;
+            int velocity = VELOCITY_OFFSET + axis;
+            int acceleration = ACCELERATION_OFFSET + axis;
+            transition[position][velocity] = dt;
             if (model == ImmModel.CA) {
-                transition[axis][axis + 6] = 0.5 * dt * dt;
-                transition[axis + 3][axis + 6] = dt;
+                transition[position][acceleration] = 0.5 * dt * dt;
+                transition[velocity][acceleration] = dt;
             } else {
-                transition[axis + 6][axis + 6] = 0.0;
+                transition[acceleration][acceleration] = 0.0;
             }
         }
         return transition;
@@ -320,10 +355,10 @@ public final class ImmTracker {
 
     private static double[][] processCovariance(ImmModel model, double dt, double noise) {
         double[][] covariance = new double[STATE_SIZE][STATE_SIZE];
-        for (int axis = 0; axis < 3; axis++) {
-            int position = axis;
-            int velocity = axis + 3;
-            int acceleration = axis + 6;
+        for (int axis = 0; axis < SPATIAL_DIMENSIONS; axis++) {
+            int position = POSITION_OFFSET + axis;
+            int velocity = VELOCITY_OFFSET + axis;
+            int acceleration = ACCELERATION_OFFSET + axis;
             if (model == ImmModel.CV) {
                 covariance[position][position] = noise * dt * dt * dt / 3.0;
                 covariance[position][velocity] = noise * dt * dt / 2.0;
@@ -349,6 +384,159 @@ public final class ImmTracker {
         return covariance;
     }
 
+    private static ImmCycleResult runImmCycle(
+            List<ImmModel> models,
+            ModelState[] previousStates,
+            double[] previousModelProbabilities,
+            double[][] modelTransitionMatrix,
+            double elapsedSeconds,
+            TargetMeasurement measurement,
+            ImmParameters parameters) {
+        // One canonical IMM cycle:
+        // 1) Markov-predict model probabilities c_j.
+        // 2) Compute conditional mixing weights mu_{i|j}.
+        // 3) Mix prior states/covariances for each destination model j.
+        // 4) Predict and update each model-conditioned Kalman filter.
+        // 5) Use model likelihoods to update posterior model probabilities.
+        // 6) Fuse model-conditioned estimates with posterior probabilities.
+        double[] predictedModelProbabilities = predictModelProbabilities(
+                previousModelProbabilities, modelTransitionMatrix);
+        double[][] mixingWeights = mixingWeights(
+                previousModelProbabilities,
+                modelTransitionMatrix,
+                predictedModelProbabilities);
+        ModelState[] mixedStates = mixStates(previousStates, mixingWeights);
+        ModelState[] predictedStates = predictModels(
+                models, mixedStates, elapsedSeconds, parameters);
+        UpdateResult[] updateResults = updateModels(predictedStates, measurement);
+        ModelState[] updatedStates = new ModelState[updateResults.length];
+        double[] logLikelihoods = new double[updateResults.length];
+        for (int modelIndex = 0; modelIndex < updateResults.length; modelIndex++) {
+            updatedStates[modelIndex] = updateResults[modelIndex].state();
+            logLikelihoods[modelIndex] = updateResults[modelIndex].logLikelihood();
+        }
+        double[] posteriorModelProbabilities = updateModelProbabilities(
+                predictedModelProbabilities,
+                logLikelihoods);
+        return new ImmCycleResult(updatedStates, posteriorModelProbabilities);
+    }
+
+    private static double[] predictModelProbabilities(
+            double[] previousModelProbabilities,
+            double[][] modelTransitionMatrix) {
+        int modelCount = previousModelProbabilities.length;
+        double[] predicted = new double[modelCount];
+        for (int destination = 0; destination < modelCount; destination++) {
+            for (int source = 0; source < modelCount; source++) {
+                predicted[destination] += previousModelProbabilities[source]
+                        * modelTransitionMatrix[source][destination];
+            }
+            predicted[destination] = Math.max(predicted[destination], MINIMUM_PROBABILITY);
+        }
+        return normalizeProbabilities(predicted);
+    }
+
+    private static double[][] mixingWeights(
+            double[] previousModelProbabilities,
+            double[][] modelTransitionMatrix,
+            double[] predictedModelProbabilities) {
+        int modelCount = previousModelProbabilities.length;
+        double[][] weights = new double[modelCount][modelCount];
+        for (int source = 0; source < modelCount; source++) {
+            for (int destination = 0; destination < modelCount; destination++) {
+                weights[source][destination] = previousModelProbabilities[source]
+                        * modelTransitionMatrix[source][destination]
+                        / Math.max(predictedModelProbabilities[destination],
+                        MINIMUM_PROBABILITY);
+            }
+        }
+        return weights;
+    }
+
+    private static ModelState[] mixStates(
+            ModelState[] previousStates,
+            double[][] mixingWeights) {
+        int modelCount = previousStates.length;
+        ModelState[] mixedStates = new ModelState[modelCount];
+        for (int destination = 0; destination < modelCount; destination++) {
+            double[] destinationWeights = new double[modelCount];
+            for (int source = 0; source < modelCount; source++) {
+                destinationWeights[source] = mixingWeights[source][destination];
+            }
+            FusedState mixed = combineModelStates(previousStates, destinationWeights);
+            mixedStates[destination] = new ModelState(mixed.mean(), mixed.covariance());
+        }
+        return mixedStates;
+    }
+
+    private static ModelState[] predictModels(
+            List<ImmModel> models,
+            ModelState[] mixedStates,
+            double elapsedSeconds,
+            ImmParameters parameters) {
+        ModelState[] predictions = new ModelState[mixedStates.length];
+        for (int modelIndex = 0; modelIndex < mixedStates.length; modelIndex++) {
+            ImmModel model = models.get(modelIndex);
+            predictions[modelIndex] = predict(
+                    mixedStates[modelIndex],
+                    model,
+                    elapsedSeconds,
+                    parameters.processNoiseFor(model));
+        }
+        return predictions;
+    }
+
+    private static UpdateResult[] updateModels(
+            ModelState[] predictedStates,
+            TargetMeasurement measurement) {
+        UpdateResult[] results = new UpdateResult[predictedStates.length];
+        for (int modelIndex = 0; modelIndex < predictedStates.length; modelIndex++) {
+            results[modelIndex] = updateModel(predictedStates[modelIndex], measurement);
+        }
+        return results;
+    }
+
+    private static double[] updateModelProbabilities(
+            double[] predictedModelProbabilities,
+            double[] logLikelihoods) {
+        double[] logWeights = new double[predictedModelProbabilities.length];
+        double largestLogWeight = Double.NEGATIVE_INFINITY;
+        for (int modelIndex = 0; modelIndex < logWeights.length; modelIndex++) {
+            logWeights[modelIndex] = Math.log(Math.max(
+                    predictedModelProbabilities[modelIndex],
+                    MINIMUM_PROBABILITY)) + logLikelihoods[modelIndex];
+            largestLogWeight = Math.max(largestLogWeight, logWeights[modelIndex]);
+        }
+        double[] posterior = new double[logWeights.length];
+        for (int modelIndex = 0; modelIndex < logWeights.length; modelIndex++) {
+            posterior[modelIndex] = Math.exp(logWeights[modelIndex] - largestLogWeight);
+        }
+        return normalizeProbabilities(posterior);
+    }
+
+    private static double[] normalizeProbabilities(double[] probabilities) {
+        double sum = 0.0;
+        for (double probability : probabilities) {
+            sum += probability;
+        }
+        if (!Double.isFinite(sum) || sum <= 0.0) {
+            return uniformModelProbabilities(probabilities.length);
+        }
+        double[] normalized = new double[probabilities.length];
+        for (int index = 0; index < probabilities.length; index++) {
+            normalized[index] = probabilities[index] / sum;
+        }
+        return normalized;
+    }
+
+    private static double[] uniformModelProbabilities(int modelCount) {
+        double[] probabilities = new double[modelCount];
+        for (int index = 0; index < modelCount; index++) {
+            probabilities[index] = 1.0 / modelCount;
+        }
+        return probabilities;
+    }
+
     private final class Track {
         private final String id;
         private final Color color;
@@ -356,7 +544,7 @@ public final class ImmTracker {
         private final List<EcefPoint> readOnlyTail = Collections.unmodifiableList(tail);
         private List<ImmModel> models;
         private ModelState[] states;
-        private double[] probabilities;
+        private double[] modelProbabilities;
         private double lastUpdateSeconds;
         private TargetMeasurement lastMeasurement;
 
@@ -365,22 +553,24 @@ public final class ImmTracker {
             this.color = color;
             this.models = parameters.enabledModels();
             this.states = new ModelState[models.size()];
-            this.probabilities = new double[models.size()];
+            this.modelProbabilities = uniformModelProbabilities(models.size());
             double[] initialMean = new double[STATE_SIZE];
             double[] value = measurementVector(measurement);
-            System.arraycopy(value, 0, initialMean, 0, MEASUREMENT_SIZE);
+            System.arraycopy(value, MEASUREMENT_POSITION_OFFSET,
+                    initialMean, POSITION_OFFSET, SPATIAL_DIMENSIONS);
+            System.arraycopy(value, MEASUREMENT_VELOCITY_OFFSET,
+                    initialMean, VELOCITY_OFFSET, SPATIAL_DIMENSIONS);
             double[][] initialCovariance = new double[STATE_SIZE][STATE_SIZE];
-            for (int i = 0; i < 3; i++) {
-                initialCovariance[i][i] = Math.max(1.0e-6,
+            for (int axis = 0; axis < SPATIAL_DIMENSIONS; axis++) {
+                initialCovariance[POSITION_OFFSET + axis][POSITION_OFFSET + axis] = Math.max(1.0e-6,
                         measurement.positionVarianceMetersSquared());
-                initialCovariance[i + 3][i + 3] = Math.max(1.0e-6,
+                initialCovariance[VELOCITY_OFFSET + axis][VELOCITY_OFFSET + axis] = Math.max(1.0e-6,
                         measurement.velocityVarianceMetersSquaredPerSecondSquared());
-                initialCovariance[i + 6][i + 6] = 100.0;
+                initialCovariance[ACCELERATION_OFFSET + axis][ACCELERATION_OFFSET + axis] = 100.0;
             }
             for (int i = 0; i < models.size(); i++) {
                 states[i] = new ModelState(initialMean.clone(),
                         LinearAlgebra.copy(initialCovariance));
-                probabilities[i] = 1.0 / models.size();
             }
             lastUpdateSeconds = measurement.timeSeconds();
             lastMeasurement = measurement;
@@ -394,78 +584,26 @@ public final class ImmTracker {
             FusedState fused = fusedStoredState();
             models = parameters.enabledModels();
             states = new ModelState[models.size()];
-            probabilities = new double[models.size()];
+            modelProbabilities = uniformModelProbabilities(models.size());
             for (int i = 0; i < models.size(); i++) {
                 states[i] = new ModelState(fused.mean().clone(),
                         LinearAlgebra.copy(fused.covariance()));
-                probabilities[i] = 1.0 / models.size();
             }
         }
 
         void update(TargetMeasurement measurement, ImmParameters parameters) {
             reconcileModels(parameters);
-            int count = models.size();
-            double[][] transitionProbabilities = parameters.transitionProbabilityMatrix();
-            double[] normalizers = new double[count];
-            for (int destination = 0; destination < count; destination++) {
-                for (int source = 0; source < count; source++) {
-                    normalizers[destination] += probabilities[source]
-                            * transitionProbabilities[source][destination];
-                }
-                normalizers[destination] = Math.max(normalizers[destination], 1.0e-300);
-            }
-
-            ModelState[] predictions = new ModelState[count];
             double elapsed = Math.max(0.0, measurement.timeSeconds() - lastUpdateSeconds);
-            for (int destination = 0; destination < count; destination++) {
-                double[] mixedMean = new double[STATE_SIZE];
-                for (int source = 0; source < count; source++) {
-                    double mixingWeight = probabilities[source]
-                            * transitionProbabilities[source][destination]
-                            / normalizers[destination];
-                    for (int element = 0; element < STATE_SIZE; element++) {
-                        mixedMean[element] += mixingWeight * states[source].mean()[element];
-                    }
-                }
-                double[][] mixedCovariance = new double[STATE_SIZE][STATE_SIZE];
-                for (int source = 0; source < count; source++) {
-                    double mixingWeight = probabilities[source]
-                            * transitionProbabilities[source][destination]
-                            / normalizers[destination];
-                    double[] difference = LinearAlgebra.subtract(states[source].mean(), mixedMean);
-                    double[][] contribution = LinearAlgebra.add(
-                            states[source].covariance(), LinearAlgebra.outer(difference, difference));
-                    for (int row = 0; row < STATE_SIZE; row++) {
-                        for (int column = 0; column < STATE_SIZE; column++) {
-                            mixedCovariance[row][column] += mixingWeight * contribution[row][column];
-                        }
-                    }
-                }
-                predictions[destination] = predict(
-                        new ModelState(mixedMean, mixedCovariance),
-                        models.get(destination),
-                        elapsed,
-                        parameters.processNoiseFor(models.get(destination)));
-            }
-
-            ModelState[] updatedStates = new ModelState[count];
-            double[] logWeights = new double[count];
-            double largestLogWeight = Double.NEGATIVE_INFINITY;
-            for (int modelIndex = 0; modelIndex < count; modelIndex++) {
-                UpdateResult update = updateModel(predictions[modelIndex], measurement);
-                updatedStates[modelIndex] = update.state();
-                logWeights[modelIndex] = Math.log(normalizers[modelIndex]) + update.logLikelihood();
-                largestLogWeight = Math.max(largestLogWeight, logWeights[modelIndex]);
-            }
-            double weightSum = 0.0;
-            for (int modelIndex = 0; modelIndex < count; modelIndex++) {
-                probabilities[modelIndex] = Math.exp(logWeights[modelIndex] - largestLogWeight);
-                weightSum += probabilities[modelIndex];
-            }
-            for (int modelIndex = 0; modelIndex < count; modelIndex++) {
-                probabilities[modelIndex] /= weightSum;
-            }
-            states = updatedStates;
+            ImmCycleResult cycle = runImmCycle(
+                    models,
+                    states,
+                    modelProbabilities,
+                    parameters.transitionProbabilityMatrix(),
+                    elapsed,
+                    measurement,
+                    parameters);
+            states = cycle.updatedStates();
+            modelProbabilities = cycle.posteriorModelProbabilities();
             lastUpdateSeconds = measurement.timeSeconds();
             lastMeasurement = measurement;
         }
@@ -480,11 +618,11 @@ public final class ImmTracker {
                         elapsed,
                         parameters.processNoiseFor(models.get(modelIndex)));
             }
-            return fuse(predictions, probabilities);
+            return combineModelStates(predictions, modelProbabilities);
         }
 
         FusedState fusedStoredState() {
-            return fuse(states, probabilities);
+            return combineModelStates(states, modelProbabilities);
         }
 
         TrackRecord updatedRecord(double timeSeconds, TargetMeasurement measurement) {
@@ -520,11 +658,8 @@ public final class ImmTracker {
         }
 
         TrackView viewFrom(FusedState fused, boolean dead, double radius) {
-            double[][] positionCovariance = new double[3][3];
-            for (int row = 0; row < 3; row++) {
-                System.arraycopy(fused.covariance()[row], 0,
-                        positionCovariance[row], 0, 3);
-            }
+            double[][] positionCovariance = stateBlock(
+                    fused.covariance(), POSITION_OFFSET, SPATIAL_DIMENSIONS);
             return new TrackView(
                     id,
                     new EcefPoint(fused.mean()[0], fused.mean()[1], fused.mean()[2]),
@@ -543,26 +678,23 @@ public final class ImmTracker {
         }
     }
 
-    private static FusedState fuse(ModelState[] states, double[] probabilities) {
+    private static FusedState combineModelStates(ModelState[] states, double[] probabilities) {
         double[] mean = new double[STATE_SIZE];
         for (int modelIndex = 0; modelIndex < states.length; modelIndex++) {
-            for (int element = 0; element < STATE_SIZE; element++) {
-                mean[element] += probabilities[modelIndex] * states[modelIndex].mean()[element];
-            }
+            mean = LinearAlgebra.add(
+                    mean,
+                    LinearAlgebra.scale(probabilities[modelIndex], states[modelIndex].mean()));
         }
         double[][] covariance = new double[STATE_SIZE][STATE_SIZE];
         for (int modelIndex = 0; modelIndex < states.length; modelIndex++) {
             double[] difference = LinearAlgebra.subtract(states[modelIndex].mean(), mean);
             double[][] contribution = LinearAlgebra.add(
                     states[modelIndex].covariance(), LinearAlgebra.outer(difference, difference));
-            for (int row = 0; row < STATE_SIZE; row++) {
-                for (int column = 0; column < STATE_SIZE; column++) {
-                    covariance[row][column] += probabilities[modelIndex]
-                            * contribution[row][column];
-                }
-            }
+            covariance = LinearAlgebra.add(
+                    covariance,
+                    LinearAlgebra.scale(probabilities[modelIndex], contribution));
         }
-        return new FusedState(mean, covariance);
+        return new FusedState(mean, LinearAlgebra.symmetrized(covariance, 1.0e-12));
     }
 
     private record ModelState(double[] mean, double[][] covariance) {
@@ -572,6 +704,11 @@ public final class ImmTracker {
     }
 
     private record UpdateResult(ModelState state, double logLikelihood) {
+    }
+
+    private record ImmCycleResult(
+            ModelState[] updatedStates,
+            double[] posteriorModelProbabilities) {
     }
 
     private record AssociationCandidate(int trackIndex, int measurementIndex, double distance) {
