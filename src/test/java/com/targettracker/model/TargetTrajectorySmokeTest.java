@@ -94,6 +94,7 @@ public final class TargetTrajectorySmokeTest {
         if (increasingSpeed.normalizedIntegralAt(0.5) >= 0.5) {
             throw new AssertionError("A rising speed profile should cover less than half the distance by half time");
         }
+        verifyPathEditingUtilities();
 
         BufferedImage earthMap = ImageIO.read(TargetTrajectorySmokeTest.class
                 .getResource("/maps/blue_marble_2048.png"));
@@ -102,6 +103,35 @@ public final class TargetTrajectorySmokeTest {
         }
 
         System.out.println("TargetTrajectorySmokeTest passed");
+    }
+
+    private static void verifyPathEditingUtilities() {
+        TargetTrajectory target = new TargetTrajectory("TEST-003", Color.GREEN);
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.00, -74.00, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.01, -73.99, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.00, -73.98, 0.0)));
+        int originalCount = target.path().size();
+        double originalLength = target.surfaceLengthMeters();
+        if (!target.smoothPath() || target.path().size() <= originalCount) {
+            throw new AssertionError("Smoothing should insert additional path support points");
+        }
+        if (!target.canUndoSmoothing() || !target.undoSmoothing()) {
+            throw new AssertionError("Smoothing should be undoable");
+        }
+        if (target.path().size() != originalCount
+                || Math.abs(target.surfaceLengthMeters() - originalLength) > 1.0e-6) {
+            throw new AssertionError("Undo smoothing should restore the original path");
+        }
+        GeodeticPoint firstBefore = Wgs84.toGeodetic(target.path().get(0));
+        if (!target.translatePath(
+                new GeodeticPoint(40.00, -74.00, 0.0),
+                new GeodeticPoint(40.00, -73.99, 0.0))) {
+            throw new AssertionError("Path translation should succeed for a non-zero drag");
+        }
+        GeodeticPoint firstAfter = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(firstAfter.longitudeDegrees() - firstBefore.longitudeDegrees()) < 0.005) {
+            throw new AssertionError("Path translation should move the target path geodetically");
+        }
     }
 
     private static void requireClose(double expected, double actual, String label) {

@@ -100,6 +100,41 @@ public final class EarthMapCanvasSmokeTest {
             throw new AssertionError(
                     "Finish Path should stop segmented clicks from extending the target");
         }
+        GeodeticPoint firstBeforeMove = Wgs84.toGeodetic(target.path().get(0));
+        canvas.setTargetDrawingEnabled(false);
+        canvas.setMoveToolEnabled(true);
+        press(canvas, 450, 308);
+        drag(canvas, 500, 308);
+        release(canvas, 500, 308);
+        canvas.setMoveToolEnabled(false);
+        GeodeticPoint firstAfterMove = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(firstAfterMove.longitudeDegrees() - firstBeforeMove.longitudeDegrees())
+                < 0.001) {
+            throw new AssertionError("Move tool should translate the selected target path");
+        }
+        press(canvas, 500, 308);
+        drag(canvas, 550, 308);
+        release(canvas, 550, 308);
+        GeodeticPoint firstAfterMoveDisabled = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(firstAfterMoveDisabled.longitudeDegrees() - firstAfterMove.longitudeDegrees())
+                > 1.0e-9) {
+            throw new AssertionError("Target path should not move when the move tool is disabled");
+        }
+        canvas.setTargetDrawingEnabled(true);
+        target.clearPath();
+        canvas.setDrawingMode(EarthMapCanvas.DrawingMode.CIRCLE);
+        click(canvas, 420, 280);
+        click(canvas, 480, 280);
+        if (target.path().size() < 40) {
+            throw new AssertionError("Circle drawing should create a sampled closed trajectory");
+        }
+        target.clearPath();
+        canvas.setDrawingMode(EarthMapCanvas.DrawingMode.RACETRACK);
+        click(canvas, 420, 280);
+        click(canvas, 520, 280);
+        if (target.path().size() < 40) {
+            throw new AssertionError("Racetrack drawing should create a sampled loop trajectory");
+        }
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.FREE_HAND);
         canvas.focusOnPoints(target.path());
         if ("1.0×".equals(canvas.viewDescription())) {
@@ -114,6 +149,18 @@ public final class EarthMapCanvasSmokeTest {
         click(canvas, 480, 335);
         if (model.blackoutRegions().size() != 1 || blackoutCallbacks.get() != 1) {
             throw new AssertionError("Second blackout click should create one user region");
+        }
+        GeodeticPoint blackoutCenterBefore = model.blackoutRegions().get(0).center();
+        canvas.setBlackoutEditingEnabled(false);
+        canvas.setMoveToolEnabled(true);
+        press(canvas, 450, 308);
+        drag(canvas, 500, 308);
+        release(canvas, 500, 308);
+        canvas.setMoveToolEnabled(false);
+        GeodeticPoint blackoutCenterAfter = model.blackoutRegions().get(0).center();
+        if (Math.abs(blackoutCenterAfter.longitudeDegrees()
+                - blackoutCenterBefore.longitudeDegrees()) < 0.001) {
+            throw new AssertionError("Move tool should translate blackout regions globally");
         }
         model.clearBlackoutRegions();
 
@@ -143,9 +190,39 @@ public final class EarthMapCanvasSmokeTest {
     }
 
     private static void click(EarthMapCanvas canvas, int x, int y) {
+        press(canvas, x, y);
+    }
+
+    private static void press(EarthMapCanvas canvas, int x, int y) {
         canvas.dispatchEvent(new MouseEvent(
                 canvas,
                 MouseEvent.MOUSE_PRESSED,
+                System.currentTimeMillis(),
+                0,
+                x,
+                y,
+                1,
+                false,
+                MouseEvent.BUTTON1));
+    }
+
+    private static void drag(EarthMapCanvas canvas, int x, int y) {
+        canvas.dispatchEvent(new MouseEvent(
+                canvas,
+                MouseEvent.MOUSE_DRAGGED,
+                System.currentTimeMillis(),
+                0,
+                x,
+                y,
+                0,
+                false,
+                MouseEvent.BUTTON1));
+    }
+
+    private static void release(EarthMapCanvas canvas, int x, int y) {
+        canvas.dispatchEvent(new MouseEvent(
+                canvas,
+                MouseEvent.MOUSE_RELEASED,
                 System.currentTimeMillis(),
                 0,
                 x,

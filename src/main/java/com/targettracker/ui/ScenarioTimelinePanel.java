@@ -7,6 +7,7 @@ import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.Timer;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -100,19 +101,32 @@ final class ScenarioTimelinePanel extends JPanel {
     private final class TimelineRuler extends JComponent {
         private static final int LEFT = 18;
         private static final int RIGHT = 18;
+        private static final int SEEK_COALESCE_MILLIS = 35;
+
+        private final Timer seekTimer;
+        private double pendingSeekSeconds;
+        private boolean seekPending;
 
         TimelineRuler() {
             setPreferredSize(new Dimension(600, 47));
             setToolTipText("Drag to seek through the pre-computed scenario");
+            seekTimer = new Timer(SEEK_COALESCE_MILLIS, event -> flushPendingSeek());
+            seekTimer.setRepeats(false);
             MouseAdapter mouse = new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent event) {
-                    seek(event.getX());
+                    seekImmediately(event.getX());
                 }
 
                 @Override
                 public void mouseDragged(MouseEvent event) {
-                    seek(event.getX());
+                    queueSeek(event.getX());
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent event) {
+                    queueSeek(event.getX());
+                    flushPendingSeek();
                 }
             };
             addMouseListener(mouse);
@@ -187,13 +201,41 @@ final class ScenarioTimelinePanel extends JPanel {
             }
         }
 
-        private void seek(int mouseX) {
+        private void seekImmediately(int mouseX) {
             if (!isEnabled() || !playback.canSeek()) {
                 return;
             }
+            seekPending = false;
+            seekTimer.stop();
+            playback.seekTo(timeAt(mouseX));
+        }
+
+        private void queueSeek(int mouseX) {
+            if (!isEnabled() || !playback.canSeek()) {
+                return;
+            }
+            pendingSeekSeconds = timeAt(mouseX);
+            seekPending = true;
+            if (!seekTimer.isRunning()) {
+                seekTimer.start();
+            }
+        }
+
+        private void flushPendingSeek() {
+            if (!seekPending || !isEnabled() || !playback.canSeek()) {
+                seekPending = false;
+                seekTimer.stop();
+                return;
+            }
+            seekPending = false;
+            seekTimer.stop();
+            playback.seekTo(pendingSeekSeconds);
+        }
+
+        private double timeAt(int mouseX) {
             int width = Math.max(1, getWidth() - LEFT - RIGHT);
             double fraction = Math.max(0.0, Math.min(1.0, (double) (mouseX - LEFT) / width));
-            playback.seekTo(fraction * playback.durationSeconds());
+            return fraction * playback.durationSeconds();
         }
 
         private void drawCandidateMarkers(

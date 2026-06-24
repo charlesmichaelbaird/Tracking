@@ -10,6 +10,7 @@ public final class TargetTrajectory {
     private final Color color;
     private final List<EcefPoint> path = new ArrayList<>();
     private final List<Double> segmentLengthsMeters = new ArrayList<>();
+    private final List<EcefPoint> smoothingUndoPath = new ArrayList<>();
     private final ScalarProfile velocityProfile = new ScalarProfile(0.0, 600.0, 200.0);
     private final ScalarProfile altitudeProfile = new ScalarProfile(0.0, 20_000.0, 1_000.0);
     private double surfaceLengthMeters;
@@ -34,6 +35,7 @@ public final class TargetTrajectory {
     public void clearPath() {
         path.clear();
         segmentLengthsMeters.clear();
+        smoothingUndoPath.clear();
         surfaceLengthMeters = 0.0;
     }
 
@@ -50,6 +52,66 @@ public final class TargetTrajectory {
             segmentLengthsMeters.add(segmentLength);
             surfaceLengthMeters += segmentLength;
         }
+    }
+
+    public void replacePath(List<EcefPoint> points) {
+        replacePath(points, true);
+    }
+
+    public boolean translatePath(GeodeticPoint dragStart, GeodeticPoint dragEnd) {
+        if (path.isEmpty()) {
+            return false;
+        }
+        Wgs84Geodesic.GeodesicData offset = Wgs84Geodesic.inverse(
+                dragStart.withAltitude(0.0),
+                dragEnd.withAltitude(0.0));
+        if (offset.distanceMeters() <= 1.0e-6) {
+            return false;
+        }
+        List<EcefPoint> translated = new ArrayList<>(path.size());
+        for (EcefPoint point : path) {
+            GeodeticPoint geodetic = Wgs84.toGeodetic(point);
+            translated.add(Wgs84.toEcef(Wgs84Geodesic.direct(
+                    geodetic,
+                    offset.initialBearingRadians(),
+                    offset.distanceMeters(),
+                    0.0)));
+        }
+        replacePath(translated, true);
+        return true;
+    }
+
+    public boolean smoothPath() {
+        if (path.size() < 3) {
+            return false;
+        }
+        smoothingUndoPath.clear();
+        smoothingUndoPath.addAll(path);
+        List<EcefPoint> smoothed = new ArrayList<>((path.size() - 1) * 2 + 1);
+        smoothed.add(path.get(0));
+        for (int index = 1; index < path.size(); index++) {
+            GeodeticPoint start = Wgs84.toGeodetic(path.get(index - 1));
+            GeodeticPoint end = Wgs84.toGeodetic(path.get(index));
+            smoothed.add(Wgs84.toEcef(Wgs84Geodesic.interpolate(start, end, 0.25, 0.0)));
+            smoothed.add(Wgs84.toEcef(Wgs84Geodesic.interpolate(start, end, 0.75, 0.0)));
+        }
+        smoothed.add(path.get(path.size() - 1));
+        replacePath(smoothed, false);
+        return true;
+    }
+
+    public boolean undoSmoothing() {
+        if (smoothingUndoPath.isEmpty()) {
+            return false;
+        }
+        List<EcefPoint> restored = List.copyOf(smoothingUndoPath);
+        smoothingUndoPath.clear();
+        replacePath(restored, false);
+        return true;
+    }
+
+    public boolean canUndoSmoothing() {
+        return !smoothingUndoPath.isEmpty();
     }
 
     public ScalarProfile velocityProfile() {
@@ -149,6 +211,18 @@ public final class TargetTrajectory {
         return Wgs84Geodesic.inverse(
                 Wgs84.toGeodetic(start),
                 Wgs84.toGeodetic(end)).distanceMeters();
+    }
+
+    private void replacePath(List<EcefPoint> points, boolean clearSmoothingUndo) {
+        path.clear();
+        segmentLengthsMeters.clear();
+        surfaceLengthMeters = 0.0;
+        if (clearSmoothingUndo) {
+            smoothingUndoPath.clear();
+        }
+        for (EcefPoint point : points) {
+            addPathPoint(point);
+        }
     }
 
     @Override

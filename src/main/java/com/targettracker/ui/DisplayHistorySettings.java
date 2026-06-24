@@ -6,8 +6,8 @@ final class DisplayHistorySettings {
     private boolean blackoutRegionsVisible = true;
     private boolean groundTruthVisible = true;
     private boolean measurementsVisible = true;
-    private double groundTruthHistoryFraction = 1.0;
-    private double measurementHistoryFraction = 1.0;
+    private double groundTruthHistoryFraction = 0.10;
+    private double measurementHistoryFraction = 0.10;
 
     boolean gridVisible() {
         return gridVisible;

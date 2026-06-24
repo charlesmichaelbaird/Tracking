@@ -42,6 +42,13 @@ final class ScenarioPlayback {
     private final Map<TargetTrajectory, Deque<EcefPoint>> recentHistory = new LinkedHashMap<>();
     private final List<ReplayFrame> replayFrames = new ArrayList<>();
     private final Map<String, List<GroundTruthRecord>> importedGroundTruth = new LinkedHashMap<>();
+    private final Map<String, List<EcefPoint>> replayTrackTailPoints = new LinkedHashMap<>();
+    private final List<Map<String, Integer>> replayTrackTailCounts = new ArrayList<>();
+    private final Map<TargetTrajectory, List<EcefPoint>> generatedTargetHistoryPoints =
+            new LinkedHashMap<>();
+    private final List<Map<TargetTrajectory, Integer>> generatedTargetHistoryCounts =
+            new ArrayList<>();
+    private final Map<String, GroundTruthCache> importedGroundTruthCaches = new LinkedHashMap<>();
 
     private double elapsedSeconds;
     private long lastTickNanos;
@@ -130,6 +137,8 @@ final class ScenarioPlayback {
             computing = false;
         }
 
+        rebuildReplayCaches();
+        rebuildGeneratedTargetHistoryCache();
         replayReady = true;
         replayDisplayActive = true;
         seekToInternal(0.0);
@@ -210,6 +219,8 @@ final class ScenarioPlayback {
                     .toList();
             replayFrames.add(new ReplayFrame(importedDurationSeconds, endingViews));
         }
+        rebuildReplayCaches();
+        rebuildImportedGroundTruthCaches();
         replayReady = true;
         replayDisplayActive = true;
         seekToInternal(0.0);
@@ -445,29 +456,19 @@ final class ScenarioPlayback {
         elapsedSeconds = Math.max(0.0, Math.min(durationSeconds(), wantedSeconds));
         int frameIndex = closestFrameIndex(elapsedSeconds);
         ReplayFrame selectedFrame = replayFrames.get(frameIndex);
-
-        Map<String, List<EcefPoint>> tailsByTrack = new LinkedHashMap<>();
-        for (int index = 0; index <= frameIndex; index++) {
-            for (TrackView track : replayFrames.get(index).trackViews()) {
-                if (track.dead()) {
-                    continue;
-                }
-                List<EcefPoint> tail = tailsByTrack.computeIfAbsent(
-                        track.id(), ignored -> new ArrayList<>());
-                EcefPoint last = tail.isEmpty() ? null : tail.get(tail.size() - 1);
-                if (last == null || last.distanceTo(track.meanPosition()) >= 1.0) {
-                    tail.add(track.meanPosition());
-                }
-            }
-        }
+        Map<String, Integer> tailCounts = frameIndex < replayTrackTailCounts.size()
+                ? replayTrackTailCounts.get(frameIndex)
+                : Map.of();
 
         List<TrackView> views = new ArrayList<>();
         for (TrackView track : selectedFrame.trackViews()) {
+            List<EcefPoint> fullTail = replayTrackTailPoints.getOrDefault(track.id(), List.of());
+            int count = Math.min(fullTail.size(), tailCounts.getOrDefault(track.id(), 0));
             views.add(new TrackView(
                     track.id(),
                     track.meanPosition(),
                     track.positionCovariance(),
-                    List.copyOf(tailsByTrack.getOrDefault(track.id(), List.of())),
+                    fullTail.subList(0, count),
                     track.color(),
                     track.dead(),
                     track.uncertaintyRadiusMeters(),
@@ -483,19 +484,17 @@ final class ScenarioPlayback {
             rebuildImportedGroundTruth();
             return;
         }
-        int firstFrame = 0;
+        Map<TargetTrajectory, Integer> counts = frameIndex < generatedTargetHistoryCounts.size()
+                ? generatedTargetHistoryCounts.get(frameIndex)
+                : Map.of();
         for (TargetTrajectory target : model.targets()) {
             if (!target.isRunnable()) {
                 continue;
             }
-            Deque<EcefPoint> history = new ArrayDeque<>();
-            for (int index = firstFrame; index <= frameIndex; index++) {
-                EcefPoint position = target.positionAt(replayFrames.get(index).timeSeconds());
-                EcefPoint last = history.peekLast();
-                if (last == null || last.distanceTo(position) >= 1.0) {
-                    history.addLast(position);
-                }
-            }
+            List<EcefPoint> fullHistory =
+                    generatedTargetHistoryPoints.getOrDefault(target, List.of());
+            int count = Math.min(fullHistory.size(), counts.getOrDefault(target, 0));
+            Deque<EcefPoint> history = new ArrayDeque<>(fullHistory.subList(0, count));
             EcefPoint exactPosition = target.positionAt(elapsedSeconds);
             EcefPoint last = history.peekLast();
             if (last == null || last.distanceTo(exactPosition) >= 1.0) {
@@ -507,29 +506,81 @@ final class ScenarioPlayback {
 
     private void rebuildImportedGroundTruth() {
         List<GroundTruthView> views = new ArrayList<>();
-        for (Map.Entry<String, List<GroundTruthRecord>> entry : importedGroundTruth.entrySet()) {
-            List<GroundTruthRecord> records = entry.getValue();
+        for (Map.Entry<String, GroundTruthCache> entry : importedGroundTruthCaches.entrySet()) {
+            GroundTruthCache cache = entry.getValue();
+            List<GroundTruthRecord> records = cache.records();
             int currentIndex = floorTruthIndex(records, elapsedSeconds);
             if (currentIndex < 0) {
                 continue;
             }
-            List<EcefPoint> plannedPath = new ArrayList<>();
-            List<EcefPoint> history = new ArrayList<>();
-            for (int index = 0; index < records.size(); index++) {
-                EcefPoint point = pointFromState(records.get(index).state());
-                appendDistinct(plannedPath, point);
-                if (index <= currentIndex) {
-                    appendDistinct(history, point);
-                }
-            }
+            int historyCount = Math.min(
+                    cache.historyPoints().size(),
+                    cache.historyCountsByRecordIndex().get(currentIndex));
             views.add(new GroundTruthView(
                     entry.getKey(),
                     pointFromState(records.get(currentIndex).state()),
-                    List.copyOf(plannedPath),
-                    List.copyOf(history),
+                    cache.plannedPath(),
+                    cache.historyPoints().subList(0, historyCount),
                     targetColor(entry.getKey())));
         }
         replayGroundTruthViews = List.copyOf(views);
+    }
+
+    private void rebuildReplayCaches() {
+        replayTrackTailPoints.clear();
+        replayTrackTailCounts.clear();
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (ReplayFrame frame : replayFrames) {
+            for (TrackView track : frame.trackViews()) {
+                if (track.dead()) {
+                    continue;
+                }
+                List<EcefPoint> tail = replayTrackTailPoints.computeIfAbsent(
+                        track.id(), ignored -> new ArrayList<>());
+                appendDistinct(tail, track.meanPosition());
+                counts.put(track.id(), tail.size());
+            }
+            replayTrackTailCounts.add(Map.copyOf(counts));
+        }
+    }
+
+    private void rebuildGeneratedTargetHistoryCache() {
+        generatedTargetHistoryPoints.clear();
+        generatedTargetHistoryCounts.clear();
+        Map<TargetTrajectory, Integer> counts = new LinkedHashMap<>();
+        for (ReplayFrame frame : replayFrames) {
+            for (TargetTrajectory target : model.targets()) {
+                if (!target.isRunnable()) {
+                    continue;
+                }
+                List<EcefPoint> history = generatedTargetHistoryPoints.computeIfAbsent(
+                        target, ignored -> new ArrayList<>());
+                appendDistinct(history, target.positionAt(frame.timeSeconds()));
+                counts.put(target, history.size());
+            }
+            generatedTargetHistoryCounts.add(Map.copyOf(counts));
+        }
+    }
+
+    private void rebuildImportedGroundTruthCaches() {
+        importedGroundTruthCaches.clear();
+        for (Map.Entry<String, List<GroundTruthRecord>> entry : importedGroundTruth.entrySet()) {
+            List<GroundTruthRecord> records = entry.getValue();
+            List<EcefPoint> plannedPath = new ArrayList<>();
+            List<EcefPoint> historyPoints = new ArrayList<>();
+            List<Integer> historyCounts = new ArrayList<>(records.size());
+            for (GroundTruthRecord record : records) {
+                EcefPoint point = pointFromState(record.state());
+                appendDistinct(plannedPath, point);
+                appendDistinct(historyPoints, point);
+                historyCounts.add(historyPoints.size());
+            }
+            importedGroundTruthCaches.put(entry.getKey(), new GroundTruthCache(
+                    records,
+                    List.copyOf(plannedPath),
+                    List.copyOf(historyPoints),
+                    List.copyOf(historyCounts)));
+        }
     }
 
     private static int floorTruthIndex(List<GroundTruthRecord> records, double timeSeconds) {
@@ -583,6 +634,11 @@ final class ScenarioPlayback {
         replayGroundTruthViews = List.of();
         scenarioExtentPoints = List.of();
         importedGroundTruth.clear();
+        replayTrackTailPoints.clear();
+        replayTrackTailCounts.clear();
+        generatedTargetHistoryPoints.clear();
+        generatedTargetHistoryCounts.clear();
+        importedGroundTruthCaches.clear();
         replayReady = false;
         replayDisplayActive = false;
     }
@@ -687,5 +743,12 @@ final class ScenarioPlayback {
     }
 
     private record ReplayFrame(double timeSeconds, List<TrackView> trackViews) {
+    }
+
+    private record GroundTruthCache(
+            List<GroundTruthRecord> records,
+            List<EcefPoint> plannedPath,
+            List<EcefPoint> historyPoints,
+            List<Integer> historyCountsByRecordIndex) {
     }
 }

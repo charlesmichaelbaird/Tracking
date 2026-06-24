@@ -21,6 +21,10 @@ public final class DisplayControlsPanelSmokeTest {
 
     private static void runChecks() {
         DisplayHistorySettings settings = new DisplayHistorySettings();
+        if (settings.groundTruthHistoryFraction() != 0.10
+                || settings.measurementHistoryFraction() != 0.10) {
+            throw new AssertionError("Layer history defaults should start at 10%");
+        }
         AtomicInteger changes = new AtomicInteger();
         DisplayControlsPanel panel = new DisplayControlsPanel(settings, changes::incrementAndGet);
         List<JToggleButton> buttons = new ArrayList<>();

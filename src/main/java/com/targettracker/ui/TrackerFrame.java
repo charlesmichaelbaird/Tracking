@@ -19,6 +19,7 @@ import com.targettracker.tracking.ImmTracker;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -27,12 +28,17 @@ import javax.swing.JPanel;
 import javax.swing.JSeparator;
 import javax.swing.JToggleButton;
 import javax.swing.SwingConstants;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.io.IOException;
 import java.nio.file.Path;
 
@@ -66,6 +72,8 @@ public final class TrackerFrame extends JFrame {
     private final JButton pauseButton = new JButton("Pause");
     private final JButton precomputeButton = new JButton("Pre-compute scenario");
     private final JButton replayButton = new JButton("Replay scenario");
+    private final JToggleButton moveToolButton = new JToggleButton("Move: Off");
+    private final Icon moveToolIcon = new MoveToolIcon();
     private final JToggleButton generationModeButton =
             new JToggleButton("Scenario Generation", true);
     private final JToggleButton analysisModeButton = new JToggleButton("Analysis Mode");
@@ -147,6 +155,8 @@ public final class TrackerFrame extends JFrame {
                 earthMapCanvas::setDrawingMode,
                 earthMapCanvas::finishPath,
                 this::clearSelectedPath,
+                this::smoothSelectedPath,
+                this::undoSmoothSelectedPath,
                 this::removeSelectedTarget,
                 earthMapCanvas::setProfileHighlightNormalizedTime);
         sensorParametersPanel = new SensorParametersPanel(
@@ -195,7 +205,20 @@ public final class TrackerFrame extends JFrame {
         JLabel frameLabel = new JLabel(
                 "WGS-84 ECEF • Plate Carrée view • Ellipsoidal altitude");
         frameLabel.setForeground(new Color(91, 103, 115));
-        titleRow.add(frameLabel, BorderLayout.EAST);
+        JPanel topRightControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        topRightControls.setOpaque(false);
+        moveToolButton.setToolTipText(
+                "Toggle click-and-drag movement for target paths and blackout regions");
+        moveToolButton.setIcon(moveToolIcon);
+        moveToolButton.setOpaque(true);
+        moveToolButton.setContentAreaFilled(true);
+        moveToolButton.setFocusPainted(false);
+        moveToolButton.addActionListener(event ->
+                setMoveToolActive(moveToolButton.isSelected()));
+        refreshMoveToolButton();
+        topRightControls.add(frameLabel);
+        topRightControls.add(moveToolButton);
+        titleRow.add(topRightControls, BorderLayout.EAST);
         container.add(titleRow);
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 7));
@@ -309,6 +332,33 @@ public final class TrackerFrame extends JFrame {
         earthMapCanvas.setBlackoutEditingEnabled(sensorCard);
     }
 
+    private void setMoveToolActive(boolean active) {
+        boolean enabled = active && !isScenarioEditingLocked();
+        if (moveToolButton.isSelected() != enabled) {
+            moveToolButton.setSelected(enabled);
+        }
+        earthMapCanvas.setMoveToolEnabled(enabled);
+        refreshMoveToolButton();
+        statusLabel.setText(enabled
+                ? "Move tool enabled — drag target paths or blackout regions"
+                : "Move tool disabled");
+    }
+
+    private void refreshMoveToolButton() {
+        boolean selected = moveToolButton.isSelected();
+        moveToolButton.setText(selected ? "Move: On" : "Move: Off");
+        moveToolButton.setBackground(selected
+                ? new Color(255, 218, 92)
+                : new Color(235, 238, 242));
+        moveToolButton.setForeground(new Color(28, 36, 44));
+        moveToolButton.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(selected
+                        ? new Color(166, 111, 0)
+                        : new Color(168, 176, 184)),
+                BorderFactory.createEmptyBorder(3, 8, 3, 8)));
+        moveToolButton.repaint();
+    }
+
     private void clearSelectedPath() {
         if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
@@ -325,6 +375,46 @@ public final class TrackerFrame extends JFrame {
         refreshTelemetry();
         timelinePanel.refresh();
         earthMapCanvas.repaint();
+    }
+
+    private void smoothSelectedPath() {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
+            return;
+        }
+        TargetTrajectory target = motionTelemetryPanel.selectedTarget();
+        if (target == null) {
+            return;
+        }
+        selectedTarget = target;
+        resetCompletedPlayback();
+        if (target.smoothPath()) {
+            refreshTelemetry();
+            timelinePanel.refresh();
+            earthMapCanvas.repaint();
+            statusLabel.setText("Smoothed path for %s".formatted(target.id()));
+        } else {
+            statusLabel.setText("Add at least three path points before smoothing");
+        }
+    }
+
+    private void undoSmoothSelectedPath() {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
+            return;
+        }
+        TargetTrajectory target = motionTelemetryPanel.selectedTarget();
+        if (target == null) {
+            return;
+        }
+        selectedTarget = target;
+        resetCompletedPlayback();
+        if (target.undoSmoothing()) {
+            refreshTelemetry();
+            timelinePanel.refresh();
+            earthMapCanvas.repaint();
+            statusLabel.setText("Restored pre-smoothing path for %s".formatted(target.id()));
+        } else {
+            statusLabel.setText("No smoothing pass to undo for %s".formatted(target.id()));
+        }
     }
 
     private void removeSelectedTarget() {
@@ -547,6 +637,13 @@ public final class TrackerFrame extends JFrame {
 
     private void updateStructuralEditingControls() {
         motionTelemetryPanel.setEditingState(isScenarioEditingLocked(), presetScenarioActive);
+        boolean canMove = !isScenarioEditingLocked();
+        moveToolButton.setEnabled(canMove);
+        if (!canMove && moveToolButton.isSelected()) {
+            moveToolButton.setSelected(false);
+            earthMapCanvas.setMoveToolEnabled(false);
+        }
+        refreshMoveToolButton();
     }
 
     private void precomputeScenario() {
@@ -896,5 +993,46 @@ public final class TrackerFrame extends JFrame {
         JSeparator separator = new JSeparator(SwingConstants.VERTICAL);
         separator.setPreferredSize(new Dimension(1, 24));
         return separator;
+    }
+
+    private final class MoveToolIcon implements Icon {
+        private static final int SIZE = 14;
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            try {
+                g2.setRenderingHint(
+                        RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                boolean selected = moveToolButton.isSelected();
+                Color fill = selected
+                        ? new Color(31, 138, 65)
+                        : new Color(150, 157, 164);
+                if (selected) {
+                    g2.setColor(new Color(31, 138, 65, 65));
+                    g2.fillOval(x, y, SIZE, SIZE);
+                }
+                g2.setColor(fill);
+                g2.fillOval(x + 2, y + 2, SIZE - 4, SIZE - 4);
+                g2.setStroke(new BasicStroke(1.0f));
+                g2.setColor(selected
+                        ? new Color(18, 83, 40, 160)
+                        : new Color(96, 103, 111, 140));
+                g2.drawOval(x + 2, y + 2, SIZE - 4, SIZE - 4);
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return SIZE;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return SIZE;
+        }
     }
 }

@@ -26,9 +26,11 @@ final class MotionTelemetryPanel extends JPanel {
     private final JButton newTargetButton = fullWidthButton("New target");
     private final JButton removeTargetButton = fullWidthButton("Remove target");
     private final JComboBox<String> drawingMode =
-            new JComboBox<>(new String[]{"Free-hand", "Segmented line"});
+            new JComboBox<>(new String[]{"Free-hand", "Segmented line", "Circle", "Racetrack"});
     private final JButton finishPathButton = fullWidthButton("Finish path");
     private final JButton clearPathButton = fullWidthButton("Clear path");
+    private final JButton smoothPathButton = fullWidthButton("Smooth");
+    private final JButton undoSmoothButton = fullWidthButton("Undo smooth");
     private final JLabel lockLabel = new JLabel("Manual target editing enabled");
     private final JLabel profileTargetLabel = new JLabel();
     private final ProfileEditor velocityEditor;
@@ -46,6 +48,8 @@ final class MotionTelemetryPanel extends JPanel {
             Consumer<EarthMapCanvas.DrawingMode> onDrawingModeChanged,
             Runnable onFinishPath,
             Runnable onClearPath,
+            Runnable onSmoothPath,
+            Runnable onUndoSmoothPath,
             Runnable onRemoveTarget,
             Consumer<Double> onProfileCursorChanged) {
         this.editingLocked = editingLocked;
@@ -61,6 +65,8 @@ final class MotionTelemetryPanel extends JPanel {
                 onDrawingModeChanged,
                 onFinishPath,
                 onClearPath,
+                onSmoothPath,
+                onUndoSmoothPath,
                 onRemoveTarget));
         add(Box.createVerticalStrut(8));
 
@@ -98,6 +104,8 @@ final class MotionTelemetryPanel extends JPanel {
             Consumer<EarthMapCanvas.DrawingMode> onDrawingModeChanged,
             Runnable onFinishPath,
             Runnable onClearPath,
+            Runnable onSmoothPath,
+            Runnable onUndoSmoothPath,
             Runnable onRemoveTarget) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
@@ -106,7 +114,7 @@ final class MotionTelemetryPanel extends JPanel {
                 BorderFactory.createEmptyBorder(0, 12, 0, 12),
                 BorderFactory.createLineBorder(new Color(214, 220, 227))));
         panel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 206));
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 246));
 
         JPanel inner = new JPanel();
         inner.setOpaque(false);
@@ -131,10 +139,12 @@ final class MotionTelemetryPanel extends JPanel {
         inner.add(Box.createVerticalStrut(4));
         drawingMode.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
         drawingMode.setAlignmentX(LEFT_ALIGNMENT);
-        drawingMode.addActionListener(event -> onDrawingModeChanged.accept(
-                drawingMode.getSelectedIndex() == 0
-                        ? EarthMapCanvas.DrawingMode.FREE_HAND
-                        : EarthMapCanvas.DrawingMode.SEGMENTED));
+        drawingMode.addActionListener(event -> onDrawingModeChanged.accept(switch (drawingMode.getSelectedIndex()) {
+            case 1 -> EarthMapCanvas.DrawingMode.SEGMENTED;
+            case 2 -> EarthMapCanvas.DrawingMode.CIRCLE;
+            case 3 -> EarthMapCanvas.DrawingMode.RACETRACK;
+            default -> EarthMapCanvas.DrawingMode.FREE_HAND;
+        }));
         inner.add(drawingMode);
         inner.add(Box.createVerticalStrut(10));
 
@@ -146,6 +156,18 @@ final class MotionTelemetryPanel extends JPanel {
         pathGrid.add(finishPathButton);
         pathGrid.add(clearPathButton);
         inner.add(pathGrid);
+        inner.add(Box.createVerticalStrut(10));
+
+        JPanel editGrid = new JPanel(new GridLayout(1, 2, 8, 0));
+        editGrid.setOpaque(false);
+        editGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        smoothPathButton.setToolTipText("Smooth the selected target path");
+        undoSmoothButton.setToolTipText("Undo the last smoothing pass for the selected target");
+        smoothPathButton.addActionListener(event -> onSmoothPath.run());
+        undoSmoothButton.addActionListener(event -> onUndoSmoothPath.run());
+        editGrid.add(smoothPathButton);
+        editGrid.add(undoSmoothButton);
+        inner.add(editGrid);
         inner.add(Box.createVerticalStrut(10));
 
         lockLabel.setForeground(new Color(44, 112, 62));
@@ -177,6 +199,10 @@ final class MotionTelemetryPanel extends JPanel {
         drawingMode.setEnabled(enabled);
         finishPathButton.setEnabled(enabled);
         clearPathButton.setEnabled(enabled && !presetScenarioActive);
+        smoothPathButton.setEnabled(enabled && !presetScenarioActive);
+        undoSmoothButton.setEnabled(enabled && !presetScenarioActive
+                && selectedTarget() != null
+                && selectedTarget().canUndoSmoothing());
         if (presetScenarioActive) {
             lockLabel.setText("Target structure locked by preset scenario");
             lockLabel.setForeground(new Color(132, 74, 17));
@@ -198,6 +224,9 @@ final class MotionTelemetryPanel extends JPanel {
                 : "Editing %s • drag directly on either chart".formatted(target.id()));
         velocityEditor.repaint();
         altitudeEditor.repaint();
+        undoSmoothButton.setEnabled(!editingLocked.getAsBoolean()
+                && target != null
+                && target.canUndoSmoothing());
     }
 
     private static JPanel wrapChart(ProfileEditor editor) {
