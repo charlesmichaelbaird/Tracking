@@ -1,5 +1,6 @@
 package com.targettracker.analysis;
 
+import com.targettracker.math.LinearAlgebra;
 import com.targettracker.recording.GroundTruthRecord;
 import com.targettracker.recording.RecordedMeasurement;
 import com.targettracker.recording.RecordedScenario;
@@ -599,19 +600,13 @@ public final class TrackStitchingAnalyzer {
         for (int row = 0; row < 3; row++) {
             System.arraycopy(innovationCovariance[row], 0, positionCovariance[row], 0, 3);
         }
-        double determinant = determinant3(positionCovariance);
+        double determinant = LinearAlgebra.determinant(positionCovariance);
         double volumeCubicMeters = 4.0 / 3.0 * Math.PI
                 * Math.sqrt(Math.max(0.0, determinant));
         if (!Double.isFinite(volumeCubicMeters)) {
             return 0.0;
         }
         return volumeCubicMeters / CUBIC_METERS_PER_CUBIC_KILOMETER;
-    }
-
-    private static double determinant3(double[][] matrix) {
-        return matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
-                - matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
-                + matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
     }
 
     static double canonicalNegativeLogLikelihood(InnovationScore score) {
@@ -635,15 +630,15 @@ public final class TrackStitchingAnalyzer {
                         + newState.covariance()[row][column];
             }
         }
-        CholeskyResult cholesky = cholesky(covariance);
-        double[] solved = solveCholesky(cholesky.lower(), innovation);
-        double innovationQuadratic = Math.max(0.0, dot(innovation, solved));
+        LinearAlgebra.SpdInverse inverse = LinearAlgebra.inverseSpd(covariance);
+        double[] solved = LinearAlgebra.multiply(inverse.inverse(), innovation);
+        double innovationQuadratic = Math.max(0.0, LinearAlgebra.dot(innovation, solved));
         return new InnovationScore(
                 innovation,
                 covariance,
                 Math.sqrt(innovationQuadratic),
                 innovationQuadratic,
-                cholesky.logDeterminant());
+                inverse.logDeterminant());
     }
 
     private static PropagatedState predictOld(TrackRecord record, double wantedTime) {
@@ -680,16 +675,18 @@ public final class TrackStitchingAnalyzer {
             double sourceTime,
             double wantedTime) {
         double dt = wantedTime - sourceTime;
-        double[][] transition = identity(STATE_SIZE);
+        double[][] transition = LinearAlgebra.identity(STATE_SIZE);
         for (int axis = 0; axis < 3; axis++) {
             transition[axis][axis + 3] = dt;
             transition[axis][axis + 6] = 0.5 * dt * dt;
             transition[axis + 3][axis + 6] = dt;
         }
         double positiveDt = Math.abs(dt);
-        double[] propagatedState = multiply(transition, source.state());
-        double[][] propagatedCovariance = add(
-                multiply(multiply(transition, source.covariance()), transpose(transition)),
+        double[] propagatedState = LinearAlgebra.multiply(transition, source.state());
+        double[][] propagatedCovariance = LinearAlgebra.add(
+                LinearAlgebra.multiply(
+                        LinearAlgebra.multiply(transition, source.covariance()),
+                        LinearAlgebra.transpose(transition)),
                 processCovariance(positiveDt));
         double regularization = 1.0e-9 * (1.0 + positiveDt);
         for (int index = 0; index < STATE_SIZE; index++) {
@@ -714,30 +711,33 @@ public final class TrackStitchingAnalyzer {
                         + measurementCovariance[row][column];
             }
         }
-        double[][] inverseInnovation = inverseSpd(innovationCovariance);
+        double[][] inverseInnovation = LinearAlgebra.inverseSpd(innovationCovariance).inverse();
         double[][] crossCovariance = new double[STATE_SIZE][MEASUREMENT_SIZE];
         for (int row = 0; row < STATE_SIZE; row++) {
             System.arraycopy(prediction.covariance()[row], 0,
                     crossCovariance[row], 0, MEASUREMENT_SIZE);
         }
-        double[][] gain = multiply(crossCovariance, inverseInnovation);
+        double[][] gain = LinearAlgebra.multiply(crossCovariance, inverseInnovation);
         double[] updatedState = prediction.state().clone();
-        double[] correction = multiply(gain, innovation);
+        double[] correction = LinearAlgebra.multiply(gain, innovation);
         for (int index = 0; index < STATE_SIZE; index++) {
             updatedState[index] += correction[index];
         }
 
-        double[][] identityMinusKh = identity(STATE_SIZE);
+        double[][] identityMinusKh = LinearAlgebra.identity(STATE_SIZE);
         for (int row = 0; row < STATE_SIZE; row++) {
             for (int column = 0; column < MEASUREMENT_SIZE; column++) {
                 identityMinusKh[row][column] -= gain[row][column];
             }
         }
-        double[][] updatedCovariance = add(
-                multiply(multiply(identityMinusKh, prediction.covariance()),
-                        transpose(identityMinusKh)),
-                multiply(multiply(gain, measurementCovariance), transpose(gain)));
-        symmetrize(updatedCovariance);
+        double[][] updatedCovariance = LinearAlgebra.add(
+                LinearAlgebra.multiply(
+                        LinearAlgebra.multiply(identityMinusKh, prediction.covariance()),
+                        LinearAlgebra.transpose(identityMinusKh)),
+                LinearAlgebra.multiply(
+                        LinearAlgebra.multiply(gain, measurementCovariance),
+                        LinearAlgebra.transpose(gain)));
+        updatedCovariance = LinearAlgebra.symmetrized(updatedCovariance, 1.0e-12);
         return new PropagatedState(updatedState, updatedCovariance);
     }
 
@@ -1037,150 +1037,6 @@ public final class TrackStitchingAnalyzer {
 
     private static double clamp(double value, double minimum, double maximum) {
         return Math.max(minimum, Math.min(maximum, value));
-    }
-
-    private static double[][] identity(int size) {
-        double[][] result = new double[size][size];
-        for (int index = 0; index < size; index++) {
-            result[index][index] = 1.0;
-        }
-        return result;
-    }
-
-    private static double[] multiply(double[][] matrix, double[] vector) {
-        double[] result = new double[matrix.length];
-        for (int row = 0; row < matrix.length; row++) {
-            for (int column = 0; column < vector.length; column++) {
-                result[row] += matrix[row][column] * vector[column];
-            }
-        }
-        return result;
-    }
-
-    private static double[][] multiply(double[][] left, double[][] right) {
-        double[][] result = new double[left.length][right[0].length];
-        for (int row = 0; row < left.length; row++) {
-            for (int inner = 0; inner < right.length; inner++) {
-                if (left[row][inner] == 0.0) {
-                    continue;
-                }
-                for (int column = 0; column < right[0].length; column++) {
-                    result[row][column] += left[row][inner] * right[inner][column];
-                }
-            }
-        }
-        return result;
-    }
-
-    private static double[][] transpose(double[][] matrix) {
-        double[][] result = new double[matrix[0].length][matrix.length];
-        for (int row = 0; row < matrix.length; row++) {
-            for (int column = 0; column < matrix[row].length; column++) {
-                result[column][row] = matrix[row][column];
-            }
-        }
-        return result;
-    }
-
-    private static double[][] add(double[][] left, double[][] right) {
-        double[][] result = new double[left.length][left[0].length];
-        for (int row = 0; row < left.length; row++) {
-            for (int column = 0; column < left[row].length; column++) {
-                result[row][column] = left[row][column] + right[row][column];
-            }
-        }
-        return result;
-    }
-
-    private static double[][] inverseSpd(double[][] matrix) {
-        CholeskyResult cholesky = cholesky(matrix);
-        double[][] inverse = new double[matrix.length][matrix.length];
-        for (int column = 0; column < matrix.length; column++) {
-            double[] basis = new double[matrix.length];
-            basis[column] = 1.0;
-            double[] solution = solveCholesky(cholesky.lower(), basis);
-            for (int row = 0; row < matrix.length; row++) {
-                inverse[row][column] = solution[row];
-            }
-        }
-        symmetrize(inverse);
-        return inverse;
-    }
-
-    private static void symmetrize(double[][] matrix) {
-        for (int row = 0; row < matrix.length; row++) {
-            matrix[row][row] = Math.max(matrix[row][row], 1.0e-12);
-            for (int column = row + 1; column < matrix.length; column++) {
-                double average = (matrix[row][column] + matrix[column][row]) / 2.0;
-                matrix[row][column] = average;
-                matrix[column][row] = average;
-            }
-        }
-    }
-
-    private static CholeskyResult cholesky(double[][] source) {
-        double jitter = 1.0e-9;
-        for (int attempt = 0; attempt < 8; attempt++) {
-            double[][] lower = new double[source.length][source.length];
-            boolean valid = true;
-            for (int row = 0; row < source.length && valid; row++) {
-                for (int column = 0; column <= row; column++) {
-                    double sum = source[row][column];
-                    if (row == column) {
-                        sum += jitter;
-                    }
-                    for (int inner = 0; inner < column; inner++) {
-                        sum -= lower[row][inner] * lower[column][inner];
-                    }
-                    if (row == column) {
-                        if (!(sum > 0.0) || !Double.isFinite(sum)) {
-                            valid = false;
-                            break;
-                        }
-                        lower[row][column] = Math.sqrt(sum);
-                    } else {
-                        lower[row][column] = sum / lower[column][column];
-                    }
-                }
-            }
-            if (valid) {
-                double logDeterminant = 0.0;
-                for (int index = 0; index < source.length; index++) {
-                    logDeterminant += 2.0 * Math.log(lower[index][index]);
-                }
-                return new CholeskyResult(lower, logDeterminant);
-            }
-            jitter *= 100.0;
-        }
-        throw new IllegalArgumentException("Innovation covariance is not positive definite");
-    }
-
-    private static double[] solveCholesky(double[][] lower, double[] rightHandSide) {
-        double[] forward = new double[rightHandSide.length];
-        for (int row = 0; row < lower.length; row++) {
-            double value = rightHandSide[row];
-            for (int column = 0; column < row; column++) {
-                value -= lower[row][column] * forward[column];
-            }
-            forward[row] = value / lower[row][row];
-        }
-        double[] result = new double[rightHandSide.length];
-        for (int row = lower.length - 1; row >= 0; row--) {
-            double value = forward[row];
-            for (int column = row + 1; column < lower.length; column++) {
-                value -= lower[column][row] * result[column];
-            }
-            result[row] = value / lower[row][row];
-        }
-        return result;
-    }
-
-    private static double dot(double[] left, double[] right) {
-        double result = 0.0;
-        for (int index = 0; index < left.length; index++) {
-            result += left[index] * right[index];
-        }
-        return result;
     }
 
     private static double[] copyVector(double[] source, int size) {
@@ -2031,6 +1887,4 @@ public final class TrackStitchingAnalyzer {
         }
     }
 
-    private record CholeskyResult(double[][] lower, double logDeterminant) {
-    }
 }

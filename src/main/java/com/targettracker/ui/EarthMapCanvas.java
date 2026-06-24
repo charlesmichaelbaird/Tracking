@@ -1,6 +1,7 @@
 package com.targettracker.ui;
 
 import com.targettracker.analysis.TrackStitchingAnalyzer;
+import com.targettracker.math.LinearAlgebra;
 import com.targettracker.model.BlackoutRegion;
 import com.targettracker.model.EcefPoint;
 import com.targettracker.model.GeodeticPoint;
@@ -985,13 +986,7 @@ final class EarthMapCanvas extends JPanel {
             double[] left,
             double[][] covariance,
             double[] right) {
-        double value = 0.0;
-        for (int row = 0; row < 3; row++) {
-            for (int column = 0; column < 3; column++) {
-                value += left[row] * covariance[row][column] * right[column];
-            }
-        }
-        return value;
+        return LinearAlgebra.bilinearForm(left, covariance, right);
     }
 
     private void drawSegmentPreview(Graphics2D g) {

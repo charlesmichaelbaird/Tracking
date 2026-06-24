@@ -1,5 +1,6 @@
 package com.targettracker.tracking;
 
+import com.targettracker.math.LinearAlgebra;
 import com.targettracker.model.EcefPoint;
 import com.targettracker.model.TargetMeasurement;
 
@@ -253,6 +254,7 @@ public final class ImmTracker {
                         LinearAlgebra.multiply(transition, state.covariance()),
                         LinearAlgebra.transpose(transition)),
                 processCovariance(model, dt, processNoise));
+        covariance = LinearAlgebra.symmetrized(covariance, 1.0e-12);
         return new ModelState(
                 LinearAlgebra.multiply(transition, state.mean()), covariance);
     }
@@ -295,6 +297,7 @@ public final class ImmTracker {
                 LinearAlgebra.multiply(
                         LinearAlgebra.multiply(gain, measurementCovariance),
                         LinearAlgebra.transpose(gain)));
+        updatedCovariance = LinearAlgebra.symmetrized(updatedCovariance, 1.0e-12);
         double squaredDistance = LinearAlgebra.quadraticForm(residual, inverse.inverse());
         double logLikelihood = -0.5
                 * (squaredDistance + inverse.logDeterminant() + MEASUREMENT_SIZE * LOG_TWO_PI);
