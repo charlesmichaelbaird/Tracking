@@ -10,6 +10,7 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JToggleButton;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -22,6 +23,7 @@ import java.util.function.Supplier;
 
 /** Combined target controls and editable velocity/altitude profiles. */
 final class MotionTelemetryPanel extends JPanel {
+    private final ScenarioModel model;
     private final TargetInspectorPanel inspector;
     private final JButton newTargetButton = fullWidthButton("New target");
     private final JButton removeTargetButton = fullWidthButton("Remove target");
@@ -31,6 +33,7 @@ final class MotionTelemetryPanel extends JPanel {
     private final JButton clearPathButton = fullWidthButton("Clear path");
     private final JButton smoothPathButton = fullWidthButton("Smooth");
     private final JButton undoSmoothButton = fullWidthButton("Undo smooth");
+    private final JToggleButton extrapolatePathButton = fullWidthToggleButton("Extrapolate");
     private final JLabel lockLabel = new JLabel("Manual target editing enabled");
     private final JLabel profileTargetLabel = new JLabel();
     private final ProfileEditor velocityEditor;
@@ -50,8 +53,10 @@ final class MotionTelemetryPanel extends JPanel {
             Runnable onClearPath,
             Runnable onSmoothPath,
             Runnable onUndoSmoothPath,
+            Runnable onToggleExtrapolatePath,
             Runnable onRemoveTarget,
             Consumer<Double> onProfileCursorChanged) {
+        this.model = model;
         this.editingLocked = editingLocked;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(new Color(246, 248, 251));
@@ -67,6 +72,7 @@ final class MotionTelemetryPanel extends JPanel {
                 onClearPath,
                 onSmoothPath,
                 onUndoSmoothPath,
+                onToggleExtrapolatePath,
                 onRemoveTarget));
         add(Box.createVerticalStrut(8));
 
@@ -106,6 +112,7 @@ final class MotionTelemetryPanel extends JPanel {
             Runnable onClearPath,
             Runnable onSmoothPath,
             Runnable onUndoSmoothPath,
+            Runnable onToggleExtrapolatePath,
             Runnable onRemoveTarget) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
@@ -114,7 +121,7 @@ final class MotionTelemetryPanel extends JPanel {
                 BorderFactory.createEmptyBorder(0, 12, 0, 12),
                 BorderFactory.createLineBorder(new Color(214, 220, 227))));
         panel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 246));
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 288));
 
         JPanel inner = new JPanel();
         inner.setOpaque(false);
@@ -170,6 +177,14 @@ final class MotionTelemetryPanel extends JPanel {
         inner.add(editGrid);
         inner.add(Box.createVerticalStrut(10));
 
+        extrapolatePathButton.setToolTipText(
+                "Extend or restore the selected path to match the scenario length");
+        extrapolatePathButton.addActionListener(event -> onToggleExtrapolatePath.run());
+        extrapolatePathButton.setAlignmentX(LEFT_ALIGNMENT);
+        extrapolatePathButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        inner.add(extrapolatePathButton);
+        inner.add(Box.createVerticalStrut(10));
+
         lockLabel.setForeground(new Color(44, 112, 62));
         lockLabel.setAlignmentX(LEFT_ALIGNMENT);
         inner.add(lockLabel);
@@ -203,6 +218,7 @@ final class MotionTelemetryPanel extends JPanel {
         undoSmoothButton.setEnabled(enabled && !presetScenarioActive
                 && selectedTarget() != null
                 && selectedTarget().canUndoSmoothing());
+        refreshExtrapolateButton(enabled && !presetScenarioActive);
         if (presetScenarioActive) {
             lockLabel.setText("Target structure locked by preset scenario");
             lockLabel.setForeground(new Color(132, 74, 17));
@@ -227,6 +243,19 @@ final class MotionTelemetryPanel extends JPanel {
         undoSmoothButton.setEnabled(!editingLocked.getAsBoolean()
                 && target != null
                 && target.canUndoSmoothing());
+        refreshExtrapolateButton(!editingLocked.getAsBoolean());
+    }
+
+    private void refreshExtrapolateButton(boolean editingEnabled) {
+        TargetTrajectory target = selectedTarget();
+        boolean extrapolated = target != null && target.extrapolatedToScenarioLength();
+        boolean canExtrapolate = target != null
+                && model.hasScenarioLength()
+                && target.canExtrapolateTo(model.explicitScenarioLengthSeconds());
+        extrapolatePathButton.setSelected(extrapolated);
+        extrapolatePathButton.setText(extrapolated ? "Remove extrapolation" : "Extrapolate");
+        extrapolatePathButton.setEnabled(editingEnabled && target != null
+                && (extrapolated || canExtrapolate));
     }
 
     private static JPanel wrapChart(ProfileEditor editor) {
@@ -244,6 +273,13 @@ final class MotionTelemetryPanel extends JPanel {
 
     private static JButton fullWidthButton(String text) {
         JButton button = new JButton(text);
+        button.setAlignmentX(LEFT_ALIGNMENT);
+        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        return button;
+    }
+
+    private static JToggleButton fullWidthToggleButton(String text) {
+        JToggleButton button = new JToggleButton(text);
         button.setAlignmentX(LEFT_ALIGNMENT);
         button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
         return button;

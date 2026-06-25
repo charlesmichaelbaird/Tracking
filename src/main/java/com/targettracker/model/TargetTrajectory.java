@@ -11,9 +11,11 @@ public final class TargetTrajectory {
     private final List<EcefPoint> path = new ArrayList<>();
     private final List<Double> segmentLengthsMeters = new ArrayList<>();
     private final List<EcefPoint> smoothingUndoPath = new ArrayList<>();
+    private final List<EcefPoint> extrapolationBasePath = new ArrayList<>();
     private final ScalarProfile velocityProfile = new ScalarProfile(0.0, 600.0, 200.0);
     private final ScalarProfile altitudeProfile = new ScalarProfile(0.0, 20_000.0, 1_000.0);
     private double surfaceLengthMeters;
+    private boolean extrapolatedToScenarioLength;
 
     public TargetTrajectory(String id, Color color) {
         this.id = id;
@@ -36,10 +38,16 @@ public final class TargetTrajectory {
         path.clear();
         segmentLengthsMeters.clear();
         smoothingUndoPath.clear();
+        clearExtrapolationState();
         surfaceLengthMeters = 0.0;
     }
 
     public void addPathPoint(EcefPoint point) {
+        clearExtrapolationState();
+        addNormalizedPathPoint(point);
+    }
+
+    private void addNormalizedPathPoint(EcefPoint point) {
         GeodeticPoint surfacePoint = Wgs84.toGeodetic(point).withAltitude(0.0);
         EcefPoint normalizedPoint = Wgs84.toEcef(surfacePoint);
         if (path.isEmpty()) {
@@ -78,6 +86,67 @@ public final class TargetTrajectory {
                     0.0)));
         }
         replacePath(translated, true);
+        return true;
+    }
+
+    public boolean extrapolatedToScenarioLength() {
+        return extrapolatedToScenarioLength;
+    }
+
+    public boolean canExtrapolateTo(double scenarioLengthSeconds) {
+        return path.size() >= 2
+                && Double.isFinite(scenarioLengthSeconds)
+                && scenarioLengthSeconds > durationSeconds() + 1.0e-6
+                && velocityProfile.average() > 1.0e-9;
+    }
+
+    public boolean extrapolateToDuration(double scenarioLengthSeconds) {
+        if (!Double.isFinite(scenarioLengthSeconds) || scenarioLengthSeconds <= 0.0) {
+            return false;
+        }
+        List<EcefPoint> basePath = extrapolatedToScenarioLength
+                ? List.copyOf(extrapolationBasePath)
+                : List.copyOf(path);
+        replacePathInternal(basePath, false, false);
+        double wantedLength = velocityProfile.average() * scenarioLengthSeconds;
+        double extraLength = wantedLength - surfaceLengthMeters();
+        if (path.size() < 2 || extraLength <= 1.0) {
+            clearExtrapolationState();
+            return false;
+        }
+
+        GeodeticPoint previous = Wgs84.toGeodetic(path.get(path.size() - 2));
+        GeodeticPoint last = Wgs84.toGeodetic(path.get(path.size() - 1));
+        Wgs84Geodesic.GeodesicData finalLeg = Wgs84Geodesic.inverse(previous, last);
+        if (finalLeg.distanceMeters() <= 1.0) {
+            clearExtrapolationState();
+            return false;
+        }
+
+        List<EcefPoint> extended = new ArrayList<>(path);
+        int samples = Math.max(1, Math.min(96, (int) Math.ceil(extraLength / 20_000.0)));
+        for (int sample = 1; sample <= samples; sample++) {
+            double distance = extraLength * sample / samples;
+            extended.add(Wgs84.toEcef(Wgs84Geodesic.direct(
+                    last,
+                    finalLeg.initialBearingRadians(),
+                    distance,
+                    0.0)));
+        }
+        replacePathInternal(extended, false, false);
+        extrapolationBasePath.clear();
+        extrapolationBasePath.addAll(basePath);
+        extrapolatedToScenarioLength = true;
+        return true;
+    }
+
+    public boolean removeExtrapolation() {
+        if (!extrapolatedToScenarioLength) {
+            return false;
+        }
+        List<EcefPoint> restored = List.copyOf(extrapolationBasePath);
+        replacePathInternal(restored, false, false);
+        clearExtrapolationState();
         return true;
     }
 
@@ -214,15 +283,30 @@ public final class TargetTrajectory {
     }
 
     private void replacePath(List<EcefPoint> points, boolean clearSmoothingUndo) {
+        replacePathInternal(points, clearSmoothingUndo, true);
+    }
+
+    private void replacePathInternal(
+            List<EcefPoint> points,
+            boolean clearSmoothingUndo,
+            boolean clearExtrapolation) {
         path.clear();
         segmentLengthsMeters.clear();
         surfaceLengthMeters = 0.0;
         if (clearSmoothingUndo) {
             smoothingUndoPath.clear();
         }
-        for (EcefPoint point : points) {
-            addPathPoint(point);
+        if (clearExtrapolation) {
+            clearExtrapolationState();
         }
+        for (EcefPoint point : points) {
+            addNormalizedPathPoint(point);
+        }
+    }
+
+    private void clearExtrapolationState() {
+        extrapolationBasePath.clear();
+        extrapolatedToScenarioLength = false;
     }
 
     @Override

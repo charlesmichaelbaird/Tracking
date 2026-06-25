@@ -125,6 +125,8 @@ public final class EarthMapCanvasSmokeTest {
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.CIRCLE);
         click(canvas, 420, 280);
         click(canvas, 480, 280);
+        click(canvas, 480, 280);
+        click(canvas, 420, 220);
         if (target.path().size() < 40) {
             throw new AssertionError("Circle drawing should create a sampled closed trajectory");
         }
@@ -132,6 +134,8 @@ public final class EarthMapCanvasSmokeTest {
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.RACETRACK);
         click(canvas, 420, 280);
         click(canvas, 520, 280);
+        click(canvas, 420, 255);
+        click(canvas, 520, 255);
         if (target.path().size() < 40) {
             throw new AssertionError("Racetrack drawing should create a sampled loop trajectory");
         }

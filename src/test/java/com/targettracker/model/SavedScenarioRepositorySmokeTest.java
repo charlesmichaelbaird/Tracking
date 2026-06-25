@@ -19,6 +19,7 @@ public final class SavedScenarioRepositorySmokeTest {
         target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.1, -74.9, 0.0)));
         target.velocityProfile().setSample(20, 123.0);
         target.altitudeProfile().setSample(20, 4_321.0);
+        model.setScenarioLengthSeconds(420.0);
         model.addBlackoutRegion(new BlackoutRegion(
                 "BLK-001",
                 new GeodeticPoint(40.05, -74.95, 0.0),
@@ -35,7 +36,9 @@ public final class SavedScenarioRepositorySmokeTest {
         repository.loadInto(listed.get(0), restored);
         if (restored.targets().size() != 1
                 || restored.targets().get(0).path().size() != 2
-                || restored.blackoutRegions().size() != 1) {
+                || restored.blackoutRegions().size() != 1
+                || !restored.hasScenarioLength()
+                || Math.abs(restored.durationSeconds() - 420.0) > 1.0e-9) {
             throw new AssertionError("Saved scenario assets were not restored");
         }
         if (Math.abs(restored.targets().get(0).velocityProfile().sample(20) - 123.0) > 1.0e-9

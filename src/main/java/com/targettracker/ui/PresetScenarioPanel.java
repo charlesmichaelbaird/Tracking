@@ -30,6 +30,8 @@ final class PresetScenarioPanel extends JPanel {
         void selectUserGeneratedMode();
 
         void saveUserScenario(String scenarioName);
+
+        void setUserScenarioLength(Double durationSeconds);
     }
 
     private final Component dialogParent;
@@ -39,7 +41,7 @@ final class PresetScenarioPanel extends JPanel {
     private final JTextField longitudeField = field("-74.0000", 8);
     private final JTextField speedField = field("100", 5);
     private final JTextField altitudeField = field("1000", 6);
-    private final JTextField durationField = field("05:00", 5);
+    private final JTextField durationField = field("", 5);
     private final JTextField saveNameField = field("My scenario", 28);
     private final JButton applyButton = new JButton("Apply preset");
     private final JButton saveButton = new JButton("Save user scenario");
@@ -91,12 +93,12 @@ final class PresetScenarioPanel extends JPanel {
         add(labeled("Altitude (m)", altitudeField,
                 "WGS-84 ellipsoidal altitude"));
         add(Box.createVerticalStrut(9));
-        add(labeled("Scenario time (mm:ss)", durationField,
-                "Duration in mm:ss; minimum 05:00"));
+        add(labeled("Scenario length (mm:ss)", durationField,
+                "Manual scenarios may leave this blank; presets require at least 05:00"));
         add(Box.createVerticalStrut(16));
 
-        applyButton.setEnabled(false);
-        applyButton.addActionListener(event -> applySelectedPreset());
+        configureScenarioActionButton();
+        applyButton.addActionListener(event -> applyScenarioAction());
         applyButton.setAlignmentX(LEFT_ALIGNMENT);
         applyButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
         add(applyButton);
@@ -112,7 +114,7 @@ final class PresetScenarioPanel extends JPanel {
         longitudeField.addActionListener(event -> applySelectedPreset());
         speedField.addActionListener(event -> applySelectedPreset());
         altitudeField.addActionListener(event -> applySelectedPreset());
-        durationField.addActionListener(event -> applySelectedPreset());
+        durationField.addActionListener(event -> applyScenarioAction());
     }
 
     private void presetSelectionChanged() {
@@ -121,7 +123,8 @@ final class PresetScenarioPanel extends JPanel {
         }
         Object selected = presetSelector.getSelectedItem();
         if (selected instanceof SavedScenarioDefinition scenario) {
-            applyButton.setEnabled(false);
+            durationField.setText(formatOptionalDuration(scenario.scenarioLengthSeconds()));
+            configureScenarioActionButton();
             modeLabel.setText("Saved user scenario");
             modeLabel.setForeground(new Color(44, 112, 62));
             listener.loadSavedScenario(scenario);
@@ -129,15 +132,27 @@ final class PresetScenarioPanel extends JPanel {
         }
         ScenarioPreset preset = selected instanceof ScenarioPreset value ? value : null;
         if (preset == null || preset.isUserGenerated()) {
-            applyButton.setEnabled(false);
+            durationField.setText("");
+            configureScenarioActionButton();
             modeLabel.setText("Manual editing");
             modeLabel.setForeground(new Color(91, 103, 115));
             listener.selectUserGeneratedMode();
+            listener.setUserScenarioLength(null);
             return;
         }
         durationField.setText(formatDuration(preset.defaultDurationSeconds()));
-        applyButton.setEnabled(generationEnabled);
+        configureScenarioActionButton();
         applySelectedPreset();
+    }
+
+    private void applyScenarioAction() {
+        Object selected = presetSelector.getSelectedItem();
+        ScenarioPreset preset = selected instanceof ScenarioPreset value ? value : null;
+        if (preset != null && !preset.isUserGenerated()) {
+            applySelectedPreset();
+            return;
+        }
+        commitUserScenarioLength();
     }
 
     private void applySelectedPreset() {
@@ -168,6 +183,28 @@ final class PresetScenarioPanel extends JPanel {
         }
     }
 
+    private void commitUserScenarioLength() {
+        if (!generationEnabled) {
+            return;
+        }
+        try {
+            Double durationSeconds = parseOptionalDuration(durationField.getText());
+            listener.setUserScenarioLength(durationSeconds);
+            if (durationSeconds == null) {
+                modeLabel.setText("Manual editing");
+            } else {
+                modeLabel.setText("Manual length set");
+            }
+            modeLabel.setForeground(new Color(44, 112, 62));
+        } catch (IllegalArgumentException exception) {
+            JOptionPane.showMessageDialog(
+                    dialogParent,
+                    exception.getMessage(),
+                    "Invalid scenario length",
+                    JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
     void setGenerationEnabled(boolean enabled) {
         generationEnabled = enabled;
         presetSelector.setEnabled(enabled);
@@ -180,7 +217,7 @@ final class PresetScenarioPanel extends JPanel {
         saveButton.setEnabled(enabled);
         Object selected = presetSelector.getSelectedItem();
         ScenarioPreset preset = selected instanceof ScenarioPreset value ? value : null;
-        applyButton.setEnabled(enabled && preset != null && !preset.isUserGenerated());
+        configureScenarioActionButton();
         if (!enabled) {
             modeLabel.setText("Disabled in Analysis Mode");
             modeLabel.setForeground(new Color(132, 74, 17));
@@ -194,6 +231,14 @@ final class PresetScenarioPanel extends JPanel {
             modeLabel.setText("Preset selected — press Apply");
             modeLabel.setForeground(new Color(132, 74, 17));
         }
+    }
+
+    private void configureScenarioActionButton() {
+        Object selected = presetSelector.getSelectedItem();
+        ScenarioPreset preset = selected instanceof ScenarioPreset value ? value : null;
+        boolean appliesPreset = preset != null && !preset.isUserGenerated();
+        applyButton.setText(appliesPreset ? "Apply preset" : "Set length");
+        applyButton.setEnabled(generationEnabled);
     }
 
     void setSavedScenarios(List<SavedScenarioDefinition> scenarios) {
@@ -303,7 +348,27 @@ final class PresetScenarioPanel extends JPanel {
         }
     }
 
+    private static Double parseOptionalDuration(String text) {
+        if (text == null || text.trim().isBlank()) {
+            return null;
+        }
+        int seconds = parseDuration(text);
+        if (seconds <= 0) {
+            throw new IllegalArgumentException("Scenario length must be greater than 00:00");
+        }
+        return (double) seconds;
+    }
+
     private static String formatDuration(int durationSeconds) {
         return "%02d:%02d".formatted(durationSeconds / 60, durationSeconds % 60);
+    }
+
+    private static String formatOptionalDuration(Double durationSeconds) {
+        if (durationSeconds == null || !Double.isFinite(durationSeconds)
+                || durationSeconds <= 0.0) {
+            return "";
+        }
+        int rounded = (int) Math.round(durationSeconds);
+        return formatDuration(rounded);
     }
 }
