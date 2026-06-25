@@ -433,6 +433,11 @@ public final class TrackStitchingAnalysisExporter {
                     + "state/covariance, 3D position innovation, 3x3 position innovation "
                     + "covariance, Mahalanobis distance, NLL, NLLR values, and "
                     + "learned-density query values.\n");
+            writer.write("  Bank states are independently propagated from fixed updated anchors: "
+                    + "the old track's last measurement update and the new track's latest "
+                    + "measurement update available at the candidate event. Stitch-gap "
+                    + "propagation uses the tracker-style constant-velocity/DCWNA transition "
+                    + "with the signed interval to each bank time.\n");
             writer.write("- `spatial_density/spatial_density_history.csv`: learned extraneous-track "
                     + "birth density over the course of the scenario. The learned estimator is an "
                     + "online evidence/exposure grid. Each cell stores birth evidence and "

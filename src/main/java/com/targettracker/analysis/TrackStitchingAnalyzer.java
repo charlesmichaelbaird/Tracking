@@ -4,6 +4,7 @@ import com.targettracker.math.LinearAlgebra;
 import com.targettracker.recording.GroundTruthRecord;
 import com.targettracker.recording.RecordedMeasurement;
 import com.targettracker.recording.RecordedScenario;
+import com.targettracker.tracking.ImmParameters;
 import com.targettracker.tracking.TrackRecord;
 
 import java.util.ArrayList;
@@ -20,7 +21,8 @@ public final class TrackStitchingAnalyzer {
     private static final int MEASUREMENT_SIZE = 6;
     private static final double EPSILON = 1.0e-8;
     private static final double LIVE_SAMPLE_TOLERANCE_SECONDS = 1.01;
-    private static final double PROCESS_NOISE_SPECTRAL_DENSITY = 1.0;
+    private static final double STITCHING_PROCESS_NOISE =
+            ImmParameters.defaults().cvProcessNoise();
     private static final double MINIMUM_LAMBDA_EX = 1.0e-300;
     private static final double CUBIC_METERS_PER_CUBIC_KILOMETER = 1.0e9;
     private static final double MINIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e-12;
@@ -106,7 +108,6 @@ public final class TrackStitchingAnalyzer {
                                 oldSegment,
                                 newSegment,
                                 truth,
-                                measurementsByTrack.getOrDefault(newSegment.trackId(), List.of()),
                                 configuration,
                                 learnedBirthDensityField);
                         pairs.add(pairDiagnostics.result());
@@ -146,7 +147,6 @@ public final class TrackStitchingAnalyzer {
             Segment oldSegment,
             Segment newSegment,
             Map<String, List<GroundTruthRecord>> truth,
-            List<RecordedMeasurement> newTrackMeasurements,
             Configuration configuration,
             BirthDensityField learnedBirthDensityField) {
         TrackRecord oldAnchor = oldSegment.lastUpdateRecord();
@@ -169,7 +169,6 @@ public final class TrackStitchingAnalyzer {
                     newSegment.trackId(),
                     oldAnchor,
                     newSegment,
-                    newTrackMeasurements,
                     time,
                     configuration,
                     learnedBirthDensityField);
@@ -192,17 +191,17 @@ public final class TrackStitchingAnalyzer {
 
         List<JoinEvaluation> joinEvaluations = new ArrayList<>();
         JoinEvaluation simpleEvaluation = joinEvaluation(
-                "Simple midpoint", oldAnchor, newSegment, newTrackMeasurements,
+                "Simple midpoint", oldAnchor, newSegment,
                 simpleTime, configuration, learnedBirthDensityField);
         JoinEvaluation kinematicEvaluation = joinEvaluation(
-                "Kinematic midpoint", oldAnchor, newSegment, newTrackMeasurements,
+                "Kinematic midpoint", oldAnchor, newSegment,
                 kinematicTime, configuration, learnedBirthDensityField);
         JoinEvaluation statisticalEvaluation = joinEvaluation(
-                "Mahalanobis bank", oldAnchor, newSegment, newTrackMeasurements,
+                "Mahalanobis bank", oldAnchor, newSegment,
                 statisticalTime, configuration, learnedBirthDensityField);
         JoinEvaluation actualEvaluation = Double.isFinite(actualTime)
                 ? joinEvaluation(
-                        "Truth RMS", oldAnchor, newSegment, newTrackMeasurements,
+                        "Truth RMS", oldAnchor, newSegment,
                         actualTime, configuration, learnedBirthDensityField)
                 : JoinEvaluation.nan("Truth RMS");
         joinEvaluations.add(simpleEvaluation);
@@ -502,12 +501,11 @@ public final class TrackStitchingAnalyzer {
             String newTrackId,
             TrackRecord oldAnchor,
             Segment newSegment,
-            List<RecordedMeasurement> newTrackMeasurements,
             double timeSeconds,
             Configuration configuration,
             BirthDensityField learnedBirthDensityField) {
         PropagatedState oldState = predictOld(oldAnchor, timeSeconds);
-        PropagatedState newState = retrodictNew(newSegment, newTrackMeasurements, timeSeconds);
+        PropagatedState newState = retrodictNew(newSegment, timeSeconds);
         InnovationScore score = innovationScore(oldState, newState);
         double nll = canonicalNegativeLogLikelihood(score);
         double innovationVolume = innovationVolumeCubicKilometers(score.innovationCovariance());
@@ -548,12 +546,11 @@ public final class TrackStitchingAnalyzer {
             String variant,
             TrackRecord oldAnchor,
             Segment newSegment,
-            List<RecordedMeasurement> newTrackMeasurements,
             double timeSeconds,
             Configuration configuration,
             BirthDensityField learnedBirthDensityField) {
         PropagatedState oldState = predictOld(oldAnchor, timeSeconds);
-        PropagatedState newState = retrodictNew(newSegment, newTrackMeasurements, timeSeconds);
+        PropagatedState newState = retrodictNew(newSegment, timeSeconds);
         InnovationScore score = innovationScore(oldState, newState);
         double nll = canonicalNegativeLogLikelihood(score);
         double innovationVolume = innovationVolumeCubicKilometers(score.innovationCovariance());
@@ -619,15 +616,19 @@ public final class TrackStitchingAnalyzer {
     static InnovationScore innovationScore(
             PropagatedState oldState,
             PropagatedState newState) {
+        double[] oldMean = oldState.state();
+        double[] newMean = newState.state();
+        double[][] oldCovariance = oldState.covariance();
+        double[][] newCovariance = newState.covariance();
         double[] innovation = new double[POSITION_SIZE];
         for (int index = 0; index < POSITION_SIZE; index++) {
-            innovation[index] = oldState.state()[index] - newState.state()[index];
+            innovation[index] = oldMean[index] - newMean[index];
         }
         double[][] covariance = new double[POSITION_SIZE][POSITION_SIZE];
         for (int row = 0; row < POSITION_SIZE; row++) {
             for (int column = 0; column < POSITION_SIZE; column++) {
-                covariance[row][column] = oldState.covariance()[row][column]
-                        + newState.covariance()[row][column];
+                covariance[row][column] = oldCovariance[row][column]
+                        + newCovariance[row][column];
             }
         }
         LinearAlgebra.GaussianLikelihood likelihood =
@@ -649,24 +650,12 @@ public final class TrackStitchingAnalyzer {
 
     static PropagatedState retrodictNew(
             Segment newSegment,
-            List<RecordedMeasurement> measurements,
             double wantedTime) {
         TrackRecord futureRecord = newSegment.lastUpdateRecord();
-        PropagatedState state = new PropagatedState(
-                futureRecord.state(), futureRecord.covariance());
-        double currentTime = futureRecord.timeSeconds();
-        double futureTime = currentTime;
-        List<RecordedMeasurement> descending = measurements.stream()
-                .filter(measurement -> measurement.timeSeconds() < futureTime - EPSILON
-                        && measurement.timeSeconds() > wantedTime + EPSILON)
-                .sorted(Comparator.comparingDouble(RecordedMeasurement::timeSeconds).reversed())
-                .toList();
-        for (RecordedMeasurement measurement : descending) {
-            state = propagate(state, currentTime, measurement.timeSeconds());
-            state = measurementUpdate(state, measurement);
-            currentTime = measurement.timeSeconds();
-        }
-        return propagate(state, currentTime, wantedTime);
+        return propagate(
+                new PropagatedState(futureRecord.state(), futureRecord.covariance()),
+                futureRecord.timeSeconds(),
+                wantedTime);
     }
 
     static PropagatedState propagate(
@@ -674,92 +663,50 @@ public final class TrackStitchingAnalyzer {
             double sourceTime,
             double wantedTime) {
         double dt = wantedTime - sourceTime;
-        double[][] transition = LinearAlgebra.identity(STATE_SIZE);
-        for (int axis = 0; axis < 3; axis++) {
-            transition[axis][axis + 3] = dt;
-            transition[axis][axis + 6] = 0.5 * dt * dt;
-            transition[axis + 3][axis + 6] = dt;
-        }
-        double positiveDt = Math.abs(dt);
-        double[] propagatedState = LinearAlgebra.multiply(transition, source.state());
+        double[] sourceState = source.state();
+        double[][] sourceCovariance = source.covariance();
+        double[][] transition = stitchTransition(dt);
+        double[] propagatedState = LinearAlgebra.multiply(transition, sourceState);
         double[][] propagatedCovariance = LinearAlgebra.add(
                 LinearAlgebra.multiply(
-                        LinearAlgebra.multiply(transition, source.covariance()),
+                        LinearAlgebra.multiply(transition, sourceCovariance),
                         LinearAlgebra.transpose(transition)),
-                processCovariance(positiveDt));
-        double regularization = 1.0e-9 * (1.0 + positiveDt);
-        for (int index = 0; index < STATE_SIZE; index++) {
-            propagatedCovariance[index][index] += regularization;
-        }
-        return new PropagatedState(propagatedState, propagatedCovariance);
+                processCovariance(dt));
+        return new PropagatedState(
+                propagatedState,
+                LinearAlgebra.symmetrized(propagatedCovariance, 1.0e-12));
     }
 
-    private static PropagatedState measurementUpdate(
-            PropagatedState prediction,
-            RecordedMeasurement measurement) {
-        double[] measurementMean = measurement.mean();
-        double[] innovation = new double[MEASUREMENT_SIZE];
-        for (int index = 0; index < MEASUREMENT_SIZE; index++) {
-            innovation[index] = measurementMean[index] - prediction.state()[index];
-        }
-        double[][] innovationCovariance = new double[MEASUREMENT_SIZE][MEASUREMENT_SIZE];
-        double[][] measurementCovariance = measurement.covariance();
-        for (int row = 0; row < MEASUREMENT_SIZE; row++) {
-            for (int column = 0; column < MEASUREMENT_SIZE; column++) {
-                innovationCovariance[row][column] = prediction.covariance()[row][column]
-                        + measurementCovariance[row][column];
-            }
-        }
-        double[][] inverseInnovation = LinearAlgebra.inverseSpd(innovationCovariance).inverse();
-        double[][] crossCovariance = new double[STATE_SIZE][MEASUREMENT_SIZE];
-        for (int row = 0; row < STATE_SIZE; row++) {
-            System.arraycopy(prediction.covariance()[row], 0,
-                    crossCovariance[row], 0, MEASUREMENT_SIZE);
-        }
-        double[][] gain = LinearAlgebra.multiply(crossCovariance, inverseInnovation);
-        double[] updatedState = prediction.state().clone();
-        double[] correction = LinearAlgebra.multiply(gain, innovation);
-        for (int index = 0; index < STATE_SIZE; index++) {
-            updatedState[index] += correction[index];
-        }
-
-        double[][] identityMinusKh = LinearAlgebra.identity(STATE_SIZE);
-        for (int row = 0; row < STATE_SIZE; row++) {
-            for (int column = 0; column < MEASUREMENT_SIZE; column++) {
-                identityMinusKh[row][column] -= gain[row][column];
-            }
-        }
-        double[][] updatedCovariance = LinearAlgebra.add(
-                LinearAlgebra.multiply(
-                        LinearAlgebra.multiply(identityMinusKh, prediction.covariance()),
-                        LinearAlgebra.transpose(identityMinusKh)),
-                LinearAlgebra.multiply(
-                        LinearAlgebra.multiply(gain, measurementCovariance),
-                        LinearAlgebra.transpose(gain)));
-        updatedCovariance = LinearAlgebra.symmetrized(updatedCovariance, 1.0e-12);
-        return new PropagatedState(updatedState, updatedCovariance);
-    }
-
-    private static double[][] processCovariance(double dt) {
-        double[][] covariance = new double[STATE_SIZE][STATE_SIZE];
-        double dt2 = dt * dt;
-        double dt3 = dt2 * dt;
-        double dt4 = dt3 * dt;
-        double dt5 = dt4 * dt;
-        double q = PROCESS_NOISE_SPECTRAL_DENSITY;
+    private static double[][] stitchTransition(double dt) {
+        double[][] transition = LinearAlgebra.identity(STATE_SIZE);
         for (int axis = 0; axis < 3; axis++) {
             int position = axis;
             int velocity = axis + 3;
             int acceleration = axis + 6;
-            covariance[position][position] = q * dt5 / 20.0;
-            covariance[position][velocity] = q * dt4 / 8.0;
-            covariance[position][acceleration] = q * dt3 / 6.0;
+            transition[position][velocity] = dt;
+            transition[acceleration][acceleration] = 0.0;
+        }
+        return transition;
+    }
+
+    private static double[][] processCovariance(double dt) {
+        double[][] covariance = new double[STATE_SIZE][STATE_SIZE];
+        double interval = Math.abs(dt);
+        double interval2 = interval * interval;
+        double interval3 = interval2 * interval;
+        double q = STITCHING_PROCESS_NOISE;
+        double signedPositionVelocity = Math.copySign(
+                q * interval2 / 2.0,
+                dt == 0.0 ? 1.0 : dt);
+        for (int axis = 0; axis < 3; axis++) {
+            int position = axis;
+            int velocity = axis + 3;
+            int acceleration = axis + 6;
+            covariance[position][position] = q * interval3 / 3.0;
+            covariance[position][velocity] = signedPositionVelocity;
             covariance[velocity][position] = covariance[position][velocity];
-            covariance[velocity][velocity] = q * dt3 / 3.0;
-            covariance[velocity][acceleration] = q * dt2 / 2.0;
-            covariance[acceleration][position] = covariance[position][acceleration];
-            covariance[acceleration][velocity] = covariance[velocity][acceleration];
-            covariance[acceleration][acceleration] = q * dt;
+            covariance[velocity][velocity] = q * interval;
+            covariance[acceleration][acceleration] = 1.0e-9;
         }
         return covariance;
     }
@@ -1361,6 +1308,20 @@ public final class TrackStitchingAnalyzer {
     }
 
     record PropagatedState(double[] state, double[][] covariance) {
+        PropagatedState {
+            state = copyVector(state, STATE_SIZE);
+            covariance = copySquare(covariance, STATE_SIZE);
+        }
+
+        @Override
+        public double[] state() {
+            return state.clone();
+        }
+
+        @Override
+        public double[][] covariance() {
+            return copySquare(covariance, STATE_SIZE);
+        }
     }
 
     record InnovationScore(

@@ -3,11 +3,17 @@ package com.targettracker.analysis;
 import com.targettracker.recording.GroundTruthRecord;
 import com.targettracker.recording.RecordedMeasurement;
 import com.targettracker.recording.RecordedScenario;
+import com.targettracker.model.EcefPoint;
+import com.targettracker.model.EcefVector;
+import com.targettracker.model.TargetMeasurement;
+import com.targettracker.tracking.ImmSettings;
+import com.targettracker.tracking.ImmTracker;
 import com.targettracker.tracking.TrackRecord;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /** Deterministic check for stitching event discovery, timing, and NLL costs. */
 public final class TrackStitchingAnalyzerSmokeTest {
@@ -16,7 +22,8 @@ public final class TrackStitchingAnalyzerSmokeTest {
 
     public static void main(String[] args) {
         verifyCanonicalInnovationMetrics();
-        verifyBackwardPropagationAndSmoothing();
+        verifyBackwardPropagationAndAnchors();
+        verifyMidpointCovarianceMatchesTrackerScale();
 
         List<TrackRecord> tracks = new ArrayList<>();
         tracks.add(track("TRK-001", 0.0, 0.0, 8.0, true));
@@ -373,7 +380,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 "position-only Gaussian NLL");
     }
 
-    private static void verifyBackwardPropagationAndSmoothing() {
+    private static void verifyBackwardPropagationAndAnchors() {
         double[] sourceState = {100.0, 0, 0, 10.0, 0, 0, 2.0, 0, 0};
         TrackStitchingAnalyzer.PropagatedState source =
                 new TrackStitchingAnalyzer.PropagatedState(sourceState, new double[9][9]);
@@ -381,16 +388,26 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 TrackStitchingAnalyzer.propagate(source, 5.0, 3.0);
         TrackStitchingAnalyzer.PropagatedState forward =
                 TrackStitchingAnalyzer.propagate(source, 5.0, 7.0);
-        requireClose(84.0, backward.state()[0], "negative-dt position transition");
-        requireClose(6.0, backward.state()[3], "negative-dt velocity transition");
-        requireClose(124.0, forward.state()[0], "positive-dt position transition");
-        for (int row = 0; row < 9; row++) {
-            for (int column = 0; column < 9; column++) {
-                requireClose(forward.covariance()[row][column],
-                        backward.covariance()[row][column],
-                        "positive covariance-growth interval");
-            }
-        }
+        requireClose(80.0, backward.state()[0], "negative-dt position transition");
+        requireClose(10.0, backward.state()[3], "negative-dt velocity transition");
+        requireClose(0.0, backward.state()[6], "stitching propagation ignores latent acceleration");
+        requireClose(120.0, forward.state()[0], "positive-dt position transition");
+        requireClose(16.0 / 3.0, forward.covariance()[0][0],
+                "forward CV process position variance");
+        requireClose(16.0 / 3.0, backward.covariance()[0][0],
+                "backward CV process position variance");
+        requireClose(4.0, forward.covariance()[0][3],
+                "forward CV process position-velocity covariance");
+        requireClose(-4.0, backward.covariance()[0][3],
+                "backward CV process position-velocity covariance uses signed dt");
+        requireClose(4.0, forward.covariance()[3][3],
+                "forward CV process velocity variance");
+        requireClose(4.0, backward.covariance()[3][3],
+                "backward CV process velocity variance");
+        sourceState[0] = -1_000.0;
+        requireClose(80.0,
+                TrackStitchingAnalyzer.propagate(source, 5.0, 3.0).state()[0],
+                "propagated source should be defensively copied");
 
         TrackRecord formation = track("TRK-NEW", 6.0, 60.0, 10.0, true);
         TrackRecord future = track("TRK-NEW", 10.0, 100.0, 10.0, true);
@@ -399,7 +416,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 false, true, formation, future, future, future,
                 List.of(formation, future));
         TrackStitchingAnalyzer.PropagatedState unsmoothed =
-                TrackStitchingAnalyzer.retrodictNew(segment, List.of(), 4.0);
+                TrackStitchingAnalyzer.retrodictNew(segment, 4.0);
         requireClose(40.0, unsmoothed.state()[0],
                 "retrodiction starts at latest updated state and passes spawn time");
 
@@ -410,22 +427,136 @@ public final class TrackStitchingAnalyzerSmokeTest {
                         false, true, formation, future, coastedDisplaySample, coastedDisplaySample,
                         List.of(formation, future, coastedDisplaySample));
         TrackStitchingAnalyzer.PropagatedState coastIgnored =
-                TrackStitchingAnalyzer.retrodictNew(segmentWithCoast, List.of(), 4.0);
+                TrackStitchingAnalyzer.retrodictNew(segmentWithCoast, 4.0);
         requireClose(40.0, coastIgnored.state()[0],
                 "retrodiction should start at latest updated measurement, not a coasted sample");
 
+        TrackStitchingAnalyzer.PropagatedState direct =
+                TrackStitchingAnalyzer.propagate(
+                        new TrackStitchingAnalyzer.PropagatedState(
+                                future.state(), future.covariance()),
+                        future.timeSeconds(),
+                        4.0);
+        requireMatrixClose(direct.covariance(), unsmoothed.covariance(),
+                "retrodiction covariance should be direct from the latest update");
+        verifyBankEvaluationsUseIndependentAnchors();
+    }
+
+    private static void verifyBankEvaluationsUseIndependentAnchors() {
+        TrackStitchingAnalyzer analyzer = new TrackStitchingAnalyzer();
+        TrackRecord oldAnchor = track("TRK-OLD", 0.0, 0.0, 10.0, true);
+        TrackRecord oldCoast = track("TRK-OLD", 8.0, 1_000.0, 10.0, false);
+        TrackRecord newFormation = track("TRK-NEW", 4.0, 40.0, 10.0, true);
+        TrackRecord newMiddleUpdate = track("TRK-NEW", 6.0, 60.0, 10.0, true);
+        TrackRecord newLatestUpdate = track("TRK-NEW", 8.0, 80.0, 10.0, true);
         double[][] measurementCovariance = diagonal(6, 0.01);
-        RecordedMeasurement earlierMeasurement = new RecordedMeasurement(
-                "GOD-SENSOR-001", "TGT-001", "TRK-NEW", 8.0,
-                new double[]{0, 0, 0, 0, 0, 0},
+        RecordedMeasurement distractingMiddleMeasurement = new RecordedMeasurement(
+                "GOD-SENSOR-001", "TGT-001", "TRK-NEW", 6.0,
+                new double[]{-500.0, 0, 0, 0, 0, 0},
                 measurementCovariance, 0.1, 0.1);
-        TrackStitchingAnalyzer.PropagatedState smoothed =
-                TrackStitchingAnalyzer.retrodictNew(
-                        segment, List.of(earlierMeasurement), 4.0);
-        if (Math.abs(smoothed.state()[0] - unsmoothed.state()[0]) < 1.0) {
-            throw new AssertionError(
-                    "Backward measurement update should influence retrodicted state");
+        RecordedMeasurement latestMeasurement = new RecordedMeasurement(
+                "GOD-SENSOR-001", "TGT-001", "TRK-NEW", 8.0,
+                new double[]{80.0, 0, 0, 10, 0, 0},
+                measurementCovariance, 0.1, 0.1);
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("precise_stitching_bank"),
+                "Precise stitching bank",
+                8.0,
+                List.of(oldAnchor, oldCoast, newFormation, newMiddleUpdate, newLatestUpdate),
+                List.of(),
+                List.of(distractingMiddleMeasurement, latestMeasurement));
+        TrackStitchingAnalyzer.AnalysisResult result = analyzer.analyzeDetailed(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(
+                        1.0, 10.0, 0.0, 10.0, false, 1.0));
+        if (result.events().size() != 1) {
+            throw new AssertionError("Expected one stitching event for precise bank test");
         }
+        TrackStitchingAnalyzer.PairDiagnostics diagnostics =
+                diagnostics(result.events().get(0), "TRK-OLD", "TRK-NEW");
+        if (diagnostics.bankEvaluations().size() != 3) {
+            throw new AssertionError("Expected bank samples at 1, 2, and 3 seconds");
+        }
+        for (TrackStitchingAnalyzer.BankEvaluation evaluation
+                : diagnostics.bankEvaluations()) {
+            double time = evaluation.timeSeconds();
+            TrackStitchingAnalyzer.PropagatedState expectedOld =
+                    TrackStitchingAnalyzer.propagate(
+                            new TrackStitchingAnalyzer.PropagatedState(
+                                    oldAnchor.state(), oldAnchor.covariance()),
+                            oldAnchor.timeSeconds(),
+                            time);
+            TrackStitchingAnalyzer.PropagatedState expectedNew =
+                    TrackStitchingAnalyzer.propagate(
+                            new TrackStitchingAnalyzer.PropagatedState(
+                                    newLatestUpdate.state(), newLatestUpdate.covariance()),
+                            newLatestUpdate.timeSeconds(),
+                            time);
+            requireVectorClose(expectedOld.state(), evaluation.oldState(),
+                    "old bank state should be direct from last update");
+            requireMatrixClose(expectedOld.covariance(), evaluation.oldCovariance(),
+                    "old bank covariance should be direct from last update");
+            requireVectorClose(expectedNew.state(), evaluation.newState(),
+                    "new bank state should be direct from latest update");
+            requireMatrixClose(expectedNew.covariance(), evaluation.newCovariance(),
+                    "new bank covariance should be direct from latest update");
+        }
+    }
+
+    private static void verifyMidpointCovarianceMatchesTrackerScale() {
+        ImmTracker oldTracker = new ImmTracker(new ImmSettings());
+        oldTracker.processMeasurements(List.of(targetMeasurement(0.0, 0.0, 10.0)));
+        oldTracker.drainUpdatedRecords();
+        oldTracker.processMeasurements(List.of(targetMeasurement(1.0, 10.0, 10.0)));
+        TrackRecord oldAnchor = rename(
+                last(oldTracker.drainUpdatedRecords()),
+                "TRK-OLD");
+        oldTracker.advanceTo(2.0);
+        double trackerMidpointVariance =
+                oldTracker.currentViews().get(0).positionCovariance()[0][0];
+        TrackRecord oldEventCoast = rename(oldTracker.recordsAt(5.0, Set.of()).get(0), "TRK-OLD");
+
+        ImmTracker newTracker = new ImmTracker(new ImmSettings());
+        newTracker.processMeasurements(List.of(targetMeasurement(3.0, 30.0, 10.0)));
+        TrackRecord newFormation = rename(
+                last(newTracker.drainUpdatedRecords()),
+                "TRK-NEW");
+        newTracker.processMeasurements(List.of(targetMeasurement(4.0, 40.0, 10.0)));
+        TrackRecord newLatestUpdate = rename(
+                last(newTracker.drainUpdatedRecords()),
+                "TRK-NEW");
+        TrackRecord newEventCoast = rename(newTracker.recordsAt(5.0, Set.of()).get(0), "TRK-NEW");
+
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("midpoint_covariance_scale"),
+                "Midpoint covariance scale",
+                5.0,
+                List.of(oldAnchor, oldEventCoast, newFormation, newLatestUpdate, newEventCoast),
+                List.of(),
+                List.of(measurement("TRK-NEW", 5.0, 50.0)));
+        TrackStitchingAnalyzer.AnalysisResult result =
+                new TrackStitchingAnalyzer().analyzeDetailed(
+                        scenario,
+                        new TrackStitchingAnalyzer.Configuration(
+                                1.0, 10.0, 0.0, 10.0, false, 0.5));
+        if (result.events().size() != 1) {
+            throw new AssertionError("Expected one stitching event for midpoint covariance test");
+        }
+        TrackStitchingAnalyzer.JoinEvaluation midpoint =
+                diagnostics(result.events().get(0), "TRK-OLD", "TRK-NEW")
+                        .joinEvaluations().stream()
+                        .filter(evaluation -> evaluation.variant().equals("Simple midpoint"))
+                        .findFirst()
+                        .orElseThrow(() -> new AssertionError("Missing simple midpoint"));
+        requireClose(2.0, midpoint.timeSeconds(), "simple temporal midpoint");
+        assertComparableCovarianceScale(
+                trackerMidpointVariance,
+                midpoint.oldCovariance()[0][0],
+                "old midpoint covariance scale");
+        assertComparableCovarianceScale(
+                trackerMidpointVariance,
+                midpoint.newCovariance()[0][0],
+                "new midpoint covariance scale");
     }
 
     private static TrackRecord track(
@@ -440,6 +571,33 @@ public final class TrackStitchingAnalyzerSmokeTest {
             covariance[index][index] = 4.0;
         }
         return new TrackRecord(id, time, state, covariance, updated);
+    }
+
+    private static TrackRecord rename(TrackRecord record, String trackId) {
+        return new TrackRecord(
+                trackId,
+                record.timeSeconds(),
+                record.state(),
+                record.covariance(),
+                record.updated(),
+                record.measurement());
+    }
+
+    private static TrackRecord last(List<TrackRecord> records) {
+        if (records.isEmpty()) {
+            throw new AssertionError("Expected at least one track update");
+        }
+        return records.get(records.size() - 1);
+    }
+
+    private static TargetMeasurement targetMeasurement(double time, double x, double vx) {
+        return new TargetMeasurement(
+                "truth",
+                time,
+                new EcefPoint(6_378_137.0 + x, 0.0, 0.0),
+                new EcefVector(vx, 0.0, 0.0),
+                1.0,
+                1.0);
     }
 
     private static RecordedMeasurement measurement(double time) {
@@ -473,6 +631,41 @@ public final class TrackStitchingAnalyzerSmokeTest {
             matrix[index][index] = value;
         }
         return matrix;
+    }
+
+    private static void requireVectorClose(double[] expected, double[] actual, String label) {
+        if (expected.length != actual.length) {
+            throw new AssertionError(label + ": vector size mismatch");
+        }
+        for (int index = 0; index < expected.length; index++) {
+            requireClose(expected[index], actual[index], label + " at " + index);
+        }
+    }
+
+    private static void requireMatrixClose(double[][] expected, double[][] actual, String label) {
+        if (expected.length != actual.length) {
+            throw new AssertionError(label + ": matrix row count mismatch");
+        }
+        for (int row = 0; row < expected.length; row++) {
+            if (expected[row].length != actual[row].length) {
+                throw new AssertionError(label + ": matrix column count mismatch at " + row);
+            }
+            for (int column = 0; column < expected[row].length; column++) {
+                requireClose(expected[row][column], actual[row][column],
+                        label + " at " + row + "," + column);
+            }
+        }
+    }
+
+    private static void assertComparableCovarianceScale(
+            double trackerVariance,
+            double stitchVariance,
+            String label) {
+        double reference = Math.max(1.0, trackerVariance);
+        if (stitchVariance < reference / 100.0 || stitchVariance > reference * 100.0) {
+            throw new AssertionError(label + ": tracker variance " + trackerVariance
+                    + " but stitching variance " + stitchVariance);
+        }
     }
 
     private static void requireClose(double expected, double actual, String label) {

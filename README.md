@@ -172,18 +172,22 @@ analysis** also computes separate Hungarian assignments for NLL, Mahalanobis,
 static/uniform NLLR, and learned-spatial NLLR costs.
 
 For every old/new segment pair, the analysis reports simple and kinematic
-midpoints, a full-state Mahalanobis time-bank estimate, and a truth-reference
+midpoints, a position Mahalanobis time-bank estimate, and a truth-reference
 time found by minimizing the RMS position error of both propagated segments.
-The old state is predicted forward from its last update. For each timestamp tab,
-the new state starts at that snapshot's most-future recorded state and is
-retrodicted through its earlier associated measurements before continuing past
-its spawn time. Backward state transitions use negative `dt`; process covariance
-growth uses positive `abs(dt)`.
+Each bank sample is evaluated independently from fixed measurement-updated
+anchors: the old state is predicted forward from its last updated record, and
+the new state is retrodicted backward from its latest updated record available
+at the candidate event. Stitch-gap propagation uses the tracker's observable
+constant-velocity/DCWNA transition with the signed interval to the requested
+join time, so latent acceleration covariance is not projected into position
+uncertainty. Coast/display predictions and intermediate associated measurements
+are not reused as smoothing updates inside the stitching bank.
 
-At each candidate time, the full 9D innovation is `x_old - x_new` and its
-covariance is `P_old + P_new`. The time bank uses the canonical Mahalanobis
-distance, while each timing variant receives both the canonical multivariate
-Gaussian negative log likelihood and the corresponding Mahalanobis distance.
+At each candidate time, the 3D position innovation is `x_old - x_new` and its
+covariance is `P_old + P_new` for the position block. The time bank uses the
+canonical Mahalanobis distance, while each timing variant receives both the
+canonical multivariate Gaussian negative log likelihood and the corresponding
+Mahalanobis distance.
 Alternative Hypothesis mode compares the same Gaussian likelihood against a
 static extraneous spatial density and a learned target-birth spatial density.
 The scenario summary remains above a combined metrics table with one row per
