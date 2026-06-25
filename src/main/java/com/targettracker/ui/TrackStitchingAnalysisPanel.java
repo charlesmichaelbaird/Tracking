@@ -617,12 +617,12 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         rocTabs.removeAll();
         rocTabs.addTab("Computing...", messagePanel("Computing 3D Hellinger ROC curves..."));
 
-        SwingWorker<RocAnalysisResult, Void> worker = new SwingWorker<>() {
+        SwingWorker<RocCurveResult, Void> worker = new SwingWorker<>() {
             @Override
-            protected RocAnalysisResult doInBackground() {
+            protected RocCurveResult doInBackground() {
                 TrackStitchingAnalyzer.AnalysisResult result =
                         analyzer.analyzeDetailed(scenario, configuration);
-                return buildRocAnalysis(result);
+                return buildRocCurve(result);
             }
 
             @Override
@@ -634,10 +634,10 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 rocButton.setEnabled(true);
                 exportButton.setEnabled(exportWasEnabled);
                 try {
-                    RocAnalysisResult result = get();
+                    RocCurveResult result = get();
                     populateRocTabs(result);
                     statusLabel.setText("ROC curve ready: "
-                            + result.allTargets().candidateCount()
+                            + result.candidateCount()
                             + " candidate stitch attempt(s)");
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
@@ -653,7 +653,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         worker.execute();
     }
 
-    private RocAnalysisResult buildRocAnalysis(
+    private RocCurveResult buildRocCurve(
             TrackStitchingAnalyzer.AnalysisResult result) {
         Map<String, String> targetByTrack = trackTargetIds();
         List<RocExample> examples = new ArrayList<>();
@@ -675,16 +675,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 }
             }
         }
-        RocCurveResult allTargets = rocCurve("All targets", examples);
-        Set<String> targetIds = scenarioTargetIds();
-        List<RocCurveResult> targetResults = new ArrayList<>();
-        for (String targetId : targetIds) {
-            List<RocExample> targetExamples = examples.stream()
-                    .filter(example -> example.involvesTarget(targetId))
-                    .toList();
-            targetResults.add(rocCurve(targetId, targetExamples));
-        }
-        return new RocAnalysisResult(allTargets, List.copyOf(targetResults));
+        return rocCurve("All targets", examples);
     }
 
     private Map<String, String> trackTargetIds() {
@@ -705,38 +696,12 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         return targetByTrack;
     }
 
-    private Set<String> scenarioTargetIds() {
-        Set<String> targetIds = new LinkedHashSet<>();
-        scenario.groundTruth().forEach(record -> {
-            if (!record.targetId().isBlank()) {
-                targetIds.add(record.targetId());
-            }
-        });
-        scenario.measurements().forEach(measurement -> {
-            if (!measurement.targetId().isBlank()) {
-                targetIds.add(measurement.targetId());
-            }
-        });
-        return targetIds;
-    }
-
     private static boolean validTargetId(String targetId) {
         return targetId != null && !targetId.isBlank();
     }
 
     private static double rocHellingerDistance(TrackStitchingAnalyzer.PairResult pair) {
-        double score = Double.POSITIVE_INFINITY;
-        score = minimumFinite(score, pair.simpleHellingerDistance());
-        score = minimumFinite(score, pair.kinematicHellingerDistance());
-        score = minimumFinite(score, pair.statisticalHellingerDistance());
-        return score;
-    }
-
-    private static double minimumFinite(double left, double right) {
-        if (!Double.isFinite(right)) {
-            return left;
-        }
-        return Math.min(left, right);
+        return pair.statisticalHellingerDistance();
     }
 
     private static RocCurveResult rocCurve(String label, List<RocExample> examples) {
@@ -796,14 +761,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         return Math.max(0.0, Math.min(1.0, area));
     }
 
-    private void populateRocTabs(RocAnalysisResult result) {
+    private void populateRocTabs(RocCurveResult result) {
         rocTabs.removeAll();
-        rocTabs.addTab("All", new RocCurveChart(result.allTargets()));
-        if (result.targetResults().size() > 1) {
-            for (RocCurveResult targetResult : result.targetResults()) {
-                rocTabs.addTab(targetResult.label(), new RocCurveChart(targetResult));
-            }
-        }
+        rocTabs.addTab("ROC", new RocCurveChart(result));
         rocTabs.setSelectedIndex(0);
     }
 
@@ -1632,7 +1592,10 @@ final class TrackStitchingAnalysisPanel extends JPanel {
 
             g2.setColor(new Color(25, 31, 37));
             g2.setFont(getFont().deriveFont(Font.BOLD, 14.0f));
-            g2.drawString(result.label() + "  3D Hellinger ROC", left, 24);
+            g2.drawString(
+                    result.label() + "  3D Hellinger ROC (Mahalanobis bank)",
+                    left,
+                    24);
             g2.setFont(getFont().deriveFont(Font.PLAIN, 11.0f));
             String auc = Double.isFinite(result.auc()) ? formatNumber(result.auc()) : "-";
             g2.drawString(
@@ -1699,11 +1662,6 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         }
     }
 
-    private record RocAnalysisResult(
-            RocCurveResult allTargets,
-            List<RocCurveResult> targetResults) {
-    }
-
     private record RocCurveResult(
             String label,
             List<RocPoint> points,
@@ -1727,10 +1685,6 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             double hellingerDistance) {
         private boolean sameTarget() {
             return oldTargetId.equals(newTargetId);
-        }
-
-        private boolean involvesTarget(String targetId) {
-            return oldTargetId.equals(targetId) || newTargetId.equals(targetId);
         }
     }
 

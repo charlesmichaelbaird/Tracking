@@ -120,13 +120,12 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
         });
         waitForRoc(panelReference.get());
         SwingUtilities.invokeAndWait(() -> {
-            JTabbedPane rocTabs = findTabbedPaneWithTitle(panelReference.get(), "All");
-            if (rocTabs == null || rocTabs.getTabCount() < 3) {
-                throw new AssertionError("ROC tabs should include all-target and per-target curves");
+            JTabbedPane rocTabs = findTabbedPaneWithTitle(panelReference.get(), "ROC");
+            if (rocTabs == null || rocTabs.getTabCount() != 1) {
+                throw new AssertionError("ROC output should show one combined curve tab");
             }
-            if (!"TGT-001".equals(rocTabs.getTitleAt(1))
-                    || !"TGT-002".equals(rocTabs.getTitleAt(2))) {
-                throw new AssertionError("Multiple-target ROC output should include per-target tabs");
+            if (!"RocCurveChart".equals(rocTabs.getComponentAt(0).getClass().getSimpleName())) {
+                throw new AssertionError("ROC tab should contain the generated curve graphic");
             }
         });
         System.out.println("TrackStitchingAnalysisPanelSmokeTest passed");
@@ -200,8 +199,11 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
         while (System.currentTimeMillis() < deadlineMillis) {
             AtomicReference<Boolean> ready = new AtomicReference<>(false);
             SwingUtilities.invokeAndWait(() -> {
-                JTabbedPane tabs = findTabbedPaneWithTitle(container, "All");
-                ready.set(tabs != null && tabs.getTabCount() >= 3);
+                JTabbedPane tabs = findTabbedPaneWithTitle(container, "ROC");
+                ready.set(tabs != null
+                        && tabs.getTabCount() == 1
+                        && "RocCurveChart".equals(
+                        tabs.getComponentAt(0).getClass().getSimpleName()));
             });
             if (ready.get()) {
                 return;
