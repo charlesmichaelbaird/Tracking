@@ -29,20 +29,26 @@ import javax.swing.event.TableModelEvent;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GridLayout;
+import java.awt.RenderingHints;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
@@ -59,6 +65,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final TrackStitchingAnalysisExporter exporter = new TrackStitchingAnalysisExporter();
     private final JTabbedPane eventTabs = new JTabbedPane(JTabbedPane.TOP);
     private final JTabbedPane outputTabs = new JTabbedPane(JTabbedPane.TOP);
+    private final JTabbedPane rocTabs = new JTabbedPane(JTabbedPane.TOP);
     private final CardLayout sectionLayout = new CardLayout();
     private final JPanel sectionCards = new JPanel(sectionLayout);
     private final JTextArea summaryArea = new JTextArea();
@@ -89,10 +96,12 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final JTextField birthRateField = new JTextField("1e-6", 8);
     private final JTextField outputDirectoryField = new JTextField("", 18);
     private final JButton analyzeButton = new JButton("Run stitching analysis");
+    private final JButton rocButton = new JButton("ROC Curve");
     private final JButton exportButton = new JButton("Output data to folder");
     private final JToggleButton configurationSectionButton = new JToggleButton("Configuration");
     private final JToggleButton analysisOutputSectionButton =
             new JToggleButton("Analysis output", true);
+    private final JToggleButton rocSectionButton = new JToggleButton("ROC curve");
     private final JToggleButton showAllButton = new JToggleButton("All", true);
     private final JToggleButton showGreyedButton = new JToggleButton("Greyed");
     private final JToggleButton showOnlyButton = new JToggleButton("Only Stitched");
@@ -104,6 +113,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private boolean active = true;
     private static final String CONFIGURATION_SECTION = "Configuration";
     private static final String ANALYSIS_OUTPUT_SECTION = "Analysis output";
+    private static final String ROC_CURVE_SECTION = "ROC curve";
 
     private enum ScoreMode {
         OVERLAP_3D,
@@ -158,11 +168,13 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         sectionCards.setOpaque(false);
         sectionCards.add(createConfigurationPanel(), CONFIGURATION_SECTION);
         sectionCards.add(createOutputPanel(), ANALYSIS_OUTPUT_SECTION);
+        sectionCards.add(createRocCurvePanel(), ROC_CURVE_SECTION);
         body.add(sectionCards, BorderLayout.CENTER);
         add(body, BorderLayout.CENTER);
         showSection(ANALYSIS_OUTPUT_SECTION);
 
         analyzeButton.addActionListener(event -> runAnalysis());
+        rocButton.addActionListener(event -> runRocCurve());
         resolutionField.addActionListener(event -> runAnalysis());
         falseAlarmRateField.addActionListener(event -> runAnalysis());
         birthRateField.addActionListener(event -> runAnalysis());
@@ -186,43 +198,67 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     }
 
     private JPanel createTitlePanel() {
-        JPanel panel = new JPanel(new BorderLayout(8, 0));
+        JPanel panel = new JPanel(new BorderLayout(0, 8));
         panel.setBackground(Color.WHITE);
         panel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(214, 220, 227)),
                 BorderFactory.createEmptyBorder(10, 10, 10, 10)));
+
+        JPanel titleRow = new JPanel(new BorderLayout(8, 0));
+        titleRow.setOpaque(false);
         JLabel title = new JLabel("Track Stitching Analysis");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 16.0f));
-        panel.add(title, BorderLayout.CENTER);
+        titleRow.add(title, BorderLayout.CENTER);
         JButton backButton = new JButton("Back to replay");
         backButton.addActionListener(event -> closeAction.run());
-        panel.add(backButton, BorderLayout.EAST);
+        titleRow.add(backButton, BorderLayout.EAST);
+        panel.add(titleRow, BorderLayout.NORTH);
+
+        JPanel actionRow = new JPanel(new BorderLayout(8, 0));
+        actionRow.setOpaque(false);
+        JPanel buttonRow = new JPanel(new GridLayout(1, 2, 7, 0));
+        buttonRow.setOpaque(false);
+        analyzeButton.setToolTipText("Compute stitching candidates for the current configuration");
+        rocButton.setToolTipText("Compute 3D Hellinger-distance ROC curves");
+        buttonRow.add(analyzeButton);
+        buttonRow.add(rocButton);
+        actionRow.add(buttonRow, BorderLayout.WEST);
+        statusLabel.setForeground(new Color(80, 92, 104));
+        actionRow.add(statusLabel, BorderLayout.CENTER);
+        panel.add(actionRow, BorderLayout.SOUTH);
         return panel;
     }
 
     private JPanel createSectionSelector() {
-        JPanel panel = new JPanel(new GridLayout(1, 2, 7, 0));
+        JPanel panel = new JPanel(new GridLayout(1, 3, 7, 0));
         panel.setOpaque(false);
         panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
         ButtonGroup group = new ButtonGroup();
         group.add(configurationSectionButton);
         group.add(analysisOutputSectionButton);
+        group.add(rocSectionButton);
         configurationSectionButton.addActionListener(
                 event -> showSection(CONFIGURATION_SECTION));
         analysisOutputSectionButton.addActionListener(
                 event -> showSection(ANALYSIS_OUTPUT_SECTION));
+        rocSectionButton.addActionListener(event -> showSection(ROC_CURVE_SECTION));
         panel.add(configurationSectionButton);
         panel.add(analysisOutputSectionButton);
+        panel.add(rocSectionButton);
         return panel;
     }
 
     private void showSection(String name) {
         sectionLayout.show(sectionCards, name);
         boolean configuration = CONFIGURATION_SECTION.equals(name);
+        boolean analysisOutput = ANALYSIS_OUTPUT_SECTION.equals(name);
+        boolean rocCurve = ROC_CURVE_SECTION.equals(name);
         configurationSectionButton.setSelected(configuration);
-        analysisOutputSectionButton.setSelected(!configuration);
+        analysisOutputSectionButton.setSelected(analysisOutput);
+        rocSectionButton.setSelected(rocCurve);
         styleSectionButton(configurationSectionButton, configuration);
-        styleSectionButton(analysisOutputSectionButton, !configuration);
+        styleSectionButton(analysisOutputSectionButton, analysisOutput);
+        styleSectionButton(rocSectionButton, rocCurve);
     }
 
     private static void styleSectionButton(JToggleButton button, boolean selected) {
@@ -259,15 +295,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         panel.add(Box.createVerticalStrut(10));
         panel.add(createVisibilityPanel());
         panel.add(Box.createVerticalStrut(10));
-        analyzeButton.setAlignmentX(LEFT_ALIGNMENT);
-        analyzeButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
-        panel.add(analyzeButton);
-        panel.add(Box.createVerticalStrut(10));
         panel.add(createExportPanel());
-        panel.add(Box.createVerticalStrut(7));
-        statusLabel.setForeground(new Color(80, 92, 104));
-        statusLabel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.add(statusLabel);
         panel.add(Box.createVerticalGlue());
         return panel;
     }
@@ -408,6 +436,26 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         return panel;
     }
 
+    private JPanel createRocCurvePanel() {
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+        panel.setBackground(Color.WHITE);
+        panel.setBorder(BorderFactory.createTitledBorder("ROC curve"));
+        rocTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        rocTabs.addTab("ROC", messagePanel("Click ROC Curve to compute 3D Hellinger ROC curves."));
+        panel.add(rocTabs, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private static JPanel messagePanel(String text) {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(new Color(250, 251, 252));
+        panel.setBorder(BorderFactory.createEmptyBorder(18, 18, 18, 18));
+        JLabel label = new JLabel(text);
+        label.setForeground(new Color(80, 92, 104));
+        panel.add(label, BorderLayout.NORTH);
+        return panel;
+    }
+
     private static void configureOutputArea(JTextArea area) {
         area.setEditable(false);
         area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
@@ -466,10 +514,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         return Math.max(0, metricsModel.getColumnCount() - 1);
     }
 
-    private void runAnalysis() {
+    private TrackStitchingAnalyzer.Configuration readConfiguration() {
         final double resolution;
-        final double falseAlarmRate;
-        final double birthRate;
         try {
             resolution = Double.parseDouble(resolutionField.getText().trim());
             if (!Double.isFinite(resolution) || resolution <= 0.0) {
@@ -479,27 +525,38 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         } catch (NumberFormatException exception) {
             resolutionField.setBackground(new Color(255, 224, 224));
             statusLabel.setText("Enter a positive time-bank resolution");
-            return;
+            throw exception;
         }
+        final double falseAlarmRate;
+        final double birthRate;
         try {
             falseAlarmRate = parseNonNegative(falseAlarmRateField);
             birthRate = parseNonNegative(birthRateField);
         } catch (NumberFormatException exception) {
             statusLabel.setText("Enter non-negative alternative-hypothesis densities");
+            throw exception;
+        }
+        return new TrackStitchingAnalyzer.Configuration(
+                coastedWindow.minimumSeconds(),
+                coastedWindow.maximumSeconds(),
+                newWindow.minimumSeconds(),
+                newWindow.maximumSeconds(),
+                allowDeadTracks.isSelected(),
+                resolution,
+                falseAlarmRate,
+                birthRate);
+    }
+
+    private void runAnalysis() {
+        final TrackStitchingAnalyzer.Configuration configuration;
+        try {
+            configuration = readConfiguration();
+        } catch (NumberFormatException exception) {
             return;
         }
-        TrackStitchingAnalyzer.Configuration configuration =
-                new TrackStitchingAnalyzer.Configuration(
-                        coastedWindow.minimumSeconds(),
-                        coastedWindow.maximumSeconds(),
-                        newWindow.minimumSeconds(),
-                        newWindow.maximumSeconds(),
-                        allowDeadTracks.isSelected(),
-                        resolution,
-                        falseAlarmRate,
-                        birthRate);
         latestConfiguration = configuration;
         analyzeButton.setEnabled(false);
+        rocButton.setEnabled(false);
         exportButton.setEnabled(false);
         statusLabel.setText("Analyzing measurement times...");
         eventTabs.removeAll();
@@ -521,6 +578,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                             return;
                         }
                         analyzeButton.setEnabled(true);
+                        rocButton.setEnabled(true);
                         try {
                             analysisResult = get();
                             events = analysisResult.events();
@@ -539,8 +597,214 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                             populateEventTabs();
                         }
                     }
-                };
+        };
         worker.execute();
+    }
+
+    private void runRocCurve() {
+        final TrackStitchingAnalyzer.Configuration configuration;
+        try {
+            configuration = readConfiguration();
+        } catch (NumberFormatException exception) {
+            return;
+        }
+        showSection(ROC_CURVE_SECTION);
+        final boolean exportWasEnabled = exportButton.isEnabled();
+        analyzeButton.setEnabled(false);
+        rocButton.setEnabled(false);
+        exportButton.setEnabled(false);
+        statusLabel.setText("Computing ROC curve...");
+        rocTabs.removeAll();
+        rocTabs.addTab("Computing...", messagePanel("Computing 3D Hellinger ROC curves..."));
+
+        SwingWorker<RocAnalysisResult, Void> worker = new SwingWorker<>() {
+            @Override
+            protected RocAnalysisResult doInBackground() {
+                TrackStitchingAnalyzer.AnalysisResult result =
+                        analyzer.analyzeDetailed(scenario, configuration);
+                return buildRocAnalysis(result);
+            }
+
+            @Override
+            protected void done() {
+                if (!active) {
+                    return;
+                }
+                analyzeButton.setEnabled(true);
+                rocButton.setEnabled(true);
+                exportButton.setEnabled(exportWasEnabled);
+                try {
+                    RocAnalysisResult result = get();
+                    populateRocTabs(result);
+                    statusLabel.setText("ROC curve ready: "
+                            + result.allTargets().candidateCount()
+                            + " candidate stitch attempt(s)");
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    statusLabel.setText("ROC computation interrupted");
+                } catch (ExecutionException exception) {
+                    rocTabs.removeAll();
+                    rocTabs.addTab("ROC", messagePanel("ROC computation failed."));
+                    statusLabel.setText("ROC computation failed: "
+                            + exception.getCause().getMessage());
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    private RocAnalysisResult buildRocAnalysis(
+            TrackStitchingAnalyzer.AnalysisResult result) {
+        Map<String, String> targetByTrack = trackTargetIds();
+        List<RocExample> examples = new ArrayList<>();
+        for (TrackStitchingAnalyzer.EventResult event : result.events()) {
+            for (TrackStitchingAnalyzer.PairResult pair : event.pairs()) {
+                String oldTargetId = targetByTrack.get(pair.oldTrackId());
+                String newTargetId = targetByTrack.get(pair.newTrackId());
+                if (!validTargetId(oldTargetId) || !validTargetId(newTargetId)) {
+                    continue;
+                }
+                double hellingerDistance = rocHellingerDistance(pair);
+                if (Double.isFinite(hellingerDistance)) {
+                    examples.add(new RocExample(
+                            pair.oldTrackId(),
+                            pair.newTrackId(),
+                            oldTargetId,
+                            newTargetId,
+                            Math.max(0.0, Math.min(1.0, hellingerDistance))));
+                }
+            }
+        }
+        RocCurveResult allTargets = rocCurve("All targets", examples);
+        Set<String> targetIds = scenarioTargetIds();
+        List<RocCurveResult> targetResults = new ArrayList<>();
+        for (String targetId : targetIds) {
+            List<RocExample> targetExamples = examples.stream()
+                    .filter(example -> example.involvesTarget(targetId))
+                    .toList();
+            targetResults.add(rocCurve(targetId, targetExamples));
+        }
+        return new RocAnalysisResult(allTargets, List.copyOf(targetResults));
+    }
+
+    private Map<String, String> trackTargetIds() {
+        Map<String, String> targetByTrack = new LinkedHashMap<>();
+        for (RecordedMeasurement measurement : scenario.measurements()) {
+            String trackId = measurement.associatedTrackId();
+            String targetId = measurement.targetId();
+            if (trackId.isBlank() || targetId.isBlank()) {
+                continue;
+            }
+            String existingTargetId = targetByTrack.get(trackId);
+            if (existingTargetId == null) {
+                targetByTrack.put(trackId, targetId);
+            } else if (!existingTargetId.equals(targetId)) {
+                targetByTrack.put(trackId, "");
+            }
+        }
+        return targetByTrack;
+    }
+
+    private Set<String> scenarioTargetIds() {
+        Set<String> targetIds = new LinkedHashSet<>();
+        scenario.groundTruth().forEach(record -> {
+            if (!record.targetId().isBlank()) {
+                targetIds.add(record.targetId());
+            }
+        });
+        scenario.measurements().forEach(measurement -> {
+            if (!measurement.targetId().isBlank()) {
+                targetIds.add(measurement.targetId());
+            }
+        });
+        return targetIds;
+    }
+
+    private static boolean validTargetId(String targetId) {
+        return targetId != null && !targetId.isBlank();
+    }
+
+    private static double rocHellingerDistance(TrackStitchingAnalyzer.PairResult pair) {
+        double score = Double.POSITIVE_INFINITY;
+        score = minimumFinite(score, pair.simpleHellingerDistance());
+        score = minimumFinite(score, pair.kinematicHellingerDistance());
+        score = minimumFinite(score, pair.statisticalHellingerDistance());
+        return score;
+    }
+
+    private static double minimumFinite(double left, double right) {
+        if (!Double.isFinite(right)) {
+            return left;
+        }
+        return Math.min(left, right);
+    }
+
+    private static RocCurveResult rocCurve(String label, List<RocExample> examples) {
+        int positives = 0;
+        for (RocExample example : examples) {
+            if (example.sameTarget()) {
+                positives++;
+            }
+        }
+        int negatives = examples.size() - positives;
+        List<RocPoint> points = new ArrayList<>();
+        for (int index = 0; index <= 100; index++) {
+            double threshold = index / 100.0;
+            int truePositives = 0;
+            int falsePositives = 0;
+            for (RocExample example : examples) {
+                if (example.hellingerDistance() <= threshold) {
+                    if (example.sameTarget()) {
+                        truePositives++;
+                    } else {
+                        falsePositives++;
+                    }
+                }
+            }
+            double truePositiveRate = positives == 0
+                    ? Double.NaN
+                    : truePositives / (double) positives;
+            double falsePositiveRate = negatives == 0
+                    ? Double.NaN
+                    : falsePositives / (double) negatives;
+            points.add(new RocPoint(threshold, truePositiveRate, falsePositiveRate));
+        }
+        return new RocCurveResult(
+                label,
+                List.copyOf(points),
+                positives,
+                negatives,
+                examples.size(),
+                positives == 0 || negatives == 0 ? Double.NaN : rocAuc(points));
+    }
+
+    private static double rocAuc(List<RocPoint> points) {
+        double area = 0.0;
+        RocPoint previous = null;
+        for (RocPoint point : points) {
+            if (!Double.isFinite(point.falsePositiveRate())
+                    || !Double.isFinite(point.truePositiveRate())) {
+                continue;
+            }
+            if (previous != null) {
+                double width = point.falsePositiveRate() - previous.falsePositiveRate();
+                double height = (point.truePositiveRate() + previous.truePositiveRate()) * 0.5;
+                area += width * height;
+            }
+            previous = point;
+        }
+        return Math.max(0.0, Math.min(1.0, area));
+    }
+
+    private void populateRocTabs(RocAnalysisResult result) {
+        rocTabs.removeAll();
+        rocTabs.addTab("All", new RocCurveChart(result.allTargets()));
+        if (result.targetResults().size() > 1) {
+            for (RocCurveResult targetResult : result.targetResults()) {
+                rocTabs.addTab(targetResult.label(), new RocCurveChart(targetResult));
+            }
+        }
+        rocTabs.setSelectedIndex(0);
     }
 
     private void exportAnalysis() {
@@ -562,6 +826,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
 
         exportButton.setEnabled(false);
         analyzeButton.setEnabled(false);
+        rocButton.setEnabled(false);
         statusLabel.setText("Exporting stitching analysis data...");
         SwingWorker<Path, Void> worker = new SwingWorker<>() {
             @Override
@@ -579,6 +844,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                     return;
                 }
                 analyzeButton.setEnabled(true);
+                rocButton.setEnabled(true);
                 exportButton.setEnabled(true);
                 try {
                     Path output = get();
@@ -1326,6 +1592,146 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 BorderFactory.createMatteBorder(
                         top, left, bottom, right, new Color(48, 56, 64)),
                 metricEmptyBorder);
+    }
+
+    private static final class RocCurveChart extends JPanel {
+        private final RocCurveResult result;
+
+        private RocCurveChart(RocCurveResult result) {
+            this.result = result;
+            setBackground(Color.WHITE);
+            setPreferredSize(new Dimension(420, 360));
+            setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            super.paintComponent(graphics);
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            try {
+                g2.setRenderingHint(
+                        RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                paintChart(g2);
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        private void paintChart(Graphics2D g2) {
+            int width = getWidth();
+            int height = getHeight();
+            int left = 58;
+            int top = 58;
+            int right = 24;
+            int bottom = 54;
+            int plotWidth = Math.max(1, width - left - right);
+            int plotHeight = Math.max(1, height - top - bottom);
+            int x0 = left;
+            int y0 = top + plotHeight;
+
+            g2.setColor(new Color(25, 31, 37));
+            g2.setFont(getFont().deriveFont(Font.BOLD, 14.0f));
+            g2.drawString(result.label() + "  3D Hellinger ROC", left, 24);
+            g2.setFont(getFont().deriveFont(Font.PLAIN, 11.0f));
+            String auc = Double.isFinite(result.auc()) ? formatNumber(result.auc()) : "-";
+            g2.drawString(
+                    "Candidates: %d   same target: %d   different target: %d   AUC: %s"
+                            .formatted(
+                                    result.candidateCount(),
+                                    result.positiveCount(),
+                                    result.negativeCount(),
+                                    auc),
+                    left,
+                    42);
+
+            g2.setColor(new Color(236, 240, 244));
+            g2.fillRect(x0, top, plotWidth, plotHeight);
+            g2.setColor(new Color(142, 151, 160));
+            for (int tick = 0; tick <= 5; tick++) {
+                int x = x0 + Math.round(plotWidth * tick / 5.0f);
+                int y = y0 - Math.round(plotHeight * tick / 5.0f);
+                g2.drawLine(x, y0, x, y0 + 4);
+                g2.drawLine(x0 - 4, y, x0, y);
+                String label = formatNumber(tick / 5.0);
+                g2.drawString(label, x - 10, y0 + 19);
+                g2.drawString(label, x0 - 40, y + 4);
+            }
+            g2.setColor(new Color(76, 86, 96));
+            g2.drawLine(x0, y0, x0 + plotWidth, y0);
+            g2.drawLine(x0, top, x0, y0);
+            g2.drawString("False positive rate", x0 + plotWidth / 2 - 48, height - 15);
+            g2.drawString("True positive rate", 12, top - 10);
+
+            if (result.positiveCount() == 0 || result.negativeCount() == 0) {
+                g2.setColor(new Color(94, 104, 114));
+                g2.drawString(
+                        "Need at least one same-target and one different-target attempt.",
+                        x0 + 18,
+                        top + plotHeight / 2);
+                return;
+            }
+
+            g2.setStroke(new BasicStroke(1.0f));
+            g2.setColor(new Color(155, 164, 173));
+            g2.drawLine(x0, y0, x0 + plotWidth, top);
+
+            g2.setStroke(new BasicStroke(2.4f));
+            g2.setColor(new Color(28, 105, 174));
+            int previousX = -1;
+            int previousY = -1;
+            for (RocPoint point : result.points()) {
+                if (!Double.isFinite(point.falsePositiveRate())
+                        || !Double.isFinite(point.truePositiveRate())) {
+                    continue;
+                }
+                int x = x0 + (int) Math.round(point.falsePositiveRate() * plotWidth);
+                int y = y0 - (int) Math.round(point.truePositiveRate() * plotHeight);
+                if (previousX >= 0) {
+                    g2.drawLine(previousX, previousY, x, y);
+                }
+                previousX = x;
+                previousY = y;
+            }
+            if (previousX >= 0) {
+                g2.fillOval(previousX - 3, previousY - 3, 6, 6);
+            }
+        }
+    }
+
+    private record RocAnalysisResult(
+            RocCurveResult allTargets,
+            List<RocCurveResult> targetResults) {
+    }
+
+    private record RocCurveResult(
+            String label,
+            List<RocPoint> points,
+            int positiveCount,
+            int negativeCount,
+            int candidateCount,
+            double auc) {
+    }
+
+    private record RocPoint(
+            double threshold,
+            double truePositiveRate,
+            double falsePositiveRate) {
+    }
+
+    private record RocExample(
+            String oldTrackId,
+            String newTrackId,
+            String oldTargetId,
+            String newTargetId,
+            double hellingerDistance) {
+        private boolean sameTarget() {
+            return oldTargetId.equals(newTargetId);
+        }
+
+        private boolean involvesTarget(String targetId) {
+            return oldTargetId.equals(targetId) || newTargetId.equals(targetId);
+        }
     }
 
     private record MetricRow(

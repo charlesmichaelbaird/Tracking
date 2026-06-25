@@ -5,6 +5,7 @@ import com.targettracker.recording.RecordedMeasurement;
 import com.targettracker.recording.RecordedScenario;
 import com.targettracker.tracking.TrackRecord;
 
+import javax.swing.JButton;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.SwingUtilities;
@@ -23,6 +24,7 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
     public static void main(String[] args) throws Exception {
         System.setProperty("java.awt.headless", "true");
         AtomicReference<ScenarioPlayback> playbackReference = new AtomicReference<>();
+        AtomicReference<TrackStitchingAnalysisPanel> panelReference = new AtomicReference<>();
         AtomicReference<JTabbedPane> tabsReference = new AtomicReference<>();
         AtomicReference<JTabbedPane> outputTabsReference = new AtomicReference<>();
         AtomicReference<JTable> tableReference = new AtomicReference<>();
@@ -66,6 +68,7 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                     },
                     ignored -> {
                     });
+            panelReference.set(panel);
             playbackReference.set(playback);
             tabsReference.set((JTabbedPane) panel.tabStrip());
             outputTabsReference.set(findTabbedPaneWithTitle(panel, "Gaussian overlap 3D"));
@@ -109,8 +112,39 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                 table.setValueAt(Boolean.TRUE, 0, 5);
                 table.setValueAt(Boolean.TRUE, 0, 6);
             }
+            JButton rocButton = findButton(panelReference.get(), "ROC Curve");
+            if (rocButton == null) {
+                throw new AssertionError("Top-level ROC Curve button should be visible");
+            }
+            rocButton.doClick();
+        });
+        waitForRoc(panelReference.get());
+        SwingUtilities.invokeAndWait(() -> {
+            JTabbedPane rocTabs = findTabbedPaneWithTitle(panelReference.get(), "All");
+            if (rocTabs == null || rocTabs.getTabCount() < 3) {
+                throw new AssertionError("ROC tabs should include all-target and per-target curves");
+            }
+            if (!"TGT-001".equals(rocTabs.getTitleAt(1))
+                    || !"TGT-002".equals(rocTabs.getTitleAt(2))) {
+                throw new AssertionError("Multiple-target ROC output should include per-target tabs");
+            }
         });
         System.out.println("TrackStitchingAnalysisPanelSmokeTest passed");
+    }
+
+    private static JButton findButton(Container container, String text) {
+        for (Component component : container.getComponents()) {
+            if (component instanceof JButton button && text.equals(button.getText())) {
+                return button;
+            }
+            if (component instanceof Container child) {
+                JButton button = findButton(child, text);
+                if (button != null) {
+                    return button;
+                }
+            }
+        }
+        return null;
     }
 
     private static JTable findTable(Container container) {
@@ -161,6 +195,22 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
         throw new AssertionError("Embedded stitching analysis did not finish");
     }
 
+    private static void waitForRoc(Container container) throws Exception {
+        long deadlineMillis = System.currentTimeMillis() + 4_000;
+        while (System.currentTimeMillis() < deadlineMillis) {
+            AtomicReference<Boolean> ready = new AtomicReference<>(false);
+            SwingUtilities.invokeAndWait(() -> {
+                JTabbedPane tabs = findTabbedPaneWithTitle(container, "All");
+                ready.set(tabs != null && tabs.getTabCount() >= 3);
+            });
+            if (ready.get()) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("ROC curve computation did not finish");
+    }
+
     private static RecordedScenario scenario() {
         List<TrackRecord> tracks = new ArrayList<>();
         tracks.add(track("TRK-001", 0.0, 0.0, 8.0, true));
@@ -168,23 +218,35 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
             tracks.add(track("TRK-001", second, 8.0 * second, 8.0, false));
         }
         tracks.add(track("TRK-002", 5.0, 50.0, 12.0, true));
+        tracks.add(track("TRK-003", 5.0, 120.0, -5.0, true));
         List<GroundTruthRecord> truth = new ArrayList<>();
         for (int second = 0; second <= 5; second++) {
             truth.add(new GroundTruthRecord(
                     "TGT-001", second,
                     new double[]{6_378_137.0, second * 10.0, 0, 0, 10, 0, 0, 0, 0}));
+            truth.add(new GroundTruthRecord(
+                    "TGT-002", second,
+                    new double[]{6_378_137.0, 120.0 - second * 5.0, 0, 0, -5, 0, 0, 0, 0}));
         }
         double[][] covariance = new double[6][6];
         for (int index = 0; index < 6; index++) {
             covariance[index][index] = 1.0;
         }
+        RecordedMeasurement oldMeasurement = new RecordedMeasurement(
+                "GOD-SENSOR-001", "TGT-001", "TRK-001", 0.0,
+                new double[]{6_378_137.0, 0, 0, 0, 10, 0},
+                covariance, 1.0, 1.0);
         RecordedMeasurement measurement = new RecordedMeasurement(
                 "GOD-SENSOR-001", "TGT-001", "TRK-002", 5.0,
                 new double[]{6_378_137.0, 50, 0, 0, 10, 0},
                 covariance, 1.0, 1.0);
+        RecordedMeasurement falsePairMeasurement = new RecordedMeasurement(
+                "GOD-SENSOR-001", "TGT-002", "TRK-003", 5.0,
+                new double[]{6_378_137.0, 95, 0, 0, -5, 0},
+                covariance, 1.0, 1.0);
         return new RecordedScenario(
                 Path.of("embedded_stitching"), "Embedded stitching", 5.0,
-                tracks, truth, List.of(measurement));
+                tracks, truth, List.of(oldMeasurement, measurement, falsePairMeasurement));
     }
 
     private static TrackRecord track(
