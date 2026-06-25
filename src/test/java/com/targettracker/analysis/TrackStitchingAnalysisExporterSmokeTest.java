@@ -37,8 +37,10 @@ public final class TrackStitchingAnalysisExporterSmokeTest {
         requireFile(exportRoot.resolve("summary").resolve("configuration.csv"));
         requireFile(exportRoot.resolve("summary").resolve("events.csv"));
         requireFile(exportRoot.resolve("summary").resolve("segments.csv"));
-        requireFile(exportRoot.resolve("summary").resolve("pair_time_estimates.csv"));
-        requireFile(exportRoot.resolve("summary").resolve("optimal_assignments.csv"));
+        Path pairs = exportRoot.resolve("summary").resolve("pair_time_estimates.csv");
+        Path assignments = exportRoot.resolve("summary").resolve("optimal_assignments.csv");
+        requireFile(pairs);
+        requireFile(assignments);
         Path bank = exportRoot.resolve("bank_evaluations").resolve("bank_evaluations.csv");
         requireFile(bank);
         requireFile(exportRoot.resolve("spatial_density")
@@ -49,6 +51,24 @@ public final class TrackStitchingAnalysisExporterSmokeTest {
                 || !bankCsv.contains("position_innovation_covariance_2_2")
                 || !bankCsv.contains("learned_negative_log_likelihood_ratio")) {
             throw new AssertionError("Bank export should include state, covariance, and NLLR columns");
+        }
+        String pairsCsv = Files.readString(pairs);
+        if (!pairsCsv.contains("simple_bhattacharyya_distance")
+                || !pairsCsv.contains("simple_bhattacharyya_coefficient")
+                || !pairsCsv.contains("simple_hellinger_distance")
+                || !pairsCsv.contains("simple_bhattacharyya_distance_6d")
+                || !pairsCsv.contains("simple_bhattacharyya_coefficient_6d")
+                || !pairsCsv.contains("simple_hellinger_distance_6d")) {
+            throw new AssertionError("Pair export should include Gaussian-overlap metrics");
+        }
+        String assignmentsCsv = Files.readString(assignments);
+        if (!assignmentsCsv.contains("Bhattacharyya Distance")
+                || !assignmentsCsv.contains("Bhattacharyya Coefficient")
+                || !assignmentsCsv.contains("Hellinger Distance")
+                || !assignmentsCsv.contains("6D Bhattacharyya Distance")
+                || !assignmentsCsv.contains("6D Bhattacharyya Coefficient")
+                || !assignmentsCsv.contains("6D Hellinger Distance")) {
+            throw new AssertionError("Assignment export should include Gaussian-overlap optima");
         }
         System.out.println("TrackStitchingAnalysisExporterSmokeTest passed");
     }

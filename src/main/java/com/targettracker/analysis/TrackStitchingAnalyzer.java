@@ -18,6 +18,7 @@ import java.util.TreeSet;
 public final class TrackStitchingAnalyzer {
     private static final int STATE_SIZE = 9;
     private static final int POSITION_SIZE = 3;
+    private static final int POSITION_VELOCITY_SIZE = 6;
     private static final int MEASUREMENT_SIZE = 6;
     private static final double EPSILON = 1.0e-8;
     private static final double LIVE_SAMPLE_TOLERANCE_SECONDS = 1.01;
@@ -121,6 +122,21 @@ public final class TrackStitchingAnalyzer {
                     List.copyOf(oldSegments),
                     List.copyOf(newSegments),
                     List.copyOf(pairs),
+                    optimalAssignments(
+                            oldSegments, newSegments, pairs, Metric.BHATTACHARYYA_DISTANCE),
+                    optimalAssignments(
+                            oldSegments, newSegments, pairs, Metric.BHATTACHARYYA_COEFFICIENT),
+                    optimalAssignments(
+                            oldSegments, newSegments, pairs, Metric.HELLINGER_DISTANCE),
+                    optimalAssignments(
+                            oldSegments, newSegments, pairs,
+                            Metric.BHATTACHARYYA_DISTANCE_6D),
+                    optimalAssignments(
+                            oldSegments, newSegments, pairs,
+                            Metric.BHATTACHARYYA_COEFFICIENT_6D),
+                    optimalAssignments(
+                            oldSegments, newSegments, pairs,
+                            Metric.HELLINGER_DISTANCE_6D),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.NLL),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.MAHALANOBIS),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.STATIC_NLLR),
@@ -217,6 +233,30 @@ public final class TrackStitchingAnalyzer {
                 kinematicTime,
                 statisticalTime,
                 actualTime,
+                simpleEvaluation.bhattacharyyaDistance(),
+                kinematicEvaluation.bhattacharyyaDistance(),
+                statisticalEvaluation.bhattacharyyaDistance(),
+                actualEvaluation.bhattacharyyaDistance(),
+                simpleEvaluation.bhattacharyyaCoefficient(),
+                kinematicEvaluation.bhattacharyyaCoefficient(),
+                statisticalEvaluation.bhattacharyyaCoefficient(),
+                actualEvaluation.bhattacharyyaCoefficient(),
+                simpleEvaluation.hellingerDistance(),
+                kinematicEvaluation.hellingerDistance(),
+                statisticalEvaluation.hellingerDistance(),
+                actualEvaluation.hellingerDistance(),
+                simpleEvaluation.bhattacharyyaDistance6d(),
+                kinematicEvaluation.bhattacharyyaDistance6d(),
+                statisticalEvaluation.bhattacharyyaDistance6d(),
+                actualEvaluation.bhattacharyyaDistance6d(),
+                simpleEvaluation.bhattacharyyaCoefficient6d(),
+                kinematicEvaluation.bhattacharyyaCoefficient6d(),
+                statisticalEvaluation.bhattacharyyaCoefficient6d(),
+                actualEvaluation.bhattacharyyaCoefficient6d(),
+                simpleEvaluation.hellingerDistance6d(),
+                kinematicEvaluation.hellingerDistance6d(),
+                statisticalEvaluation.hellingerDistance6d(),
+                actualEvaluation.hellingerDistance6d(),
                 simpleEvaluation.negativeLogLikelihood(),
                 kinematicEvaluation.negativeLogLikelihood(),
                 statisticalEvaluation.negativeLogLikelihood(),
@@ -273,7 +313,7 @@ public final class TrackStitchingAnalyzer {
                 VariantScore score = bestVariant(pair, metric);
                 if (score != null) {
                     scores[row][column] = score;
-                    costs[row][column] = score.score();
+                    costs[row][column] = score.cost();
                 }
             }
         }
@@ -317,8 +357,9 @@ public final class TrackStitchingAnalyzer {
                         pair.statisticalMahalanobisDistance(),
                         metric));
         return variants.stream()
-                .filter(score -> Double.isFinite(score.score()))
-                .min(Comparator.comparingDouble(VariantScore::score))
+                .filter(score -> Double.isFinite(score.score())
+                        && Double.isFinite(score.cost()))
+                .min(Comparator.comparingDouble(VariantScore::cost))
                 .orElse(null);
     }
 
@@ -330,6 +371,42 @@ public final class TrackStitchingAnalyzer {
             double mahalanobisDistance,
             Metric metric) {
         double score = switch (metric) {
+            case BHATTACHARYYA_DISTANCE -> switch (label) {
+                case "Simple midpoint" -> pair.simpleBhattacharyyaDistance();
+                case "Kinematic midpoint" -> pair.kinematicBhattacharyyaDistance();
+                case "Mahalanobis bank" -> pair.statisticalBhattacharyyaDistance();
+                default -> pair.actualBhattacharyyaDistance();
+            };
+            case BHATTACHARYYA_COEFFICIENT -> switch (label) {
+                case "Simple midpoint" -> pair.simpleBhattacharyyaCoefficient();
+                case "Kinematic midpoint" -> pair.kinematicBhattacharyyaCoefficient();
+                case "Mahalanobis bank" -> pair.statisticalBhattacharyyaCoefficient();
+                default -> pair.actualBhattacharyyaCoefficient();
+            };
+            case HELLINGER_DISTANCE -> switch (label) {
+                case "Simple midpoint" -> pair.simpleHellingerDistance();
+                case "Kinematic midpoint" -> pair.kinematicHellingerDistance();
+                case "Mahalanobis bank" -> pair.statisticalHellingerDistance();
+                default -> pair.actualHellingerDistance();
+            };
+            case BHATTACHARYYA_DISTANCE_6D -> switch (label) {
+                case "Simple midpoint" -> pair.simpleBhattacharyyaDistance6d();
+                case "Kinematic midpoint" -> pair.kinematicBhattacharyyaDistance6d();
+                case "Mahalanobis bank" -> pair.statisticalBhattacharyyaDistance6d();
+                default -> pair.actualBhattacharyyaDistance6d();
+            };
+            case BHATTACHARYYA_COEFFICIENT_6D -> switch (label) {
+                case "Simple midpoint" -> pair.simpleBhattacharyyaCoefficient6d();
+                case "Kinematic midpoint" -> pair.kinematicBhattacharyyaCoefficient6d();
+                case "Mahalanobis bank" -> pair.statisticalBhattacharyyaCoefficient6d();
+                default -> pair.actualBhattacharyyaCoefficient6d();
+            };
+            case HELLINGER_DISTANCE_6D -> switch (label) {
+                case "Simple midpoint" -> pair.simpleHellingerDistance6d();
+                case "Kinematic midpoint" -> pair.kinematicHellingerDistance6d();
+                case "Mahalanobis bank" -> pair.statisticalHellingerDistance6d();
+                default -> pair.actualHellingerDistance6d();
+            };
             case NLL -> negativeLogLikelihood;
             case MAHALANOBIS -> mahalanobisDistance;
             case STATIC_NLLR -> switch (label) {
@@ -345,7 +422,11 @@ public final class TrackStitchingAnalyzer {
                 default -> pair.actualLearnedNegativeLogLikelihoodRatio();
             };
         };
-        return new VariantScore(label, joinTimeSeconds, score);
+        double cost = metric == Metric.BHATTACHARYYA_COEFFICIENT
+                || metric == Metric.BHATTACHARYYA_COEFFICIENT_6D
+                ? 1.0 - score
+                : score;
+        return new VariantScore(label, joinTimeSeconds, score, cost);
     }
 
     private static TrackRecord joinTimingAnchor(Segment newSegment) {
@@ -552,6 +633,10 @@ public final class TrackStitchingAnalyzer {
         PropagatedState oldState = predictOld(oldAnchor, timeSeconds);
         PropagatedState newState = retrodictNew(newSegment, timeSeconds);
         InnovationScore score = innovationScore(oldState, newState);
+        DistributionScore distributionScore3d =
+                distributionScore(oldState, newState, POSITION_SIZE);
+        DistributionScore distributionScore6d =
+                distributionScore(oldState, newState, POSITION_VELOCITY_SIZE);
         double nll = canonicalNegativeLogLikelihood(score);
         double innovationVolume = innovationVolumeCubicKilometers(score.innovationCovariance());
         double staticDensity = configuration.falseAlarmRatePerCubicKilometer()
@@ -576,7 +661,13 @@ public final class TrackStitchingAnalyzer {
                 nll,
                 innovationVolume,
                 staticNllr,
-                learnedNllr);
+                learnedNllr,
+                distributionScore3d.bhattacharyyaDistance(),
+                distributionScore3d.bhattacharyyaCoefficient(),
+                distributionScore3d.hellingerDistance(),
+                distributionScore6d.bhattacharyyaDistance(),
+                distributionScore6d.bhattacharyyaCoefficient(),
+                distributionScore6d.hellingerDistance());
     }
 
     private static double lambdaEx(double densityPerCubicKilometer, double volumeCubicKilometers) {
@@ -639,6 +730,60 @@ public final class TrackStitchingAnalyzer {
                 likelihood.mahalanobisDistance(),
                 likelihood.squaredMahalanobisDistance(),
                 likelihood.logDeterminant());
+    }
+
+    static DistributionScore distributionScore(
+            PropagatedState oldState,
+            PropagatedState newState) {
+        return distributionScore(oldState, newState, POSITION_SIZE);
+    }
+
+    static DistributionScore distributionScore(
+            PropagatedState oldState,
+            PropagatedState newState,
+            int dimension) {
+        if (dimension != POSITION_SIZE && dimension != POSITION_VELOCITY_SIZE) {
+            throw new IllegalArgumentException("Overlap dimension must be 3D or 6D");
+        }
+        double[] oldMean = leadingStateVector(oldState.state(), dimension);
+        double[] newMean = leadingStateVector(newState.state(), dimension);
+        double[][] oldCovariance = leadingStateCovariance(oldState.covariance(), dimension);
+        double[][] newCovariance = leadingStateCovariance(newState.covariance(), dimension);
+        double[][] averageCovariance = LinearAlgebra.scale(
+                0.5, LinearAlgebra.add(oldCovariance, newCovariance));
+        double[] difference = LinearAlgebra.subtract(oldMean, newMean);
+        LinearAlgebra.SpdSolve averageSolve =
+                LinearAlgebra.solveSpd(averageCovariance, difference);
+        double quadratic = Math.max(
+                0.0, LinearAlgebra.dot(difference, averageSolve.solution()));
+        double oldLogDeterminant =
+                LinearAlgebra.solveSpd(oldCovariance, new double[dimension])
+                        .logDeterminant();
+        double newLogDeterminant =
+                LinearAlgebra.solveSpd(newCovariance, new double[dimension])
+                        .logDeterminant();
+        double determinantTerm = 0.5 * (
+                averageSolve.logDeterminant()
+                        - 0.5 * (oldLogDeterminant + newLogDeterminant));
+        double distance = Math.max(0.0, 0.125 * quadratic + determinantTerm);
+        double coefficient = Math.exp(-Math.min(745.0, distance));
+        coefficient = Math.max(0.0, Math.min(1.0, coefficient));
+        double hellinger = Math.sqrt(Math.max(0.0, 1.0 - coefficient));
+        return new DistributionScore(distance, coefficient, hellinger);
+    }
+
+    private static double[] leadingStateVector(double[] state, int dimension) {
+        double[] result = new double[dimension];
+        System.arraycopy(state, 0, result, 0, dimension);
+        return result;
+    }
+
+    private static double[][] leadingStateCovariance(double[][] covariance, int dimension) {
+        double[][] result = new double[dimension][dimension];
+        for (int row = 0; row < dimension; row++) {
+            System.arraycopy(covariance[row], 0, result[row], 0, dimension);
+        }
+        return result;
     }
 
     private static PropagatedState predictOld(TrackRecord record, double wantedTime) {
@@ -1078,6 +1223,12 @@ public final class TrackStitchingAnalyzer {
             List<Segment> oldSegments,
             List<Segment> newSegments,
             List<PairResult> pairs,
+            List<OptimalAssignment> bhattacharyyaDistanceAssignments,
+            List<OptimalAssignment> bhattacharyyaCoefficientAssignments,
+            List<OptimalAssignment> hellingerDistanceAssignments,
+            List<OptimalAssignment> sixDimensionalBhattacharyyaDistanceAssignments,
+            List<OptimalAssignment> sixDimensionalBhattacharyyaCoefficientAssignments,
+            List<OptimalAssignment> sixDimensionalHellingerDistanceAssignments,
             List<OptimalAssignment> nllAssignments,
             List<OptimalAssignment> mahalanobisAssignments,
             List<OptimalAssignment> staticNllrAssignments,
@@ -1089,6 +1240,27 @@ public final class TrackStitchingAnalyzer {
             oldSegments = oldSegments == null ? List.of() : List.copyOf(oldSegments);
             newSegments = newSegments == null ? List.of() : List.copyOf(newSegments);
             pairs = pairs == null ? List.of() : List.copyOf(pairs);
+            bhattacharyyaDistanceAssignments = bhattacharyyaDistanceAssignments == null
+                    ? List.of()
+                    : List.copyOf(bhattacharyyaDistanceAssignments);
+            bhattacharyyaCoefficientAssignments = bhattacharyyaCoefficientAssignments == null
+                    ? List.of()
+                    : List.copyOf(bhattacharyyaCoefficientAssignments);
+            hellingerDistanceAssignments = hellingerDistanceAssignments == null
+                    ? List.of()
+                    : List.copyOf(hellingerDistanceAssignments);
+            sixDimensionalBhattacharyyaDistanceAssignments =
+                    sixDimensionalBhattacharyyaDistanceAssignments == null
+                            ? List.of()
+                            : List.copyOf(sixDimensionalBhattacharyyaDistanceAssignments);
+            sixDimensionalBhattacharyyaCoefficientAssignments =
+                    sixDimensionalBhattacharyyaCoefficientAssignments == null
+                            ? List.of()
+                            : List.copyOf(sixDimensionalBhattacharyyaCoefficientAssignments);
+            sixDimensionalHellingerDistanceAssignments =
+                    sixDimensionalHellingerDistanceAssignments == null
+                            ? List.of()
+                            : List.copyOf(sixDimensionalHellingerDistanceAssignments);
             nllAssignments = nllAssignments == null ? List.of() : List.copyOf(nllAssignments);
             mahalanobisAssignments = mahalanobisAssignments == null
                     ? List.of()
@@ -1111,6 +1283,30 @@ public final class TrackStitchingAnalyzer {
             double kinematicJoinTimeSeconds,
             double statisticalJoinTimeSeconds,
             double actualJoinTimeSeconds,
+            double simpleBhattacharyyaDistance,
+            double kinematicBhattacharyyaDistance,
+            double statisticalBhattacharyyaDistance,
+            double actualBhattacharyyaDistance,
+            double simpleBhattacharyyaCoefficient,
+            double kinematicBhattacharyyaCoefficient,
+            double statisticalBhattacharyyaCoefficient,
+            double actualBhattacharyyaCoefficient,
+            double simpleHellingerDistance,
+            double kinematicHellingerDistance,
+            double statisticalHellingerDistance,
+            double actualHellingerDistance,
+            double simpleBhattacharyyaDistance6d,
+            double kinematicBhattacharyyaDistance6d,
+            double statisticalBhattacharyyaDistance6d,
+            double actualBhattacharyyaDistance6d,
+            double simpleBhattacharyyaCoefficient6d,
+            double kinematicBhattacharyyaCoefficient6d,
+            double statisticalBhattacharyyaCoefficient6d,
+            double actualBhattacharyyaCoefficient6d,
+            double simpleHellingerDistance6d,
+            double kinematicHellingerDistance6d,
+            double statisticalHellingerDistance6d,
+            double actualHellingerDistance6d,
             double simpleNegativeLogLikelihood,
             double kinematicNegativeLogLikelihood,
             double statisticalNegativeLogLikelihood,
@@ -1164,7 +1360,13 @@ public final class TrackStitchingAnalyzer {
             double negativeLogLikelihood,
             double innovationVolumeCubicKilometers,
             double staticNegativeLogLikelihoodRatio,
-            double learnedNegativeLogLikelihoodRatio) {
+            double learnedNegativeLogLikelihoodRatio,
+            double bhattacharyyaDistance,
+            double bhattacharyyaCoefficient,
+            double hellingerDistance,
+            double bhattacharyyaDistance6d,
+            double bhattacharyyaCoefficient6d,
+            double hellingerDistance6d) {
         public JoinEvaluation {
             variant = variant == null ? "" : variant;
             oldState = copyVector(oldState, STATE_SIZE);
@@ -1185,6 +1387,12 @@ public final class TrackStitchingAnalyzer {
                     new double[STATE_SIZE][STATE_SIZE],
                     new double[POSITION_SIZE],
                     new double[POSITION_SIZE][POSITION_SIZE],
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
                     Double.NaN,
                     Double.NaN,
                     Double.NaN,
@@ -1332,6 +1540,12 @@ public final class TrackStitchingAnalyzer {
             double logDeterminant) {
     }
 
+    record DistributionScore(
+            double bhattacharyyaDistance,
+            double bhattacharyyaCoefficient,
+            double hellingerDistance) {
+    }
+
     private record ScoredTime(double timeSeconds, double score) {
     }
 
@@ -1347,6 +1561,12 @@ public final class TrackStitchingAnalyzer {
     }
 
     private enum Metric {
+        BHATTACHARYYA_DISTANCE("Bhattacharyya Distance"),
+        BHATTACHARYYA_COEFFICIENT("Bhattacharyya Coefficient"),
+        HELLINGER_DISTANCE("Hellinger Distance"),
+        BHATTACHARYYA_DISTANCE_6D("6D Bhattacharyya Distance"),
+        BHATTACHARYYA_COEFFICIENT_6D("6D Bhattacharyya Coefficient"),
+        HELLINGER_DISTANCE_6D("6D Hellinger Distance"),
         NLL("NLL"),
         MAHALANOBIS("Mahalanobis"),
         STATIC_NLLR("Static/uniform NLLR"),
@@ -1366,7 +1586,8 @@ public final class TrackStitchingAnalyzer {
     private record VariantScore(
             String variant,
             double joinTimeSeconds,
-            double score) {
+            double score,
+            double cost) {
     }
 
     private record BirthPoint(

@@ -30,6 +30,7 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
@@ -57,19 +58,23 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final TrackStitchingAnalyzer analyzer = new TrackStitchingAnalyzer();
     private final TrackStitchingAnalysisExporter exporter = new TrackStitchingAnalysisExporter();
     private final JTabbedPane eventTabs = new JTabbedPane(JTabbedPane.TOP);
+    private final JTabbedPane outputTabs = new JTabbedPane(JTabbedPane.TOP);
+    private final CardLayout sectionLayout = new CardLayout();
+    private final JPanel sectionCards = new JPanel(sectionLayout);
     private final JTextArea summaryArea = new JTextArea();
     private final JTextArea assignmentArea = new JTextArea();
     private final DefaultTableModel metricsModel = new DefaultTableModel(
-            new Object[]{"Pair", "Estimated join time", "NLL", "Mahalanobis",
+            new Object[]{"Pair", "Estimated join time", "Bhattacharyya Distance",
+                    "Bhattacharyya Coefficient", "Hellinger Distance",
                     "State", "Poly"}, 0) {
         @Override
         public boolean isCellEditable(int row, int column) {
-            return column >= 4;
+            return isOverlayColumn(column);
         }
 
         @Override
         public Class<?> getColumnClass(int columnIndex) {
-            return columnIndex >= 4 ? Boolean.class : String.class;
+            return isOverlayColumn(columnIndex) ? Boolean.class : String.class;
         }
     };
     private final JTable metricsTable = new JTable(metricsModel);
@@ -85,8 +90,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final JTextField outputDirectoryField = new JTextField("", 18);
     private final JButton analyzeButton = new JButton("Run stitching analysis");
     private final JButton exportButton = new JButton("Output data to folder");
-    private final JToggleButton feasibilityButton = new JToggleButton("Feasibility", true);
-    private final JToggleButton alternativeButton = new JToggleButton("Alternative Hypothesis");
+    private final JToggleButton configurationSectionButton = new JToggleButton("Configuration");
+    private final JToggleButton analysisOutputSectionButton =
+            new JToggleButton("Analysis output", true);
     private final JToggleButton showAllButton = new JToggleButton("All", true);
     private final JToggleButton showGreyedButton = new JToggleButton("Greyed");
     private final JToggleButton showOnlyButton = new JToggleButton("Only Stitched");
@@ -96,8 +102,12 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private TrackStitchingAnalyzer.Configuration latestConfiguration;
     private boolean populatingMetricsTable;
     private boolean active = true;
+    private static final String CONFIGURATION_SECTION = "Configuration";
+    private static final String ANALYSIS_OUTPUT_SECTION = "Analysis output";
 
     private enum ScoreMode {
+        OVERLAP_3D,
+        OVERLAP_6D,
         FEASIBILITY,
         ALTERNATIVE
     }
@@ -144,23 +154,20 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         JPanel body = new JPanel(new BorderLayout(0, 10));
         body.setOpaque(false);
         body.setBorder(BorderFactory.createEmptyBorder(0, 10, 10, 10));
-        body.add(createConfigurationPanel(), BorderLayout.NORTH);
-        body.add(createOutputPanel(), BorderLayout.CENTER);
+        body.add(createSectionSelector(), BorderLayout.NORTH);
+        sectionCards.setOpaque(false);
+        sectionCards.add(createConfigurationPanel(), CONFIGURATION_SECTION);
+        sectionCards.add(createOutputPanel(), ANALYSIS_OUTPUT_SECTION);
+        body.add(sectionCards, BorderLayout.CENTER);
         add(body, BorderLayout.CENTER);
+        showSection(ANALYSIS_OUTPUT_SECTION);
 
         analyzeButton.addActionListener(event -> runAnalysis());
         resolutionField.addActionListener(event -> runAnalysis());
         falseAlarmRateField.addActionListener(event -> runAnalysis());
         birthRateField.addActionListener(event -> runAnalysis());
         allowDeadTracks.addActionListener(event -> runAnalysis());
-        feasibilityButton.addActionListener(event -> {
-            syncScoreModeButtons();
-            updateSelectedEvent();
-        });
-        alternativeButton.addActionListener(event -> {
-            syncScoreModeButtons();
-            updateSelectedEvent();
-        });
+        outputTabs.addChangeListener(event -> updateSelectedEvent());
         showAllButton.addActionListener(event -> updateSelectedEvent());
         showGreyedButton.addActionListener(event -> updateSelectedEvent());
         showOnlyButton.addActionListener(event -> updateSelectedEvent());
@@ -191,6 +198,46 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         backButton.addActionListener(event -> closeAction.run());
         panel.add(backButton, BorderLayout.EAST);
         return panel;
+    }
+
+    private JPanel createSectionSelector() {
+        JPanel panel = new JPanel(new GridLayout(1, 2, 7, 0));
+        panel.setOpaque(false);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        ButtonGroup group = new ButtonGroup();
+        group.add(configurationSectionButton);
+        group.add(analysisOutputSectionButton);
+        configurationSectionButton.addActionListener(
+                event -> showSection(CONFIGURATION_SECTION));
+        analysisOutputSectionButton.addActionListener(
+                event -> showSection(ANALYSIS_OUTPUT_SECTION));
+        panel.add(configurationSectionButton);
+        panel.add(analysisOutputSectionButton);
+        return panel;
+    }
+
+    private void showSection(String name) {
+        sectionLayout.show(sectionCards, name);
+        boolean configuration = CONFIGURATION_SECTION.equals(name);
+        configurationSectionButton.setSelected(configuration);
+        analysisOutputSectionButton.setSelected(!configuration);
+        styleSectionButton(configurationSectionButton, configuration);
+        styleSectionButton(analysisOutputSectionButton, !configuration);
+    }
+
+    private static void styleSectionButton(JToggleButton button, boolean selected) {
+        button.setOpaque(true);
+        button.setFocusPainted(false);
+        button.setFont(button.getFont().deriveFont(selected ? Font.BOLD : Font.PLAIN));
+        if (selected) {
+            button.setBackground(new Color(199, 231, 255));
+            button.setForeground(new Color(25, 31, 37));
+            button.setBorder(BorderFactory.createLineBorder(new Color(61, 126, 174)));
+        } else {
+            button.setBackground(new Color(241, 243, 245));
+            button.setForeground(new Color(67, 74, 82));
+            button.setBorder(BorderFactory.createLineBorder(new Color(178, 184, 190)));
+        }
     }
 
     private JPanel createConfigurationPanel() {
@@ -342,50 +389,23 @@ final class TrackStitchingAnalysisPanel extends JPanel {
 
         JPanel metricsPanel = new JPanel(new BorderLayout(0, 4));
         metricsPanel.setOpaque(false);
-        metricsPanel.add(createScoreModePanel(), BorderLayout.NORTH);
+        outputTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        outputTabs.addTab("Gaussian overlap 3D", emptyTabBody());
+        outputTabs.addTab("Gaussian overlap 6D", emptyTabBody());
+        outputTabs.addTab("Feasibility", emptyTabBody());
+        outputTabs.addTab("Alternative Hypothesis", emptyTabBody());
+        outputTabs.setSelectedIndex(0);
+        outputTabs.setPreferredSize(new Dimension(0, 32));
+        metricsPanel.add(outputTabs, BorderLayout.NORTH);
         JScrollPane metricsScroll = new JScrollPane(
                 metricsTable,
                 ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
                 ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         metricsScroll.setBorder(BorderFactory.createTitledBorder(
-                "Join time, NLL, and Mahalanobis metrics"));
+                "Join time and Gaussian-overlap metrics"));
         metricsPanel.add(metricsScroll, BorderLayout.CENTER);
         panel.add(metricsPanel, BorderLayout.CENTER);
         return panel;
-    }
-
-    private JPanel createScoreModePanel() {
-        JPanel panel = new JPanel(new GridLayout(1, 2, 6, 0));
-        panel.setOpaque(false);
-        ButtonGroup group = new ButtonGroup();
-        group.add(feasibilityButton);
-        group.add(alternativeButton);
-        feasibilityButton.setToolTipText("Show Gaussian NLL and Mahalanobis feasibility scores");
-        alternativeButton.setToolTipText("Show static and learned spatial-density NLLR scores");
-        panel.add(feasibilityButton);
-        panel.add(alternativeButton);
-        syncScoreModeButtons();
-        return panel;
-    }
-
-    private void syncScoreModeButtons() {
-        styleScoreModeButton(feasibilityButton, feasibilityButton.isSelected());
-        styleScoreModeButton(alternativeButton, alternativeButton.isSelected());
-    }
-
-    private static void styleScoreModeButton(JToggleButton button, boolean selected) {
-        button.setOpaque(true);
-        button.setFocusPainted(false);
-        button.setFont(button.getFont().deriveFont(selected ? Font.BOLD : Font.PLAIN));
-        if (selected) {
-            button.setBackground(new Color(188, 193, 199));
-            button.setForeground(Color.BLACK);
-            button.setBorder(BorderFactory.createLineBorder(new Color(91, 98, 106)));
-        } else {
-            button.setBackground(new Color(241, 243, 245));
-            button.setForeground(new Color(67, 74, 82));
-            button.setBorder(BorderFactory.createLineBorder(new Color(178, 184, 190)));
-        }
     }
 
     private static void configureOutputArea(JTextArea area) {
@@ -410,7 +430,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         metricsModel.addTableModelListener(event -> {
             if (populatingMetricsTable
                     || event.getType() != TableModelEvent.UPDATE
-                    || event.getColumn() < 4) {
+                    || !isOverlayColumn(event.getColumn())) {
                 return;
             }
             updateStitchingOverlays();
@@ -418,15 +438,32 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     }
 
     private void configureMetricColumnWidths() {
-        if (metricsTable.getColumnModel().getColumnCount() < 6) {
+        int columnCount = metricsTable.getColumnModel().getColumnCount();
+        if (columnCount < 6) {
             return;
         }
-        metricsTable.getColumnModel().getColumn(0).setPreferredWidth(85);
-        metricsTable.getColumnModel().getColumn(1).setPreferredWidth(172);
-        metricsTable.getColumnModel().getColumn(2).setPreferredWidth(92);
-        metricsTable.getColumnModel().getColumn(3).setPreferredWidth(104);
-        metricsTable.getColumnModel().getColumn(4).setPreferredWidth(46);
-        metricsTable.getColumnModel().getColumn(5).setPreferredWidth(46);
+        metricsTable.getColumnModel().getColumn(0).setPreferredWidth(82);
+        metricsTable.getColumnModel().getColumn(1).setPreferredWidth(160);
+        for (int column = 2; column < columnCount - 2; column++) {
+            metricsTable.getColumnModel().getColumn(column).setPreferredWidth(104);
+        }
+        metricsTable.getColumnModel().getColumn(columnCount - 2).setPreferredWidth(46);
+        metricsTable.getColumnModel().getColumn(columnCount - 1).setPreferredWidth(46);
+    }
+
+    private boolean isOverlayColumn(int column) {
+        return column >= 0
+                && column < metricsModel.getColumnCount()
+                && ("State".equals(metricsModel.getColumnName(column))
+                || "Poly".equals(metricsModel.getColumnName(column)));
+    }
+
+    private int stateColumnIndex() {
+        return Math.max(0, metricsModel.getColumnCount() - 2);
+    }
+
+    private int polyColumnIndex() {
+        return Math.max(0, metricsModel.getColumnCount() - 1);
     }
 
     private void runAnalysis() {
@@ -641,7 +678,12 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     }
 
     private ScoreMode scoreMode() {
-        return alternativeButton.isSelected() ? ScoreMode.ALTERNATIVE : ScoreMode.FEASIBILITY;
+        return switch (outputTabs.getSelectedIndex()) {
+            case 1 -> ScoreMode.OVERLAP_6D;
+            case 2 -> ScoreMode.FEASIBILITY;
+            case 3 -> ScoreMode.ALTERNATIVE;
+            default -> ScoreMode.OVERLAP_3D;
+        };
     }
 
     private static Set<String> candidateTrackIds(TrackStitchingAnalyzer.EventResult event) {
@@ -717,12 +759,33 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         text.append("Learned null birth density:\n  ")
                 .append(formatScientific(event.learnedBirthDensityPerCubicKilometer()))
                 .append(" births / km^3\n\n");
-        if (mode == ScoreMode.ALTERNATIVE) {
-            appendAssignments(text, "Static/uniform NLLR optimum", event.staticNllrAssignments());
-            appendAssignments(text, "Learned spatial NLLR optimum", event.learnedNllrAssignments());
-        } else {
-            appendAssignments(text, "NLL optimum", event.nllAssignments());
-            appendAssignments(text, "Mahalanobis optimum", event.mahalanobisAssignments());
+        switch (mode) {
+            case OVERLAP_3D -> {
+                appendAssignments(text, "3D Bhattacharyya Distance optimum",
+                        event.bhattacharyyaDistanceAssignments());
+                appendAssignments(text, "3D Bhattacharyya Coefficient optimum",
+                        event.bhattacharyyaCoefficientAssignments());
+                appendAssignments(text, "3D Hellinger Distance optimum",
+                        event.hellingerDistanceAssignments());
+            }
+            case OVERLAP_6D -> {
+                appendAssignments(text, "6D Bhattacharyya Distance optimum",
+                        event.sixDimensionalBhattacharyyaDistanceAssignments());
+                appendAssignments(text, "6D Bhattacharyya Coefficient optimum",
+                        event.sixDimensionalBhattacharyyaCoefficientAssignments());
+                appendAssignments(text, "6D Hellinger Distance optimum",
+                        event.sixDimensionalHellingerDistanceAssignments());
+            }
+            case FEASIBILITY -> {
+                appendAssignments(text, "NLL optimum", event.nllAssignments());
+                appendAssignments(text, "Mahalanobis optimum", event.mahalanobisAssignments());
+            }
+            case ALTERNATIVE -> {
+                appendAssignments(text, "Static/uniform NLLR optimum",
+                        event.staticNllrAssignments());
+                appendAssignments(text, "Learned spatial NLLR optimum",
+                        event.learnedNllrAssignments());
+            }
         }
         return text.toString();
     }
@@ -756,13 +819,15 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         populatingMetricsTable = true;
         metricsModel.setRowCount(0);
         ScoreMode mode = scoreMode();
-        if (mode == ScoreMode.ALTERNATIVE) {
-            metricsModel.setColumnIdentifiers(new Object[]{
+        switch (mode) {
+            case OVERLAP_3D, OVERLAP_6D -> metricsModel.setColumnIdentifiers(new Object[]{
+                    "Pair", "Estimated join time", "Bhattacharyya Distance",
+                    "Bhattacharyya Coefficient", "Hellinger Distance", "State", "Poly"});
+            case FEASIBILITY -> metricsModel.setColumnIdentifiers(new Object[]{
+                    "Pair", "Estimated join time", "NLL", "Mahalanobis", "State", "Poly"});
+            case ALTERNATIVE -> metricsModel.setColumnIdentifiers(new Object[]{
                     "Pair", "Estimated join time", "Static/uniform NLLR",
                     "Learned spatial NLLR", "State", "Poly"});
-        } else {
-            metricsModel.setColumnIdentifiers(new Object[]{
-                    "Pair", "Estimated join time", "NLL", "Mahalanobis", "State", "Poly"});
         }
         configureMetricColumnWidths();
         List<MetricRow> rows = new ArrayList<>();
@@ -774,48 +839,36 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                     pairName,
                     "Simple midpoint",
                     "Simple midpoint @ " + formatTime(pair.simpleJoinTimeSeconds()),
-                    mode == ScoreMode.ALTERNATIVE
-                            ? pair.simpleStaticNegativeLogLikelihoodRatio()
-                            : pair.simpleNegativeLogLikelihood(),
-                    mode == ScoreMode.ALTERNATIVE
-                            ? pair.simpleLearnedNegativeLogLikelihoodRatio()
-                            : pair.simpleMahalanobisDistance()));
+                    firstMetric(pair, "Simple midpoint", mode),
+                    secondMetric(pair, "Simple midpoint", mode),
+                    thirdMetric(pair, "Simple midpoint", mode)));
             rows.add(addMetricRow(
                     event,
                     pair,
                     pairName,
                     "Kinematic midpoint",
                     "Kinematic midpoint @ " + formatTime(pair.kinematicJoinTimeSeconds()),
-                    mode == ScoreMode.ALTERNATIVE
-                            ? pair.kinematicStaticNegativeLogLikelihoodRatio()
-                            : pair.kinematicNegativeLogLikelihood(),
-                    mode == ScoreMode.ALTERNATIVE
-                            ? pair.kinematicLearnedNegativeLogLikelihoodRatio()
-                            : pair.kinematicMahalanobisDistance()));
+                    firstMetric(pair, "Kinematic midpoint", mode),
+                    secondMetric(pair, "Kinematic midpoint", mode),
+                    thirdMetric(pair, "Kinematic midpoint", mode)));
             rows.add(addMetricRow(
                     event,
                     pair,
                     pairName,
                     "Mahalanobis bank",
                     "Mahalanobis bank @ " + formatTime(pair.statisticalJoinTimeSeconds()),
-                    mode == ScoreMode.ALTERNATIVE
-                            ? pair.statisticalStaticNegativeLogLikelihoodRatio()
-                            : pair.statisticalNegativeLogLikelihood(),
-                    mode == ScoreMode.ALTERNATIVE
-                            ? pair.statisticalLearnedNegativeLogLikelihoodRatio()
-                            : pair.statisticalMahalanobisDistance()));
+                    firstMetric(pair, "Mahalanobis bank", mode),
+                    secondMetric(pair, "Mahalanobis bank", mode),
+                    thirdMetric(pair, "Mahalanobis bank", mode)));
             rows.add(addMetricRow(
                     event,
                     pair,
                     pairName,
                     "Truth RMS",
                     "Truth RMS @ " + formatTime(pair.actualJoinTimeSeconds()),
-                    mode == ScoreMode.ALTERNATIVE
-                            ? pair.actualStaticNegativeLogLikelihoodRatio()
-                            : pair.actualNegativeLogLikelihood(),
-                    mode == ScoreMode.ALTERNATIVE
-                            ? pair.actualLearnedNegativeLogLikelihoodRatio()
-                            : pair.actualMahalanobisDistance()));
+                    firstMetric(pair, "Truth RMS", mode),
+                    secondMetric(pair, "Truth RMS", mode),
+                    thirdMetric(pair, "Truth RMS", mode)));
         }
         metricRows = List.copyOf(rows);
         populatingMetricsTable = false;
@@ -828,17 +881,30 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             String pairName,
             String variant,
             String estimate,
-            double negativeLogLikelihood,
-            double mahalanobisDistance) {
-        metricsModel.addRow(new Object[]{
-                pairName,
-                estimate,
-                formatNumber(negativeLogLikelihood),
-                formatNumber(mahalanobisDistance),
-                false,
-                false
-        });
+            double firstMetric,
+            double secondMetric,
+            double thirdMetric) {
         ScoreMode mode = scoreMode();
+        if (isOverlapMode(mode)) {
+            metricsModel.addRow(new Object[]{
+                    pairName,
+                    estimate,
+                    formatNumber(firstMetric),
+                    formatNumber(secondMetric),
+                    formatNumber(thirdMetric),
+                    false,
+                    false
+            });
+        } else {
+            metricsModel.addRow(new Object[]{
+                    pairName,
+                    estimate,
+                    formatNumber(firstMetric),
+                    formatNumber(secondMetric),
+                    false,
+                    false
+            });
+        }
         return new MetricRow(
                 pairName,
                 variant,
@@ -846,12 +912,133 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 diagnosticsFor(event, pair),
                 segmentFor(event.oldSegments(), pair.oldTrackId()),
                 segmentFor(event.newSegments(), pair.newTrackId()),
-                isAssigned(mode == ScoreMode.ALTERNATIVE
-                        ? event.staticNllrAssignments()
-                        : event.nllAssignments(), pair, variant),
-                isAssigned(mode == ScoreMode.ALTERNATIVE
-                        ? event.learnedNllrAssignments()
-                        : event.mahalanobisAssignments(), pair, variant));
+                isAssigned(firstAssignments(event, mode), pair, variant),
+                isAssigned(secondAssignments(event, mode), pair, variant),
+                isAssigned(thirdAssignments(event, mode), pair, variant));
+    }
+
+    private static double firstMetric(
+            TrackStitchingAnalyzer.PairResult pair,
+            String variant,
+            ScoreMode mode) {
+        return switch (mode) {
+            case OVERLAP_3D -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleBhattacharyyaDistance();
+                case "Kinematic midpoint" -> pair.kinematicBhattacharyyaDistance();
+                case "Mahalanobis bank" -> pair.statisticalBhattacharyyaDistance();
+                default -> pair.actualBhattacharyyaDistance();
+            };
+            case OVERLAP_6D -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleBhattacharyyaDistance6d();
+                case "Kinematic midpoint" -> pair.kinematicBhattacharyyaDistance6d();
+                case "Mahalanobis bank" -> pair.statisticalBhattacharyyaDistance6d();
+                default -> pair.actualBhattacharyyaDistance6d();
+            };
+            case FEASIBILITY -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleNegativeLogLikelihood();
+                case "Kinematic midpoint" -> pair.kinematicNegativeLogLikelihood();
+                case "Mahalanobis bank" -> pair.statisticalNegativeLogLikelihood();
+                default -> pair.actualNegativeLogLikelihood();
+            };
+            case ALTERNATIVE -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleStaticNegativeLogLikelihoodRatio();
+                case "Kinematic midpoint" -> pair.kinematicStaticNegativeLogLikelihoodRatio();
+                case "Mahalanobis bank" -> pair.statisticalStaticNegativeLogLikelihoodRatio();
+                default -> pair.actualStaticNegativeLogLikelihoodRatio();
+            };
+        };
+    }
+
+    private static double secondMetric(
+            TrackStitchingAnalyzer.PairResult pair,
+            String variant,
+            ScoreMode mode) {
+        return switch (mode) {
+            case OVERLAP_3D -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleBhattacharyyaCoefficient();
+                case "Kinematic midpoint" -> pair.kinematicBhattacharyyaCoefficient();
+                case "Mahalanobis bank" -> pair.statisticalBhattacharyyaCoefficient();
+                default -> pair.actualBhattacharyyaCoefficient();
+            };
+            case OVERLAP_6D -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleBhattacharyyaCoefficient6d();
+                case "Kinematic midpoint" -> pair.kinematicBhattacharyyaCoefficient6d();
+                case "Mahalanobis bank" -> pair.statisticalBhattacharyyaCoefficient6d();
+                default -> pair.actualBhattacharyyaCoefficient6d();
+            };
+            case FEASIBILITY -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleMahalanobisDistance();
+                case "Kinematic midpoint" -> pair.kinematicMahalanobisDistance();
+                case "Mahalanobis bank" -> pair.statisticalMahalanobisDistance();
+                default -> pair.actualMahalanobisDistance();
+            };
+            case ALTERNATIVE -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleLearnedNegativeLogLikelihoodRatio();
+                case "Kinematic midpoint" -> pair.kinematicLearnedNegativeLogLikelihoodRatio();
+                case "Mahalanobis bank" -> pair.statisticalLearnedNegativeLogLikelihoodRatio();
+                default -> pair.actualLearnedNegativeLogLikelihoodRatio();
+            };
+        };
+    }
+
+    private static double thirdMetric(
+            TrackStitchingAnalyzer.PairResult pair,
+            String variant,
+            ScoreMode mode) {
+        if (!isOverlapMode(mode)) {
+            return Double.NaN;
+        }
+        return switch (mode) {
+            case OVERLAP_3D -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleHellingerDistance();
+                case "Kinematic midpoint" -> pair.kinematicHellingerDistance();
+                case "Mahalanobis bank" -> pair.statisticalHellingerDistance();
+                default -> pair.actualHellingerDistance();
+            };
+            case OVERLAP_6D -> switch (variant) {
+                case "Simple midpoint" -> pair.simpleHellingerDistance6d();
+                case "Kinematic midpoint" -> pair.kinematicHellingerDistance6d();
+                case "Mahalanobis bank" -> pair.statisticalHellingerDistance6d();
+                default -> pair.actualHellingerDistance6d();
+            };
+            default -> Double.NaN;
+        };
+    }
+
+    private static boolean isOverlapMode(ScoreMode mode) {
+        return mode == ScoreMode.OVERLAP_3D || mode == ScoreMode.OVERLAP_6D;
+    }
+
+    private static List<TrackStitchingAnalyzer.OptimalAssignment> firstAssignments(
+            TrackStitchingAnalyzer.EventResult event,
+            ScoreMode mode) {
+        return switch (mode) {
+            case OVERLAP_3D -> event.bhattacharyyaDistanceAssignments();
+            case OVERLAP_6D -> event.sixDimensionalBhattacharyyaDistanceAssignments();
+            case FEASIBILITY -> event.nllAssignments();
+            case ALTERNATIVE -> event.staticNllrAssignments();
+        };
+    }
+
+    private static List<TrackStitchingAnalyzer.OptimalAssignment> secondAssignments(
+            TrackStitchingAnalyzer.EventResult event,
+            ScoreMode mode) {
+        return switch (mode) {
+            case OVERLAP_3D -> event.bhattacharyyaCoefficientAssignments();
+            case OVERLAP_6D -> event.sixDimensionalBhattacharyyaCoefficientAssignments();
+            case FEASIBILITY -> event.mahalanobisAssignments();
+            case ALTERNATIVE -> event.learnedNllrAssignments();
+        };
+    }
+
+    private static List<TrackStitchingAnalyzer.OptimalAssignment> thirdAssignments(
+            TrackStitchingAnalyzer.EventResult event,
+            ScoreMode mode) {
+        return switch (mode) {
+            case OVERLAP_3D -> event.hellingerDistanceAssignments();
+            case OVERLAP_6D -> event.sixDimensionalHellingerDistanceAssignments();
+            default -> List.of();
+        };
     }
 
     private void updateStitchingOverlays() {
@@ -861,9 +1048,11 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         }
         List<EarthMapCanvas.StitchingOverlay> overlays = new ArrayList<>();
         int rowCount = Math.min(metricRows.size(), metricsModel.getRowCount());
+        int stateColumn = stateColumnIndex();
+        int polyColumn = polyColumnIndex();
         for (int row = 0; row < rowCount; row++) {
-            boolean showStates = Boolean.TRUE.equals(metricsModel.getValueAt(row, 4));
-            boolean showPolynomial = Boolean.TRUE.equals(metricsModel.getValueAt(row, 5));
+            boolean showStates = Boolean.TRUE.equals(metricsModel.getValueAt(row, stateColumn));
+            boolean showPolynomial = Boolean.TRUE.equals(metricsModel.getValueAt(row, polyColumn));
             if (!showStates && !showPolynomial) {
                 continue;
             }
@@ -1096,14 +1285,27 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     }
 
     private Color metricRowBackground(MetricRow row) {
-        if (row.nllOptimal() && row.mahalanobisOptimal()) {
+        int optimumCount = 0;
+        if (row.firstOptimal()) {
+            optimumCount++;
+        }
+        if (row.secondOptimal()) {
+            optimumCount++;
+        }
+        if (row.thirdOptimal()) {
+            optimumCount++;
+        }
+        if (optimumCount >= 2) {
             return new Color(220, 246, 225);
         }
-        if (row.nllOptimal()) {
+        if (row.firstOptimal()) {
             return new Color(255, 244, 204);
         }
-        if (row.mahalanobisOptimal()) {
+        if (row.secondOptimal()) {
             return new Color(220, 239, 255);
+        }
+        if (row.thirdOptimal()) {
+            return new Color(235, 226, 255);
         }
         return Color.WHITE;
     }
@@ -1133,8 +1335,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             TrackStitchingAnalyzer.PairDiagnostics diagnostics,
             TrackStitchingAnalyzer.Segment oldSegment,
             TrackStitchingAnalyzer.Segment newSegment,
-            boolean nllOptimal,
-            boolean mahalanobisOptimal) {
+            boolean firstOptimal,
+            boolean secondOptimal,
+            boolean thirdOptimal) {
     }
 
     private static JPanel emptyTabBody() {

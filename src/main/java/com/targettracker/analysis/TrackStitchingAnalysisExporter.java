@@ -189,6 +189,30 @@ public final class TrackStitchingAnalysisExporter {
                     "kinematic_join_time_seconds",
                     "mahalanobis_bank_join_time_seconds",
                     "truth_rms_join_time_seconds",
+                    "simple_bhattacharyya_distance",
+                    "kinematic_bhattacharyya_distance",
+                    "mahalanobis_bank_bhattacharyya_distance",
+                    "truth_rms_bhattacharyya_distance",
+                    "simple_bhattacharyya_coefficient",
+                    "kinematic_bhattacharyya_coefficient",
+                    "mahalanobis_bank_bhattacharyya_coefficient",
+                    "truth_rms_bhattacharyya_coefficient",
+                    "simple_hellinger_distance",
+                    "kinematic_hellinger_distance",
+                    "mahalanobis_bank_hellinger_distance",
+                    "truth_rms_hellinger_distance",
+                    "simple_bhattacharyya_distance_6d",
+                    "kinematic_bhattacharyya_distance_6d",
+                    "mahalanobis_bank_bhattacharyya_distance_6d",
+                    "truth_rms_bhattacharyya_distance_6d",
+                    "simple_bhattacharyya_coefficient_6d",
+                    "kinematic_bhattacharyya_coefficient_6d",
+                    "mahalanobis_bank_bhattacharyya_coefficient_6d",
+                    "truth_rms_bhattacharyya_coefficient_6d",
+                    "simple_hellinger_distance_6d",
+                    "kinematic_hellinger_distance_6d",
+                    "mahalanobis_bank_hellinger_distance_6d",
+                    "truth_rms_hellinger_distance_6d",
                     "simple_nll",
                     "kinematic_nll",
                     "mahalanobis_bank_nll",
@@ -219,6 +243,30 @@ public final class TrackStitchingAnalysisExporter {
                             pair.kinematicJoinTimeSeconds(),
                             pair.statisticalJoinTimeSeconds(),
                             pair.actualJoinTimeSeconds(),
+                            pair.simpleBhattacharyyaDistance(),
+                            pair.kinematicBhattacharyyaDistance(),
+                            pair.statisticalBhattacharyyaDistance(),
+                            pair.actualBhattacharyyaDistance(),
+                            pair.simpleBhattacharyyaCoefficient(),
+                            pair.kinematicBhattacharyyaCoefficient(),
+                            pair.statisticalBhattacharyyaCoefficient(),
+                            pair.actualBhattacharyyaCoefficient(),
+                            pair.simpleHellingerDistance(),
+                            pair.kinematicHellingerDistance(),
+                            pair.statisticalHellingerDistance(),
+                            pair.actualHellingerDistance(),
+                            pair.simpleBhattacharyyaDistance6d(),
+                            pair.kinematicBhattacharyyaDistance6d(),
+                            pair.statisticalBhattacharyyaDistance6d(),
+                            pair.actualBhattacharyyaDistance6d(),
+                            pair.simpleBhattacharyyaCoefficient6d(),
+                            pair.kinematicBhattacharyyaCoefficient6d(),
+                            pair.statisticalBhattacharyyaCoefficient6d(),
+                            pair.actualBhattacharyyaCoefficient6d(),
+                            pair.simpleHellingerDistance6d(),
+                            pair.kinematicHellingerDistance6d(),
+                            pair.statisticalHellingerDistance6d(),
+                            pair.actualHellingerDistance6d(),
                             pair.simpleNegativeLogLikelihood(),
                             pair.kinematicNegativeLogLikelihood(),
                             pair.statisticalNegativeLogLikelihood(),
@@ -256,6 +304,18 @@ public final class TrackStitchingAnalysisExporter {
             writer.newLine();
             for (int eventIndex = 0; eventIndex < events.size(); eventIndex++) {
                 TrackStitchingAnalyzer.EventResult event = events.get(eventIndex);
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.bhattacharyyaDistanceAssignments());
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.bhattacharyyaCoefficientAssignments());
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.hellingerDistanceAssignments());
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.sixDimensionalBhattacharyyaDistanceAssignments());
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.sixDimensionalBhattacharyyaCoefficientAssignments());
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.sixDimensionalHellingerDistanceAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(), event.nllAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(), event.mahalanobisAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(), event.staticNllrAssignments());
@@ -426,8 +486,10 @@ public final class TrackStitchingAnalysisExporter {
                     + "timestamp, including old/new candidate flags and anchor states/covariances.\n");
             writer.write("- `summary/pair_time_estimates.csv`: all join-time estimates and metric values "
                     + "for each old-track/new-track pair.\n");
-            writer.write("- `summary/optimal_assignments.csv`: Hungarian-solver assignments for NLL, "
-                    + "Mahalanobis, static/uniform NLLR, and learned-spatial NLLR.\n");
+            writer.write("- `summary/optimal_assignments.csv`: Hungarian-solver assignments for "
+                    + "3D and 6D Bhattacharyya Distance, Bhattacharyya Coefficient, "
+                    + "Hellinger Distance, NLL, Mahalanobis, static/uniform NLLR, and "
+                    + "learned-spatial NLLR.\n");
             writer.write("- `bank_evaluations/bank_evaluations.csv`: one row per candidate pair per "
                     + "time-bank sample. It includes old predicted state/covariance, new retrodicted "
                     + "state/covariance, 3D position innovation, 3x3 position innovation "

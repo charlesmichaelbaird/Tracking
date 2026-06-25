@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-/** Deterministic check for stitching event discovery, timing, and NLL costs. */
+/** Deterministic check for stitching event discovery, timing, and compatibility costs. */
 public final class TrackStitchingAnalyzerSmokeTest {
     private TrackStitchingAnalyzerSmokeTest() {
     }
@@ -70,13 +70,44 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 || !Double.isFinite(pair.statisticalNegativeLogLikelihood())) {
             throw new AssertionError("Truth identity and NLL cost should be available");
         }
+        if (!Double.isFinite(pair.simpleBhattacharyyaDistance())
+                || !Double.isFinite(pair.simpleBhattacharyyaCoefficient())
+                || !Double.isFinite(pair.simpleHellingerDistance())
+                || pair.simpleBhattacharyyaCoefficient() < 0.0
+                || pair.simpleBhattacharyyaCoefficient() > 1.0
+                || pair.simpleHellingerDistance() < 0.0
+                || pair.simpleHellingerDistance() > 1.0) {
+            throw new AssertionError("Gaussian-overlap metrics should be available");
+        }
+        if (events.get(0).bhattacharyyaDistanceAssignments().size() != 1
+                || events.get(0).bhattacharyyaCoefficientAssignments().size() != 1
+                || events.get(0).hellingerDistanceAssignments().size() != 1
+                || events.get(0).sixDimensionalBhattacharyyaDistanceAssignments().size() != 1
+                || events.get(0)
+                .sixDimensionalBhattacharyyaCoefficientAssignments().size() != 1
+                || events.get(0).sixDimensionalHellingerDistanceAssignments().size() != 1) {
+            throw new AssertionError("Expected Hungarian optima for Gaussian-overlap metrics");
+        }
         if (events.get(0).nllAssignments().size() != 1
                 || events.get(0).mahalanobisAssignments().size() != 1
                 || !events.get(0).nllAssignments().get(0).oldTrackId().equals("TRK-001")
                 || !events.get(0).nllAssignments().get(0).newTrackId().equals("TRK-002")) {
             throw new AssertionError("Expected Hungarian optimum for the single feasible pair");
         }
-        if (events.get(0).nllAssignments().stream()
+        if (events.get(0).bhattacharyyaDistanceAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).bhattacharyyaCoefficientAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).hellingerDistanceAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).sixDimensionalBhattacharyyaDistanceAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0)
+                .sixDimensionalBhattacharyyaCoefficientAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).sixDimensionalHellingerDistanceAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).nllAssignments().stream()
                 .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
                 || events.get(0).mahalanobisAssignments().stream()
                 .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
@@ -378,6 +409,27 @@ public final class TrackStitchingAnalyzerSmokeTest {
         requireClose(expectedNll,
                 TrackStitchingAnalyzer.canonicalNegativeLogLikelihood(score),
                 "position-only Gaussian NLL");
+        TrackStitchingAnalyzer.DistributionScore distribution =
+                TrackStitchingAnalyzer.distributionScore(
+                        new TrackStitchingAnalyzer.PropagatedState(oldState, oldCovariance),
+                        new TrackStitchingAnalyzer.PropagatedState(newState, newCovariance));
+        requireClose(0.5, distribution.bhattacharyyaDistance(),
+                "Bhattacharyya distance");
+        requireClose(Math.exp(-0.5), distribution.bhattacharyyaCoefficient(),
+                "Bhattacharyya coefficient");
+        requireClose(Math.sqrt(1.0 - Math.exp(-0.5)), distribution.hellingerDistance(),
+                "Hellinger distance");
+        TrackStitchingAnalyzer.DistributionScore distribution6d =
+                TrackStitchingAnalyzer.distributionScore(
+                        new TrackStitchingAnalyzer.PropagatedState(oldState, oldCovariance),
+                        new TrackStitchingAnalyzer.PropagatedState(newState, newCovariance),
+                        6);
+        requireClose(1250.5, distribution6d.bhattacharyyaDistance(),
+                "6D Bhattacharyya distance");
+        if (distribution6d.bhattacharyyaCoefficient() >= 1.0e-300
+                || distribution6d.hellingerDistance() < 0.999999) {
+            throw new AssertionError("6D Gaussian overlap should reflect velocity mismatch");
+        }
     }
 
     private static void verifyBackwardPropagationAndAnchors() {

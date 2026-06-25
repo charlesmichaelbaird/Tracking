@@ -24,6 +24,7 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
         System.setProperty("java.awt.headless", "true");
         AtomicReference<ScenarioPlayback> playbackReference = new AtomicReference<>();
         AtomicReference<JTabbedPane> tabsReference = new AtomicReference<>();
+        AtomicReference<JTabbedPane> outputTabsReference = new AtomicReference<>();
         AtomicReference<JTable> tableReference = new AtomicReference<>();
         SwingUtilities.invokeAndWait(() -> {
             RecordedScenario scenario = scenario();
@@ -67,6 +68,7 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                     });
             playbackReference.set(playback);
             tabsReference.set((JTabbedPane) panel.tabStrip());
+            outputTabsReference.set(findTabbedPaneWithTitle(panel, "Gaussian overlap 3D"));
             tableReference.set(findTable(panel));
         });
 
@@ -80,18 +82,32 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                 throw new AssertionError("Selecting the stitching tab should seek replay time");
             }
             JTable table = tableReference.get();
-            if (table == null || table.getColumnCount() != 6) {
-                throw new AssertionError("Stitching metrics table should include overlay toggles");
+            JTabbedPane outputTabs = outputTabsReference.get();
+            if (outputTabs == null
+                    || outputTabs.getSelectedIndex() != 0
+                    || !"Gaussian overlap 3D".equals(outputTabs.getTitleAt(0))
+                    || outputTabs.getTabCount() < 2
+                    || !"Gaussian overlap 6D".equals(outputTabs.getTitleAt(1))) {
+                throw new AssertionError("Analysis output should default to 3D Gaussian overlap");
             }
-            if (!"State".equals(table.getColumnName(4))
-                    || !"Poly".equals(table.getColumnName(5))
-                    || table.getColumnClass(4) != Boolean.class
-                    || table.getColumnClass(5) != Boolean.class) {
+            if (table == null || table.getColumnCount() != 7) {
+                throw new AssertionError(
+                        "Stitching metrics table should include overlap metrics and toggles");
+            }
+            if (!"Bhattacharyya Distance".equals(table.getColumnName(2))
+                    || !"Bhattacharyya Coefficient".equals(table.getColumnName(3))
+                    || !"Hellinger Distance".equals(table.getColumnName(4))) {
+                throw new AssertionError("Gaussian-overlap metric columns should be visible");
+            }
+            if (!"State".equals(table.getColumnName(5))
+                    || !"Poly".equals(table.getColumnName(6))
+                    || table.getColumnClass(5) != Boolean.class
+                    || table.getColumnClass(6) != Boolean.class) {
                 throw new AssertionError("Overlay columns should be Boolean State/Poly toggles");
             }
             if (table.getRowCount() > 0) {
-                table.setValueAt(Boolean.TRUE, 0, 4);
                 table.setValueAt(Boolean.TRUE, 0, 5);
+                table.setValueAt(Boolean.TRUE, 0, 6);
             }
         });
         System.out.println("TrackStitchingAnalysisPanelSmokeTest passed");
@@ -106,6 +122,25 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                 JTable table = findTable(child);
                 if (table != null) {
                     return table;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static JTabbedPane findTabbedPaneWithTitle(Container container, String title) {
+        for (Component component : container.getComponents()) {
+            if (component instanceof JTabbedPane tabs) {
+                for (int index = 0; index < tabs.getTabCount(); index++) {
+                    if (title.equals(tabs.getTitleAt(index))) {
+                        return tabs;
+                    }
+                }
+            }
+            if (component instanceof Container child) {
+                JTabbedPane tabs = findTabbedPaneWithTitle(child, title);
+                if (tabs != null) {
+                    return tabs;
                 }
             }
         }
