@@ -125,20 +125,62 @@ public final class EarthMapCanvasSmokeTest {
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.CIRCLE);
         click(canvas, 420, 280);
         click(canvas, 480, 280);
+        if (!canvas.hasPendingPathDirectionSelection()) {
+            throw new AssertionError(
+                    "Circle drawing should ask for a start point after the loop is placed");
+        }
+        GeodeticPoint circleStartBefore = Wgs84.toGeodetic(target.path().get(0));
         click(canvas, 480, 280);
-        click(canvas, 420, 220);
+        if (!canvas.hasPendingPathDirectionSelection()) {
+            throw new AssertionError(
+                    "Circle drawing should ask for direction after the start point is placed");
+        }
+        click(canvas, 480, 220);
+        if (canvas.hasPendingPathDirectionSelection()) {
+            throw new AssertionError(
+                    "Circle drawing should finish after start point and direction clicks");
+        }
         if (target.path().size() < 40) {
             throw new AssertionError("Circle drawing should create a sampled closed trajectory");
         }
+        GeodeticPoint circleStartAfter = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(circleStartAfter.longitudeDegrees() - circleStartBefore.longitudeDegrees())
+                < 1.0e-4) {
+            throw new AssertionError(
+                    "Circle start-point click should rotate the loop to the chosen point");
+        }
+        assertTrajectoryArrowToggleChangesRendering(canvas, "Circle");
         target.clearPath();
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.RACETRACK);
         click(canvas, 420, 280);
         click(canvas, 520, 280);
-        click(canvas, 420, 255);
+        if (!canvas.hasPendingPathDirectionSelection()) {
+            throw new AssertionError(
+                    "Racetrack drawing should ask for a start point after the loop is placed");
+        }
+        GeodeticPoint raceStartBefore = Wgs84.toGeodetic(target.path().get(0));
+        click(canvas, 470, 255);
+        if (!canvas.hasPendingPathDirectionSelection()) {
+            throw new AssertionError(
+                    "Racetrack drawing should ask for direction after the start point is placed");
+        }
         click(canvas, 520, 255);
+        if (canvas.hasPendingPathDirectionSelection()) {
+            throw new AssertionError(
+                    "Racetrack drawing should finish after start point and direction clicks");
+        }
         if (target.path().size() < 40) {
             throw new AssertionError("Racetrack drawing should create a sampled loop trajectory");
         }
+        GeodeticPoint raceStartAfter = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(raceStartAfter.longitudeDegrees() - raceStartBefore.longitudeDegrees())
+                < 1.0e-4) {
+            throw new AssertionError(
+                    "Racetrack start-point click should rotate the loop to the chosen point");
+        }
+        assertTrajectoryArrowToggleChangesRendering(canvas, "Racetrack");
+        canvas.setTrajectoryArrowsVisible(false);
+        canvas.setTrajectoryArrowsVisible(true);
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.FREE_HAND);
         canvas.focusOnPoints(target.path());
         if ("1.0×".equals(canvas.viewDescription())) {
@@ -195,6 +237,40 @@ public final class EarthMapCanvasSmokeTest {
 
     private static void click(EarthMapCanvas canvas, int x, int y) {
         press(canvas, x, y);
+    }
+
+    private static void assertTrajectoryArrowToggleChangesRendering(
+            EarthMapCanvas canvas,
+            String shapeName) {
+        canvas.setTrajectoryArrowsVisible(true);
+        BufferedImage withArrow = render(canvas);
+        canvas.setTrajectoryArrowsVisible(false);
+        BufferedImage withoutArrow = render(canvas);
+        canvas.setTrajectoryArrowsVisible(true);
+        if (differentPixelCount(withArrow, withoutArrow) < 30) {
+            throw new AssertionError(shapeName + " arrow toggle should change the rendering");
+        }
+    }
+
+    private static BufferedImage render(EarthMapCanvas canvas) {
+        BufferedImage image = new BufferedImage(
+                canvas.getWidth(), canvas.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        canvas.paint(graphics);
+        graphics.dispose();
+        return image;
+    }
+
+    private static int differentPixelCount(BufferedImage first, BufferedImage second) {
+        int changed = 0;
+        for (int y = 0; y < first.getHeight(); y++) {
+            for (int x = 0; x < first.getWidth(); x++) {
+                if (first.getRGB(x, y) != second.getRGB(x, y)) {
+                    changed++;
+                }
+            }
+        }
+        return changed;
     }
 
     private static void press(EarthMapCanvas canvas, int x, int y) {

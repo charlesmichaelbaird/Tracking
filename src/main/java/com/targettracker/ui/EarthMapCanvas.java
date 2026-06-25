@@ -131,6 +131,7 @@ final class EarthMapCanvas extends JPanel {
     private boolean targetDrawingEnabled = true;
     private boolean blackoutEditingEnabled;
     private boolean moveToolEnabled;
+    private boolean trajectoryArrowsVisible = true;
     private boolean panning;
     private TargetTrajectory finishedSegmentedTarget;
     private Point mousePoint;
@@ -378,6 +379,7 @@ final class EarthMapCanvas extends JPanel {
         blackoutFirstCorner = null;
         finishedSegmentedTarget = null;
         shapeAnchor = null;
+        clearDirectionPlacement();
         repaint();
     }
 
@@ -390,6 +392,7 @@ final class EarthMapCanvas extends JPanel {
             draggedTarget = null;
             trajectoryDragAnchor = null;
             shapeAnchor = null;
+            clearDirectionPlacement();
         }
         repaint();
     }
@@ -411,6 +414,7 @@ final class EarthMapCanvas extends JPanel {
         blackoutDrawing = false;
         blackoutFirstCorner = null;
         shapeAnchor = null;
+        clearDirectionPlacement();
         if (!enabled) {
             targetDragging = false;
             blackoutDragging = false;
@@ -424,11 +428,13 @@ final class EarthMapCanvas extends JPanel {
         repaint();
     }
 
+    void setTrajectoryArrowsVisible(boolean visible) {
+        trajectoryArrowsVisible = visible;
+        repaint();
+    }
+
     void finishPath() {
-        if (directionPlacementTarget != null
-                && directionPlacementTarget.path().isEmpty()) {
-            clearDirectionPlacement();
-        }
+        clearDirectionPlacement();
         freeHandDrawing = false;
         blackoutDrawing = false;
         blackoutFirstCorner = null;
@@ -454,6 +460,7 @@ final class EarthMapCanvas extends JPanel {
         blackoutFirstCorner = null;
         finishedSegmentedTarget = null;
         mousePoint = null;
+        clearDirectionPlacement();
         setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
         repaint();
     }
@@ -779,7 +786,9 @@ final class EarthMapCanvas extends JPanel {
                 Color color = greyed ? mutedColor(truth.color()) : truth.color();
                 g.setColor(withAlpha(color, greyed ? 70 : 170));
                 g.setStroke(PLANNED_STROKE);
-                drawEcefPath(g, truth.plannedPath());
+                List<EcefPoint> plannedPath = truth.plannedPath();
+                drawEcefPath(g, plannedPath);
+                drawTrajectoryArrow(g, plannedPath, color, greyed);
             }
             return;
         }
@@ -797,6 +806,9 @@ final class EarthMapCanvas extends JPanel {
             g.setColor(withAlpha(color, alpha));
             g.setStroke(target == selected ? SELECTED_PLANNED_STROKE : PLANNED_STROKE);
             drawPlannedTargetPath(g, target, withAlpha(color, alpha));
+            List<EcefPoint> plannedPath = sampledGeodesicPath(target.path());
+            drawEcefPath(g, plannedPath);
+            drawTrajectoryArrow(g, plannedPath, color, greyed);
             if (target == selected && Double.isFinite(profileHighlightNormalizedTime)) {
                 drawProfileHighlight(g, target, color);
             }
@@ -949,8 +961,8 @@ final class EarthMapCanvas extends JPanel {
                 radius * 2 + 4, radius * 2 + 4);
         g.setColor(color);
         g.fillOval(point.x - radius, point.y - radius, radius * 2, radius * 2);
-        g.setColor(new Color(31, 38, 45));
-        g.drawString(id, point.x + radius + 5, point.y - radius - 2);
+        drawLabelChip(g, id, point.x + radius + 5, point.y - radius - 2,
+                new Color(31, 38, 45));
     }
 
     private static List<EcefPoint> historySlice(
@@ -999,11 +1011,15 @@ final class EarthMapCanvas extends JPanel {
                     ? new Color(105, 110, 116)
                     : new Color(25, 31, 37));
             String label = track.dead() ? track.id() + " (dead)" : track.id();
-            g.drawString(label, point.x + radius + 5, point.y - radius - 2);
+            drawLabelChip(g, label, point.x + radius + 5, point.y - radius - 2,
+                    track.dead() || greyed
+                            ? new Color(82, 88, 96)
+                            : new Color(25, 31, 37));
             if (track.dead() && !track.deadReason().isBlank()) {
                 Font previousFont = g.getFont();
                 g.setFont(g.getFont().deriveFont(Font.PLAIN, 10.0f));
-                g.drawString(track.deadReason(), point.x + radius + 5, point.y + radius + 10);
+                drawLabelChip(g, track.deadReason(), point.x + radius + 5,
+                        point.y + radius + 10, new Color(82, 88, 96));
                 g.setFont(previousFont);
             }
         }
@@ -1041,8 +1057,10 @@ final class EarthMapCanvas extends JPanel {
             g.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
             g.setColor(Color.WHITE);
             g.drawRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
-            g.setColor(new Color(105, 110, 116));
-            g.drawString(segment.trackId() + " (dead)", point.x + radius + 5, point.y - radius - 2);
+            drawLabelChip(g, segment.trackId() + " (dead)",
+                    point.x + radius + 5,
+                    point.y - radius - 2,
+                    new Color(82, 88, 96));
         }
     }
 
@@ -1419,6 +1437,118 @@ final class EarthMapCanvas extends JPanel {
         }
     }
 
+    private void drawTrajectoryArrow(
+            Graphics2D g,
+            List<EcefPoint> points,
+            Color color,
+            boolean muted) {
+        if (!trajectoryArrowsVisible || points.size() < 2) {
+            return;
+        }
+        Point start = null;
+        Point previous = null;
+        for (EcefPoint point : points) {
+            Point next = toScreen(Wgs84.toGeodetic(point));
+            if (next == null) {
+                start = null;
+                previous = null;
+                continue;
+            }
+            if (start == null) {
+                start = next;
+                previous = next;
+                continue;
+            }
+            if (!validPathSegment(previous, next)) {
+                start = next;
+                previous = next;
+                continue;
+            }
+            if (start.distance(next) >= 9.0) {
+                double angle = Math.atan2(next.y - start.y, next.x - start.x);
+                drawArrowHead(g, start.x, start.y, angle, color, muted);
+                return;
+            }
+            previous = next;
+        }
+    }
+
+    private void drawArrowHead(
+            Graphics2D g,
+            double tipX,
+            double tipY,
+            double angle,
+            Color color,
+            boolean muted) {
+        double length = 15.0;
+        double halfWidth = 6.5;
+        double backX = tipX - Math.cos(angle) * length;
+        double backY = tipY - Math.sin(angle) * length;
+        double normalX = -Math.sin(angle);
+        double normalY = Math.cos(angle);
+        Polygon outline = arrowPolygon(
+                tipX,
+                tipY,
+                backX + normalX * (halfWidth + 2.0),
+                backY + normalY * (halfWidth + 2.0),
+                backX - normalX * (halfWidth + 2.0),
+                backY - normalY * (halfWidth + 2.0));
+        Polygon arrow = arrowPolygon(
+                tipX,
+                tipY,
+                backX + normalX * halfWidth,
+                backY + normalY * halfWidth,
+                backX - normalX * halfWidth,
+                backY - normalY * halfWidth);
+        g.setColor(new Color(255, 255, 255, muted ? 175 : 230));
+        g.fillPolygon(outline);
+        g.setColor(withAlpha(color, muted ? 145 : 235));
+        g.fillPolygon(arrow);
+        g.setColor(new Color(28, 35, 42, muted ? 85 : 130));
+        g.drawPolygon(arrow);
+    }
+
+    private static Polygon arrowPolygon(
+            double tipX,
+            double tipY,
+            double leftX,
+            double leftY,
+            double rightX,
+            double rightY) {
+        return new Polygon(
+                new int[]{(int) Math.round(tipX), (int) Math.round(leftX),
+                        (int) Math.round(rightX)},
+                new int[]{(int) Math.round(tipY), (int) Math.round(leftY),
+                        (int) Math.round(rightY)},
+                3);
+    }
+
+    private boolean validPathSegment(Point previous, Point next) {
+        return previous != null
+                && next != null
+                && Math.abs(next.x - previous.x) < mapBounds().width / 2;
+    }
+
+    private static void drawLabelChip(
+            Graphics2D g,
+            String text,
+            int x,
+            int baseline,
+            Color foreground) {
+        FontMetrics metrics = g.getFontMetrics();
+        int padX = 5;
+        int padY = 3;
+        int width = metrics.stringWidth(text) + padX * 2;
+        int height = metrics.getHeight() + padY * 2;
+        int y = baseline - metrics.getAscent() - padY;
+        g.setColor(new Color(255, 255, 255, 228));
+        g.fillRoundRect(x - padX, y, width, height, 8, 8);
+        g.setColor(new Color(122, 132, 143, 155));
+        g.drawRoundRect(x - padX, y, width, height, 8, 8);
+        g.setColor(foreground);
+        g.drawString(text, x, baseline);
+    }
+
     private List<EcefPoint> sampledGeodesicPath(List<EcefPoint> controlPoints) {
         List<EcefPoint> sampled = new ArrayList<>();
         sampled.add(controlPoints.get(0));
@@ -1527,7 +1657,9 @@ final class EarthMapCanvas extends JPanel {
         List<EcefPoint> shape = buildShapePath(shapeAnchor, geodetic, drawingMode);
         if (shape.size() >= 2) {
             target.replacePath(shape);
-            beginDirectionPlacement(target);
+            if (drawingMode == DrawingMode.CIRCLE || drawingMode == DrawingMode.RACETRACK) {
+                beginDirectionPlacement(target);
+            }
             finishedSegmentedTarget = null;
             onPathChanged.run();
         }
@@ -1558,11 +1690,15 @@ final class EarthMapCanvas extends JPanel {
         }
         List<EcefPoint> loop = loopPointsForDirectionPlacement();
         PathSnap snap = nearestLoopSnap(loop, point);
-        if (snap == null || snap.screenDistancePixels() > 26.0) {
+        if (snap == null) {
             repaint();
             return;
         }
         if (directionPlacementPhase == DirectionPlacementPhase.START) {
+            if (snap.screenDistancePixels() > 26.0) {
+                repaint();
+                return;
+            }
             directionStartSnap = snap;
             directionPlacementPhase = DirectionPlacementPhase.DIRECTION;
             mousePoint = point;
@@ -1750,10 +1886,14 @@ final class EarthMapCanvas extends JPanel {
         double leftBearing = centerline.initialBearingRadians() - Math.PI / 2.0;
         double rightBearing = centerline.initialBearingRadians() + Math.PI / 2.0;
         List<EcefPoint> points = new ArrayList<>();
-        GeodeticPoint firstLeft = Wgs84Geodesic.direct(firstTurnCenter, leftBearing, radius, 0.0);
-        GeodeticPoint secondLeft = Wgs84Geodesic.direct(secondTurnCenter, leftBearing, radius, 0.0);
-        GeodeticPoint secondRight = Wgs84Geodesic.direct(secondTurnCenter, rightBearing, radius, 0.0);
-        GeodeticPoint firstRight = Wgs84Geodesic.direct(firstTurnCenter, rightBearing, radius, 0.0);
+        GeodeticPoint firstLeft = Wgs84Geodesic.direct(
+                firstTurnCenter, leftBearing, radius, 0.0);
+        GeodeticPoint secondLeft = Wgs84Geodesic.direct(
+                secondTurnCenter, leftBearing, radius, 0.0);
+        GeodeticPoint secondRight = Wgs84Geodesic.direct(
+                secondTurnCenter, rightBearing, radius, 0.0);
+        GeodeticPoint firstRight = Wgs84Geodesic.direct(
+                firstTurnCenter, rightBearing, radius, 0.0);
         appendGeodesic(points, firstLeft, secondLeft, 18);
         appendArc(points, secondTurnCenter, leftBearing, leftBearing + Math.PI, radius, 36);
         appendGeodesic(points, secondRight, firstRight, 18);

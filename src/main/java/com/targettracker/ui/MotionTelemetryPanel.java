@@ -121,7 +121,7 @@ final class MotionTelemetryPanel extends JPanel {
                 BorderFactory.createEmptyBorder(0, 12, 0, 12),
                 BorderFactory.createLineBorder(new Color(214, 220, 227))));
         panel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 288));
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 246));
 
         JPanel inner = new JPanel();
         inner.setOpaque(false);
@@ -146,12 +146,14 @@ final class MotionTelemetryPanel extends JPanel {
         inner.add(Box.createVerticalStrut(4));
         drawingMode.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
         drawingMode.setAlignmentX(LEFT_ALIGNMENT);
-        drawingMode.addActionListener(event -> onDrawingModeChanged.accept(switch (drawingMode.getSelectedIndex()) {
-            case 1 -> EarthMapCanvas.DrawingMode.SEGMENTED;
-            case 2 -> EarthMapCanvas.DrawingMode.CIRCLE;
-            case 3 -> EarthMapCanvas.DrawingMode.RACETRACK;
-            default -> EarthMapCanvas.DrawingMode.FREE_HAND;
-        }));
+        drawingMode.addActionListener(event -> {
+            onDrawingModeChanged.accept(switch (drawingMode.getSelectedIndex()) {
+                case 1 -> EarthMapCanvas.DrawingMode.SEGMENTED;
+                case 2 -> EarthMapCanvas.DrawingMode.CIRCLE;
+                case 3 -> EarthMapCanvas.DrawingMode.RACETRACK;
+                default -> EarthMapCanvas.DrawingMode.FREE_HAND;
+            });
+        });
         inner.add(drawingMode);
         inner.add(Box.createVerticalStrut(10));
 
@@ -284,4 +286,5 @@ final class MotionTelemetryPanel extends JPanel {
         button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
         return button;
     }
+
 }

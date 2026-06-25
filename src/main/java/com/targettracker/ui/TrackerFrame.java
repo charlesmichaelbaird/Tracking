@@ -38,6 +38,7 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Polygon;
 import java.awt.RenderingHints;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -73,7 +74,9 @@ public final class TrackerFrame extends JFrame {
     private final JButton precomputeButton = new JButton("Pre-compute scenario");
     private final JButton replayButton = new JButton("Replay scenario");
     private final JToggleButton moveToolButton = new JToggleButton("Move: Off");
+    private final JToggleButton trajectoryArrowButton = new JToggleButton("Arrow: On", true);
     private final Icon moveToolIcon = new MoveToolIcon();
+    private final Icon trajectoryArrowIcon = new TrajectoryArrowIcon();
     private final JToggleButton generationModeButton =
             new JToggleButton("Scenario Generation", true);
     private final JToggleButton analysisModeButton = new JToggleButton("Analysis Mode");
@@ -221,9 +224,19 @@ public final class TrackerFrame extends JFrame {
         moveToolButton.setFocusPainted(false);
         moveToolButton.addActionListener(event ->
                 setMoveToolActive(moveToolButton.isSelected()));
+        trajectoryArrowButton.setToolTipText(
+                "Show or hide direction arrows on target trajectories");
+        trajectoryArrowButton.setIcon(trajectoryArrowIcon);
+        trajectoryArrowButton.setOpaque(true);
+        trajectoryArrowButton.setContentAreaFilled(true);
+        trajectoryArrowButton.setFocusPainted(false);
+        trajectoryArrowButton.addActionListener(event ->
+                setTrajectoryArrowsVisible(trajectoryArrowButton.isSelected()));
         refreshMoveToolButton();
+        refreshTrajectoryArrowButton();
         topRightControls.add(frameLabel);
         topRightControls.add(moveToolButton);
+        topRightControls.add(trajectoryArrowButton);
         titleRow.add(topRightControls, BorderLayout.EAST);
         container.add(titleRow);
 
@@ -363,6 +376,32 @@ public final class TrackerFrame extends JFrame {
                         : new Color(168, 176, 184)),
                 BorderFactory.createEmptyBorder(3, 8, 3, 8)));
         moveToolButton.repaint();
+    }
+
+    private void setTrajectoryArrowsVisible(boolean visible) {
+        if (trajectoryArrowButton.isSelected() != visible) {
+            trajectoryArrowButton.setSelected(visible);
+        }
+        earthMapCanvas.setTrajectoryArrowsVisible(visible);
+        refreshTrajectoryArrowButton();
+        statusLabel.setText(visible
+                ? "Trajectory arrows enabled"
+                : "Trajectory arrows hidden");
+    }
+
+    private void refreshTrajectoryArrowButton() {
+        boolean selected = trajectoryArrowButton.isSelected();
+        trajectoryArrowButton.setText(selected ? "Arrow: On" : "Arrow: Off");
+        trajectoryArrowButton.setBackground(selected
+                ? new Color(199, 231, 255)
+                : new Color(235, 238, 242));
+        trajectoryArrowButton.setForeground(new Color(28, 36, 44));
+        trajectoryArrowButton.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(selected
+                        ? new Color(61, 126, 174)
+                        : new Color(168, 176, 184)),
+                BorderFactory.createEmptyBorder(3, 8, 3, 8)));
+        trajectoryArrowButton.repaint();
     }
 
     private void clearSelectedPath() {
@@ -1097,6 +1136,45 @@ public final class TrackerFrame extends JFrame {
                         ? new Color(18, 83, 40, 160)
                         : new Color(96, 103, 111, 140));
                 g2.drawOval(x + 2, y + 2, SIZE - 4, SIZE - 4);
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return SIZE;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return SIZE;
+        }
+    }
+
+    private final class TrajectoryArrowIcon implements Icon {
+        private static final int SIZE = 14;
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            try {
+                g2.setRenderingHint(
+                        RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                boolean selected = trajectoryArrowButton.isSelected();
+                g2.setStroke(new BasicStroke(1.7f, BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND));
+                g2.setColor(selected
+                        ? new Color(25, 105, 160)
+                        : new Color(150, 157, 164));
+                int midY = y + SIZE / 2;
+                g2.drawLine(x + 2, midY, x + SIZE - 4, midY);
+                Polygon head = new Polygon(
+                        new int[]{x + SIZE - 3, x + SIZE - 8, x + SIZE - 8},
+                        new int[]{midY, midY - 4, midY + 4},
+                        3);
+                g2.fillPolygon(head);
             } finally {
                 g2.dispose();
             }
