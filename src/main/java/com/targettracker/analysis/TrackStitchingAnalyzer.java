@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.function.ToDoubleFunction;
 
 /** Track-segment timing, compatibility, and truth-reference analysis. */
 public final class TrackStitchingAnalyzer {
@@ -25,7 +26,13 @@ public final class TrackStitchingAnalyzer {
     private static final double STITCHING_PROCESS_NOISE =
             ImmParameters.defaults().cvProcessNoise();
     private static final double MINIMUM_LAMBDA_EX = 1.0e-300;
+    private static final double MINIMUM_VOLUME_CUBIC_METERS = 1.0e-300;
     private static final double CUBIC_METERS_PER_CUBIC_KILOMETER = 1.0e9;
+    private static final double DEFAULT_BRIDGE_ACCELERATION_GATE_METERS_PER_SECOND_SQUARED =
+            50.0;
+    private static final double DEFAULT_BRIDGE_VOLUME_GATE = 1.0;
+    private static final double DEFAULT_USER_NLLR_VOLUME_CUBIC_KILOMETERS = 1.0;
+    private static final double UNIT_BALL_VOLUME_3D = 4.0 / 3.0 * Math.PI;
     private static final double MINIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e-12;
     private static final double MAXIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e3;
     private static final double FIELD_FORGETTING_HALF_LIFE_SECONDS = 30.0 * 60.0;
@@ -139,6 +146,9 @@ public final class TrackStitchingAnalyzer {
                             Metric.HELLINGER_DISTANCE_6D),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.NLL),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.MAHALANOBIS),
+                    optimalAssignments(oldSegments, newSegments, pairs, Metric.MINIMUM_NLL),
+                    optimalAssignments(oldSegments, newSegments, pairs, Metric.BRIDGE_VOLUME_NLLR),
+                    optimalAssignments(oldSegments, newSegments, pairs, Metric.USER_VOLUME_NLLR),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.STATIC_NLLR),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.LEARNED_NLLR),
                     learnedBirthDensity,
@@ -196,6 +206,17 @@ public final class TrackStitchingAnalyzer {
                 truthScores.add(truthScore);
             }
         }
+        BankEvaluation minimumNllEvaluation = bestBankEvaluation(
+                bankEvaluations,
+                BankEvaluation::negativeLogLikelihood);
+        BankEvaluation bridgeNllrEvaluation = bestBankEvaluation(
+                bankEvaluations,
+                evaluation -> evaluation.bridgeAdmissible()
+                        ? evaluation.bridgeNegativeLogLikelihoodRatio()
+                        : Double.NaN);
+        BankEvaluation userVolumeNllrEvaluation = bestBankEvaluation(
+                bankEvaluations,
+                BankEvaluation::userVolumeNegativeLogLikelihoodRatio);
         double statisticalTime = bestTwoMidpoint(mahalanobisScores, simpleTime);
         double actualTime = truthScores.isEmpty()
                 ? Double.NaN
@@ -215,6 +236,12 @@ public final class TrackStitchingAnalyzer {
         JoinEvaluation statisticalEvaluation = joinEvaluation(
                 "Mahalanobis bank", oldAnchor, newSegment,
                 statisticalTime, configuration, learnedBirthDensityField);
+        JoinEvaluation minimumNllJoinEvaluation = joinEvaluationFromBank(
+                "Minimum NLL bank", minimumNllEvaluation);
+        JoinEvaluation bridgeNllrJoinEvaluation = joinEvaluationFromBank(
+                "Bridge NLLR bank", bridgeNllrEvaluation);
+        JoinEvaluation userVolumeNllrJoinEvaluation = joinEvaluationFromBank(
+                "User volume NLLR bank", userVolumeNllrEvaluation);
         JoinEvaluation actualEvaluation = Double.isFinite(actualTime)
                 ? joinEvaluation(
                         "Truth RMS", oldAnchor, newSegment,
@@ -223,6 +250,9 @@ public final class TrackStitchingAnalyzer {
         joinEvaluations.add(simpleEvaluation);
         joinEvaluations.add(kinematicEvaluation);
         joinEvaluations.add(statisticalEvaluation);
+        joinEvaluations.add(minimumNllJoinEvaluation);
+        joinEvaluations.add(bridgeNllrJoinEvaluation);
+        joinEvaluations.add(userVolumeNllrJoinEvaluation);
         joinEvaluations.add(actualEvaluation);
 
         PairResult result = new PairResult(
@@ -272,7 +302,31 @@ public final class TrackStitchingAnalyzer {
                 simpleEvaluation.learnedNegativeLogLikelihoodRatio(),
                 kinematicEvaluation.learnedNegativeLogLikelihoodRatio(),
                 statisticalEvaluation.learnedNegativeLogLikelihoodRatio(),
-                actualEvaluation.learnedNegativeLogLikelihoodRatio());
+                actualEvaluation.learnedNegativeLogLikelihoodRatio(),
+                evaluationTime(minimumNllEvaluation),
+                evaluationScore(
+                        minimumNllEvaluation,
+                        BankEvaluation::negativeLogLikelihood),
+                evaluationScore(
+                        minimumNllEvaluation,
+                        BankEvaluation::bridgeNegativeLogLikelihoodRatio),
+                evaluationScore(
+                        minimumNllEvaluation,
+                        BankEvaluation::userVolumeNegativeLogLikelihoodRatio),
+                evaluationTime(bridgeNllrEvaluation),
+                evaluationScore(
+                        bridgeNllrEvaluation,
+                        BankEvaluation::bridgeAdmissibleVolumeCubicKilometers),
+                evaluationScore(
+                        bridgeNllrEvaluation,
+                        BankEvaluation::bridgeDifferentTargetNegativeLogLikelihood),
+                evaluationScore(
+                        bridgeNllrEvaluation,
+                        BankEvaluation::bridgeNegativeLogLikelihoodRatio),
+                evaluationTime(userVolumeNllrEvaluation),
+                evaluationScore(
+                        userVolumeNllrEvaluation,
+                        BankEvaluation::userVolumeNegativeLogLikelihoodRatio));
         return new PairDiagnostics(
                 result,
                 List.copyOf(joinEvaluations),
@@ -340,6 +394,27 @@ public final class TrackStitchingAnalyzer {
     }
 
     private static VariantScore bestVariant(PairResult pair, Metric metric) {
+        if (metric == Metric.MINIMUM_NLL) {
+            return variant(pair, "Minimum NLL bank",
+                    pair.minimumNllTimeSeconds(),
+                    pair.minimumNegativeLogLikelihood(),
+                    Double.NaN,
+                    metric);
+        }
+        if (metric == Metric.BRIDGE_VOLUME_NLLR) {
+            return variant(pair, "Bridge NLLR bank",
+                    pair.bridgeNllrTimeSeconds(),
+                    Double.NaN,
+                    Double.NaN,
+                    metric);
+        }
+        if (metric == Metric.USER_VOLUME_NLLR) {
+            return variant(pair, "User volume NLLR bank",
+                    pair.userVolumeNllrTimeSeconds(),
+                    Double.NaN,
+                    Double.NaN,
+                    metric);
+        }
         List<VariantScore> variants = List.of(
                 variant(pair, "Simple midpoint",
                         pair.simpleJoinTimeSeconds(),
@@ -409,6 +484,9 @@ public final class TrackStitchingAnalyzer {
             };
             case NLL -> negativeLogLikelihood;
             case MAHALANOBIS -> mahalanobisDistance;
+            case MINIMUM_NLL -> pair.minimumNegativeLogLikelihood();
+            case BRIDGE_VOLUME_NLLR -> pair.bridgeNegativeLogLikelihoodRatio();
+            case USER_VOLUME_NLLR -> pair.userVolumeNegativeLogLikelihoodRatio();
             case STATIC_NLLR -> switch (label) {
                 case "Simple midpoint" -> pair.simpleStaticNegativeLogLikelihoodRatio();
                 case "Kinematic midpoint" -> pair.kinematicStaticNegativeLogLikelihoodRatio();
@@ -589,6 +667,20 @@ public final class TrackStitchingAnalyzer {
         PropagatedState newState = retrodictNew(newSegment, timeSeconds);
         InnovationScore score = innovationScore(oldState, newState);
         double nll = canonicalNegativeLogLikelihood(score);
+        BridgeScore bridgeScore = bridgeScore(
+                oldAnchor,
+                newSegment.formationRecord(),
+                timeSeconds,
+                score.innovation(),
+                configuration);
+        double bridgeNllr = bridgeScore.admissible()
+                ? nll - bridgeScore.differentTargetNegativeLogLikelihood()
+                : Double.NaN;
+        double userVolumeCubicMeters =
+                configuration.userNllrVolumeCubicKilometers()
+                        * CUBIC_METERS_PER_CUBIC_KILOMETER;
+        double userVolumeNllr = nll
+                - Math.log(Math.max(MINIMUM_VOLUME_CUBIC_METERS, userVolumeCubicMeters));
         double innovationVolume = innovationVolumeCubicKilometers(score.innovationCovariance());
         double staticDensity = configuration.falseAlarmRatePerCubicKilometer()
                 + configuration.birthRatePerCubicKilometer();
@@ -612,6 +704,17 @@ public final class TrackStitchingAnalyzer {
                 score.innovationQuadratic(),
                 score.logDeterminant(),
                 nll,
+                bridgeScore.endpointRmsAccelerationMetersPerSecondSquared(),
+                bridgeScore.endpointPeakAccelerationMetersPerSecondSquared(),
+                bridgeScore.endpointAdmissible(),
+                bridgeScore.bankAdmissibilityQuadratic(),
+                bridgeScore.admissibleVolumeCubicMeters(),
+                bridgeScore.admissibleVolumeCubicKilometers(),
+                bridgeScore.admissible(),
+                bridgeScore.differentTargetNegativeLogLikelihood(),
+                bridgeNllr,
+                configuration.userNllrVolumeCubicKilometers(),
+                userVolumeNllr,
                 innovationVolume,
                 staticLambdaEx,
                 nll + Math.log(staticLambdaEx),
@@ -670,6 +773,34 @@ public final class TrackStitchingAnalyzer {
                 distributionScore6d.hellingerDistance());
     }
 
+    private static JoinEvaluation joinEvaluationFromBank(
+            String variant,
+            BankEvaluation evaluation) {
+        if (evaluation == null) {
+            return JoinEvaluation.nan(variant);
+        }
+        return new JoinEvaluation(
+                variant,
+                evaluation.timeSeconds(),
+                evaluation.oldState(),
+                evaluation.oldCovariance(),
+                evaluation.newState(),
+                evaluation.newCovariance(),
+                evaluation.innovation(),
+                evaluation.innovationCovariance(),
+                evaluation.mahalanobisDistance(),
+                evaluation.negativeLogLikelihood(),
+                evaluation.innovationVolumeCubicKilometers(),
+                evaluation.staticNegativeLogLikelihoodRatio(),
+                evaluation.learnedNegativeLogLikelihoodRatio(),
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN,
+                Double.NaN);
+    }
+
     private static double lambdaEx(double densityPerCubicKilometer, double volumeCubicKilometers) {
         return Math.max(MINIMUM_LAMBDA_EX,
                 Math.max(0.0, densityPerCubicKilometer)
@@ -695,6 +826,109 @@ public final class TrackStitchingAnalyzer {
             return 0.0;
         }
         return volumeCubicMeters / CUBIC_METERS_PER_CUBIC_KILOMETER;
+    }
+
+    private static BridgeScore bridgeScore(
+            TrackRecord oldAnchor,
+            TrackRecord newAnchor,
+            double bankTimeSeconds,
+            double[] innovation,
+            Configuration configuration) {
+        EndpointBridge endpointBridge = endpointBridge(oldAnchor, newAnchor, configuration);
+        double oldDuration = bankTimeSeconds - oldAnchor.timeSeconds();
+        double newDuration = newAnchor.timeSeconds() - bankTimeSeconds;
+        double accelerationGate = configuration.bridgeAccelerationGateMetersPerSecondSquared();
+        double volumeGate = configuration.bridgeVolumeGate();
+        double shape = Double.NaN;
+        double quadratic = Double.NaN;
+        double volumeCubicMeters = Double.NaN;
+        double volumeCubicKilometers = Double.NaN;
+        double differentTargetNll = Double.NaN;
+        boolean bankAdmissible = false;
+        if (oldDuration > EPSILON
+                && newDuration > EPSILON
+                && Double.isFinite(accelerationGate)
+                && accelerationGate > 0.0) {
+            shape = accelerationGate * accelerationGate
+                    * (Math.pow(oldDuration, 4.0) + Math.pow(newDuration, 4.0))
+                    / 3.0;
+            double innovationNormSquared = 0.0;
+            for (double value : innovation) {
+                innovationNormSquared += value * value;
+            }
+            if (Double.isFinite(shape) && shape > 0.0) {
+                quadratic = innovationNormSquared / shape;
+                volumeCubicMeters = UNIT_BALL_VOLUME_3D
+                        * Math.pow(volumeGate, POSITION_SIZE / 2.0)
+                        * Math.pow(shape, POSITION_SIZE / 2.0);
+                if (Double.isFinite(volumeCubicMeters) && volumeCubicMeters > 0.0) {
+                    volumeCubicKilometers =
+                            volumeCubicMeters / CUBIC_METERS_PER_CUBIC_KILOMETER;
+                    differentTargetNll = Math.log(Math.max(
+                            MINIMUM_VOLUME_CUBIC_METERS, volumeCubicMeters));
+                    bankAdmissible = endpointBridge.admissible()
+                            && Double.isFinite(quadratic)
+                            && quadratic <= volumeGate + EPSILON;
+                }
+            }
+        }
+        return new BridgeScore(
+                endpointBridge.rmsAccelerationMetersPerSecondSquared(),
+                endpointBridge.peakAccelerationMetersPerSecondSquared(),
+                endpointBridge.admissible(),
+                quadratic,
+                volumeCubicMeters,
+                volumeCubicKilometers,
+                bankAdmissible,
+                differentTargetNll);
+    }
+
+    private static EndpointBridge endpointBridge(
+            TrackRecord oldAnchor,
+            TrackRecord newAnchor,
+            Configuration configuration) {
+        double gapSeconds = newAnchor.timeSeconds() - oldAnchor.timeSeconds();
+        if (!(gapSeconds > EPSILON)) {
+            return new EndpointBridge(Double.NaN, Double.NaN, false);
+        }
+        double[] oldState = oldAnchor.state();
+        double[] newState = newAnchor.state();
+        double inverseGap = 1.0 / gapSeconds;
+        double inverseGap2 = inverseGap * inverseGap;
+        double inverseGap3 = inverseGap2 * inverseGap;
+        double energy = 0.0;
+        double[] lambdaPosition = new double[POSITION_SIZE];
+        double[] lambdaVelocity = new double[POSITION_SIZE];
+        for (int axis = 0; axis < POSITION_SIZE; axis++) {
+            double positionResidual = newState[axis]
+                    - oldState[axis]
+                    - gapSeconds * oldState[axis + POSITION_SIZE];
+            double velocityResidual =
+                    newState[axis + POSITION_SIZE] - oldState[axis + POSITION_SIZE];
+            energy += 12.0 * positionResidual * positionResidual * inverseGap3
+                    - 12.0 * positionResidual * velocityResidual * inverseGap2
+                    + 4.0 * velocityResidual * velocityResidual * inverseGap;
+            lambdaPosition[axis] = 12.0 * positionResidual * inverseGap3
+                    - 6.0 * velocityResidual * inverseGap2;
+            lambdaVelocity[axis] = -6.0 * positionResidual * inverseGap2
+                    + 4.0 * velocityResidual * inverseGap;
+        }
+        energy = Math.max(0.0, energy);
+        double rmsAcceleration = Math.sqrt(energy / gapSeconds);
+        double startPeakSquared = 0.0;
+        double endPeakSquared = 0.0;
+        for (int axis = 0; axis < POSITION_SIZE; axis++) {
+            double startAcceleration = lambdaVelocity[axis]
+                    + gapSeconds * lambdaPosition[axis];
+            double endAcceleration = lambdaVelocity[axis];
+            startPeakSquared += startAcceleration * startAcceleration;
+            endPeakSquared += endAcceleration * endAcceleration;
+        }
+        double peakAcceleration = Math.sqrt(Math.max(startPeakSquared, endPeakSquared));
+        boolean admissible = Double.isFinite(rmsAcceleration)
+                && rmsAcceleration
+                <= configuration.bridgeAccelerationGateMetersPerSecondSquared() + EPSILON;
+        return new EndpointBridge(rmsAcceleration, peakAcceleration, admissible);
     }
 
     static double canonicalNegativeLogLikelihood(InnovationScore score) {
@@ -922,6 +1156,31 @@ public final class TrackStitchingAnalyzer {
                 .mapToDouble(ScoredTime::timeSeconds)
                 .average()
                 .orElse(fallback);
+    }
+
+    private static BankEvaluation bestBankEvaluation(
+            List<BankEvaluation> evaluations,
+            ToDoubleFunction<BankEvaluation> scorer) {
+        BankEvaluation best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (BankEvaluation evaluation : evaluations) {
+            double score = scorer.applyAsDouble(evaluation);
+            if (Double.isFinite(score) && score < bestScore) {
+                bestScore = score;
+                best = evaluation;
+            }
+        }
+        return best;
+    }
+
+    private static double evaluationTime(BankEvaluation evaluation) {
+        return evaluation == null ? Double.NaN : evaluation.timeSeconds();
+    }
+
+    private static double evaluationScore(
+            BankEvaluation evaluation,
+            ToDoubleFunction<BankEvaluation> scorer) {
+        return evaluation == null ? Double.NaN : scorer.applyAsDouble(evaluation);
     }
 
     private static double bestTwoTruthMidpoint(List<TruthScore> scores, double fallback) {
@@ -1159,7 +1418,28 @@ public final class TrackStitchingAnalyzer {
             boolean allowDeadTracks,
             double resolutionSeconds,
             double falseAlarmRatePerCubicKilometer,
-            double birthRatePerCubicKilometer) {
+            double birthRatePerCubicKilometer,
+            double bridgeAccelerationGateMetersPerSecondSquared,
+            double bridgeVolumeGate,
+            double userNllrVolumeCubicKilometers) {
+        public Configuration(
+                double coastedMinimumSeconds,
+                double coastedMaximumSeconds,
+                double newMinimumSeconds,
+                double newMaximumSeconds,
+                boolean allowDeadTracks,
+                double resolutionSeconds,
+                double falseAlarmRatePerCubicKilometer,
+                double birthRatePerCubicKilometer) {
+            this(coastedMinimumSeconds, coastedMaximumSeconds,
+                    newMinimumSeconds, newMaximumSeconds, allowDeadTracks,
+                    resolutionSeconds, falseAlarmRatePerCubicKilometer,
+                    birthRatePerCubicKilometer,
+                    DEFAULT_BRIDGE_ACCELERATION_GATE_METERS_PER_SECOND_SQUARED,
+                    DEFAULT_BRIDGE_VOLUME_GATE,
+                    DEFAULT_USER_NLLR_VOLUME_CUBIC_KILOMETERS);
+        }
+
         public Configuration(
                 double coastedMinimumSeconds,
                 double coastedMaximumSeconds,
@@ -1169,7 +1449,10 @@ public final class TrackStitchingAnalyzer {
                 double resolutionSeconds) {
             this(coastedMinimumSeconds, coastedMaximumSeconds,
                     newMinimumSeconds, newMaximumSeconds, allowDeadTracks,
-                    resolutionSeconds, 1.0e-6, 1.0e-6);
+                    resolutionSeconds, 1.0e-6, 1.0e-6,
+                    DEFAULT_BRIDGE_ACCELERATION_GATE_METERS_PER_SECOND_SQUARED,
+                    DEFAULT_BRIDGE_VOLUME_GATE,
+                    DEFAULT_USER_NLLR_VOLUME_CUBIC_KILOMETERS);
         }
 
         public Configuration {
@@ -1186,7 +1469,13 @@ public final class TrackStitchingAnalyzer {
                     || !Double.isFinite(falseAlarmRatePerCubicKilometer)
                     || falseAlarmRatePerCubicKilometer < 0.0
                     || !Double.isFinite(birthRatePerCubicKilometer)
-                    || birthRatePerCubicKilometer < 0.0) {
+                    || birthRatePerCubicKilometer < 0.0
+                    || !Double.isFinite(bridgeAccelerationGateMetersPerSecondSquared)
+                    || bridgeAccelerationGateMetersPerSecondSquared <= 0.0
+                    || !Double.isFinite(bridgeVolumeGate)
+                    || bridgeVolumeGate <= 0.0
+                    || !Double.isFinite(userNllrVolumeCubicKilometers)
+                    || userNllrVolumeCubicKilometers <= 0.0) {
                 throw new IllegalArgumentException("Invalid stitching time-window configuration");
             }
         }
@@ -1231,6 +1520,9 @@ public final class TrackStitchingAnalyzer {
             List<OptimalAssignment> sixDimensionalHellingerDistanceAssignments,
             List<OptimalAssignment> nllAssignments,
             List<OptimalAssignment> mahalanobisAssignments,
+            List<OptimalAssignment> minimumNllAssignments,
+            List<OptimalAssignment> bridgeNllrAssignments,
+            List<OptimalAssignment> userVolumeNllrAssignments,
             List<OptimalAssignment> staticNllrAssignments,
             List<OptimalAssignment> learnedNllrAssignments,
             double learnedBirthDensityPerCubicKilometer,
@@ -1265,6 +1557,15 @@ public final class TrackStitchingAnalyzer {
             mahalanobisAssignments = mahalanobisAssignments == null
                     ? List.of()
                     : List.copyOf(mahalanobisAssignments);
+            minimumNllAssignments = minimumNllAssignments == null
+                    ? List.of()
+                    : List.copyOf(minimumNllAssignments);
+            bridgeNllrAssignments = bridgeNllrAssignments == null
+                    ? List.of()
+                    : List.copyOf(bridgeNllrAssignments);
+            userVolumeNllrAssignments = userVolumeNllrAssignments == null
+                    ? List.of()
+                    : List.copyOf(userVolumeNllrAssignments);
             staticNllrAssignments = staticNllrAssignments == null
                     ? List.of()
                     : List.copyOf(staticNllrAssignments);
@@ -1322,7 +1623,17 @@ public final class TrackStitchingAnalyzer {
             double simpleLearnedNegativeLogLikelihoodRatio,
             double kinematicLearnedNegativeLogLikelihoodRatio,
             double statisticalLearnedNegativeLogLikelihoodRatio,
-            double actualLearnedNegativeLogLikelihoodRatio) {
+            double actualLearnedNegativeLogLikelihoodRatio,
+            double minimumNllTimeSeconds,
+            double minimumNegativeLogLikelihood,
+            double minimumNllBridgeNegativeLogLikelihoodRatio,
+            double minimumNllUserVolumeNegativeLogLikelihoodRatio,
+            double bridgeNllrTimeSeconds,
+            double bridgeAdmissibleVolumeCubicKilometers,
+            double bridgeDifferentTargetNegativeLogLikelihood,
+            double bridgeNegativeLogLikelihoodRatio,
+            double userVolumeNllrTimeSeconds,
+            double userVolumeNegativeLogLikelihoodRatio) {
     }
 
     public record OptimalAssignment(
@@ -1445,6 +1756,17 @@ public final class TrackStitchingAnalyzer {
             double innovationQuadratic,
             double logDeterminant,
             double negativeLogLikelihood,
+            double bridgeEndpointRmsAccelerationMetersPerSecondSquared,
+            double bridgeEndpointPeakAccelerationMetersPerSecondSquared,
+            boolean bridgeEndpointAdmissible,
+            double bridgeAdmissibilityQuadratic,
+            double bridgeAdmissibleVolumeCubicMeters,
+            double bridgeAdmissibleVolumeCubicKilometers,
+            boolean bridgeAdmissible,
+            double bridgeDifferentTargetNegativeLogLikelihood,
+            double bridgeNegativeLogLikelihoodRatio,
+            double userNllrVolumeCubicKilometers,
+            double userVolumeNegativeLogLikelihoodRatio,
             double innovationVolumeCubicKilometers,
             double staticLambdaEx,
             double staticNegativeLogLikelihoodRatio,
@@ -1540,6 +1862,23 @@ public final class TrackStitchingAnalyzer {
             double logDeterminant) {
     }
 
+    private record EndpointBridge(
+            double rmsAccelerationMetersPerSecondSquared,
+            double peakAccelerationMetersPerSecondSquared,
+            boolean admissible) {
+    }
+
+    private record BridgeScore(
+            double endpointRmsAccelerationMetersPerSecondSquared,
+            double endpointPeakAccelerationMetersPerSecondSquared,
+            boolean endpointAdmissible,
+            double bankAdmissibilityQuadratic,
+            double admissibleVolumeCubicMeters,
+            double admissibleVolumeCubicKilometers,
+            boolean admissible,
+            double differentTargetNegativeLogLikelihood) {
+    }
+
     record DistributionScore(
             double bhattacharyyaDistance,
             double bhattacharyyaCoefficient,
@@ -1569,6 +1908,9 @@ public final class TrackStitchingAnalyzer {
         HELLINGER_DISTANCE_6D("6D Hellinger Distance"),
         NLL("NLL"),
         MAHALANOBIS("Mahalanobis"),
+        MINIMUM_NLL("Minimum NLL"),
+        BRIDGE_VOLUME_NLLR("Bridge-volume NLLR"),
+        USER_VOLUME_NLLR("User-volume NLLR"),
         STATIC_NLLR("Static/uniform NLLR"),
         LEARNED_NLLR("Learned spatial NLLR");
 

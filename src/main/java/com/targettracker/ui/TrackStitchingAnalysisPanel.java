@@ -94,6 +94,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final JTextField resolutionField = new JTextField("0.5", 7);
     private final JTextField falseAlarmRateField = new JTextField("1e-6", 8);
     private final JTextField birthRateField = new JTextField("1e-6", 8);
+    private final JTextField userNllrVolumeField = new JTextField("1.0", 8);
     private final JTextField outputDirectoryField = new JTextField("", 18);
     private final JButton analyzeButton = new JButton("Run stitching analysis");
     private final JButton rocButton = new JButton("ROC Curve");
@@ -116,6 +117,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private static final String ROC_CURVE_SECTION = "ROC curve";
 
     private enum ScoreMode {
+        MINIMUM_NLL,
         OVERLAP_3D,
         OVERLAP_6D,
         FEASIBILITY,
@@ -178,6 +180,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         resolutionField.addActionListener(event -> runAnalysis());
         falseAlarmRateField.addActionListener(event -> runAnalysis());
         birthRateField.addActionListener(event -> runAnalysis());
+        userNllrVolumeField.addActionListener(event -> runAnalysis());
         allowDeadTracks.addActionListener(event -> runAnalysis());
         outputTabs.addChangeListener(event -> updateSelectedEvent());
         showAllButton.addActionListener(event -> updateSelectedEvent());
@@ -327,7 +330,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         JPanel panel = new JPanel(new BorderLayout(12, 0));
         panel.setOpaque(false);
         panel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 112));
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 154));
 
         JPanel timingPanel = new JPanel();
         timingPanel.setLayout(new BoxLayout(timingPanel, BoxLayout.Y_AXIS));
@@ -340,9 +343,12 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         allowDeadTracks.setAlignmentX(LEFT_ALIGNMENT);
         timingPanel.add(allowDeadTracks);
 
-        JPanel alternativeColumn = new JPanel(new BorderLayout());
+        JPanel alternativeColumn = new JPanel();
+        alternativeColumn.setLayout(new BoxLayout(alternativeColumn, BoxLayout.Y_AXIS));
         alternativeColumn.setOpaque(false);
-        alternativeColumn.add(createAlternativeHypothesisPanel(), BorderLayout.NORTH);
+        alternativeColumn.add(createAlternativeHypothesisPanel());
+        alternativeColumn.add(Box.createVerticalStrut(6));
+        alternativeColumn.add(createBridgeNllrPanel());
 
         panel.add(timingPanel, BorderLayout.CENTER);
         panel.add(alternativeColumn, BorderLayout.EAST);
@@ -370,6 +376,27 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         panel.add(falseAlarmRateField);
         panel.add(compactLabel("Target births / km^3"));
         panel.add(birthRateField);
+        return panel;
+    }
+
+    private JPanel createBridgeNllrPanel() {
+        JPanel panel = new JPanel(new GridLayout(0, 2, 5, 2));
+        panel.setOpaque(false);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setPreferredSize(new Dimension(244, 44));
+        panel.setMinimumSize(new Dimension(244, 44));
+        panel.setMaximumSize(new Dimension(252, 48));
+        javax.swing.border.TitledBorder titleBorder =
+                BorderFactory.createTitledBorder("Bridge NLLR");
+        titleBorder.setTitleFont(titleBorder.getTitleFont().deriveFont(Font.PLAIN, 11f));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                titleBorder,
+                BorderFactory.createEmptyBorder(0, 4, 3, 4)));
+        userNllrVolumeField.setToolTipText(
+                "Uniform residual volume in km^3 for the user-volume NLLR column");
+        userNllrVolumeField.setColumns(7);
+        panel.add(compactLabel("User volume km^3"));
+        panel.add(userNllrVolumeField);
         return panel;
     }
 
@@ -418,10 +445,11 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         JPanel metricsPanel = new JPanel(new BorderLayout(0, 4));
         metricsPanel.setOpaque(false);
         outputTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        outputTabs.addTab("Min log-likelihood", emptyTabBody());
         outputTabs.addTab("Gaussian overlap 3D", emptyTabBody());
         outputTabs.addTab("Gaussian overlap 6D", emptyTabBody());
         outputTabs.addTab("Feasibility", emptyTabBody());
-        outputTabs.addTab("Alternative Hypothesis", emptyTabBody());
+        outputTabs.addTab("NLLR", emptyTabBody());
         outputTabs.setSelectedIndex(0);
         outputTabs.setPreferredSize(new Dimension(0, 32));
         metricsPanel.add(outputTabs, BorderLayout.NORTH);
@@ -529,11 +557,18 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         }
         final double falseAlarmRate;
         final double birthRate;
+        final double userNllrVolume;
         try {
             falseAlarmRate = parseNonNegative(falseAlarmRateField);
             birthRate = parseNonNegative(birthRateField);
         } catch (NumberFormatException exception) {
             statusLabel.setText("Enter non-negative alternative-hypothesis densities");
+            throw exception;
+        }
+        try {
+            userNllrVolume = parsePositive(userNllrVolumeField);
+        } catch (NumberFormatException exception) {
+            statusLabel.setText("Enter a positive user NLLR volume");
             throw exception;
         }
         return new TrackStitchingAnalyzer.Configuration(
@@ -544,7 +579,10 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 allowDeadTracks.isSelected(),
                 resolution,
                 falseAlarmRate,
-                birthRate);
+                birthRate,
+                50.0,
+                1.0,
+                userNllrVolume);
     }
 
     private void runAnalysis() {
@@ -836,6 +874,20 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         }
     }
 
+    private static double parsePositive(JTextField field) {
+        try {
+            double value = Double.parseDouble(field.getText().trim());
+            if (!Double.isFinite(value) || value <= 0.0) {
+                throw new NumberFormatException();
+            }
+            field.setBackground(Color.WHITE);
+            return value;
+        } catch (NumberFormatException exception) {
+            field.setBackground(new Color(255, 224, 224));
+            throw exception;
+        }
+    }
+
     private void populateEventTabs() {
         eventTabs.removeAll();
         if (events.isEmpty()) {
@@ -905,10 +957,11 @@ final class TrackStitchingAnalysisPanel extends JPanel {
 
     private ScoreMode scoreMode() {
         return switch (outputTabs.getSelectedIndex()) {
-            case 1 -> ScoreMode.OVERLAP_6D;
-            case 2 -> ScoreMode.FEASIBILITY;
-            case 3 -> ScoreMode.ALTERNATIVE;
-            default -> ScoreMode.OVERLAP_3D;
+            case 1 -> ScoreMode.OVERLAP_3D;
+            case 2 -> ScoreMode.OVERLAP_6D;
+            case 3 -> ScoreMode.FEASIBILITY;
+            case 4 -> ScoreMode.ALTERNATIVE;
+            default -> ScoreMode.MINIMUM_NLL;
         };
     }
 
@@ -986,6 +1039,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 .append(formatScientific(event.learnedBirthDensityPerCubicKilometer()))
                 .append(" births / km^3\n\n");
         switch (mode) {
+            case MINIMUM_NLL -> appendAssignments(text, "Minimum NLL optimum",
+                    event.minimumNllAssignments());
             case OVERLAP_3D -> {
                 appendAssignments(text, "3D Bhattacharyya Distance optimum",
                         event.bhattacharyyaDistanceAssignments());
@@ -1007,10 +1062,10 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 appendAssignments(text, "Mahalanobis optimum", event.mahalanobisAssignments());
             }
             case ALTERNATIVE -> {
-                appendAssignments(text, "Static/uniform NLLR optimum",
-                        event.staticNllrAssignments());
-                appendAssignments(text, "Learned spatial NLLR optimum",
-                        event.learnedNllrAssignments());
+                appendAssignments(text, "Bridge-volume NLLR optimum",
+                        event.bridgeNllrAssignments());
+                appendAssignments(text, "User-volume NLLR optimum",
+                        event.userVolumeNllrAssignments());
             }
         }
         return text.toString();
@@ -1046,19 +1101,46 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         metricsModel.setRowCount(0);
         ScoreMode mode = scoreMode();
         switch (mode) {
+            case MINIMUM_NLL -> metricsModel.setColumnIdentifiers(new Object[]{
+                    "Pair", "Time of min log-likelihood", "NLL",
+                    "NLLR", "NLLR-static", "State", "Poly"});
             case OVERLAP_3D, OVERLAP_6D -> metricsModel.setColumnIdentifiers(new Object[]{
                     "Pair", "Estimated join time", "Bhattacharyya Distance",
                     "Bhattacharyya Coefficient", "Hellinger Distance", "State", "Poly"});
             case FEASIBILITY -> metricsModel.setColumnIdentifiers(new Object[]{
                     "Pair", "Estimated join time", "NLL", "Mahalanobis", "State", "Poly"});
             case ALTERNATIVE -> metricsModel.setColumnIdentifiers(new Object[]{
-                    "Pair", "Estimated join time", "Static/uniform NLLR",
-                    "Learned spatial NLLR", "State", "Poly"});
+                    "Pair", "Time of min NLLR", "Bridge-volume NLLR",
+                    "User-volume NLLR", "State", "Poly"});
         }
         configureMetricColumnWidths();
         List<MetricRow> rows = new ArrayList<>();
         for (TrackStitchingAnalyzer.PairResult pair : event.pairs()) {
             String pairName = pair.oldTrackId() + " -> " + pair.newTrackId();
+            if (mode == ScoreMode.MINIMUM_NLL) {
+                rows.add(addMetricRow(
+                        event,
+                        pair,
+                        pairName,
+                        "Minimum NLL bank",
+                        formatTime(pair.minimumNllTimeSeconds()),
+                        pair.minimumNegativeLogLikelihood(),
+                        pair.minimumNllBridgeNegativeLogLikelihoodRatio(),
+                        pair.minimumNllUserVolumeNegativeLogLikelihoodRatio()));
+                continue;
+            }
+            if (mode == ScoreMode.ALTERNATIVE) {
+                rows.add(addMetricRow(
+                        event,
+                        pair,
+                        pairName,
+                        "Bridge NLLR bank",
+                        formatTime(pair.bridgeNllrTimeSeconds()),
+                        pair.bridgeNegativeLogLikelihoodRatio(),
+                        pair.userVolumeNegativeLogLikelihoodRatio(),
+                        Double.NaN));
+                continue;
+            }
             rows.add(addMetricRow(
                     event,
                     pair,
@@ -1121,6 +1203,16 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                     false,
                     false
             });
+        } else if (mode == ScoreMode.MINIMUM_NLL) {
+            metricsModel.addRow(new Object[]{
+                    pairName,
+                    estimate,
+                    formatNumber(firstMetric),
+                    formatNumber(secondMetric),
+                    formatNumber(thirdMetric),
+                    false,
+                    false
+            });
         } else {
             metricsModel.addRow(new Object[]{
                     pairName,
@@ -1148,6 +1240,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             String variant,
             ScoreMode mode) {
         return switch (mode) {
+            case MINIMUM_NLL -> pair.minimumNegativeLogLikelihood();
             case OVERLAP_3D -> switch (variant) {
                 case "Simple midpoint" -> pair.simpleBhattacharyyaDistance();
                 case "Kinematic midpoint" -> pair.kinematicBhattacharyyaDistance();
@@ -1166,12 +1259,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 case "Mahalanobis bank" -> pair.statisticalNegativeLogLikelihood();
                 default -> pair.actualNegativeLogLikelihood();
             };
-            case ALTERNATIVE -> switch (variant) {
-                case "Simple midpoint" -> pair.simpleStaticNegativeLogLikelihoodRatio();
-                case "Kinematic midpoint" -> pair.kinematicStaticNegativeLogLikelihoodRatio();
-                case "Mahalanobis bank" -> pair.statisticalStaticNegativeLogLikelihoodRatio();
-                default -> pair.actualStaticNegativeLogLikelihoodRatio();
-            };
+            case ALTERNATIVE -> pair.bridgeNegativeLogLikelihoodRatio();
         };
     }
 
@@ -1180,6 +1268,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             String variant,
             ScoreMode mode) {
         return switch (mode) {
+            case MINIMUM_NLL -> pair.minimumNllBridgeNegativeLogLikelihoodRatio();
             case OVERLAP_3D -> switch (variant) {
                 case "Simple midpoint" -> pair.simpleBhattacharyyaCoefficient();
                 case "Kinematic midpoint" -> pair.kinematicBhattacharyyaCoefficient();
@@ -1198,12 +1287,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 case "Mahalanobis bank" -> pair.statisticalMahalanobisDistance();
                 default -> pair.actualMahalanobisDistance();
             };
-            case ALTERNATIVE -> switch (variant) {
-                case "Simple midpoint" -> pair.simpleLearnedNegativeLogLikelihoodRatio();
-                case "Kinematic midpoint" -> pair.kinematicLearnedNegativeLogLikelihoodRatio();
-                case "Mahalanobis bank" -> pair.statisticalLearnedNegativeLogLikelihoodRatio();
-                default -> pair.actualLearnedNegativeLogLikelihoodRatio();
-            };
+            case ALTERNATIVE -> pair.userVolumeNegativeLogLikelihoodRatio();
         };
     }
 
@@ -1211,6 +1295,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             TrackStitchingAnalyzer.PairResult pair,
             String variant,
             ScoreMode mode) {
+        if (mode == ScoreMode.MINIMUM_NLL) {
+            return pair.minimumNllUserVolumeNegativeLogLikelihoodRatio();
+        }
         if (!isOverlapMode(mode)) {
             return Double.NaN;
         }
@@ -1239,10 +1326,11 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             TrackStitchingAnalyzer.EventResult event,
             ScoreMode mode) {
         return switch (mode) {
+            case MINIMUM_NLL -> event.minimumNllAssignments();
             case OVERLAP_3D -> event.bhattacharyyaDistanceAssignments();
             case OVERLAP_6D -> event.sixDimensionalBhattacharyyaDistanceAssignments();
             case FEASIBILITY -> event.nllAssignments();
-            case ALTERNATIVE -> event.staticNllrAssignments();
+            case ALTERNATIVE -> event.bridgeNllrAssignments();
         };
     }
 
@@ -1250,10 +1338,11 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             TrackStitchingAnalyzer.EventResult event,
             ScoreMode mode) {
         return switch (mode) {
+            case MINIMUM_NLL -> List.of();
             case OVERLAP_3D -> event.bhattacharyyaCoefficientAssignments();
             case OVERLAP_6D -> event.sixDimensionalBhattacharyyaCoefficientAssignments();
             case FEASIBILITY -> event.mahalanobisAssignments();
-            case ALTERNATIVE -> event.learnedNllrAssignments();
+            case ALTERNATIVE -> event.userVolumeNllrAssignments();
         };
     }
 
@@ -1442,7 +1531,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         return assignments.stream().anyMatch(assignment ->
                 assignment.oldTrackId().equals(pair.oldTrackId())
                         && assignment.newTrackId().equals(pair.newTrackId())
-                        && assignment.variant().equals(variant));
+                        && (assignment.variant().equals(variant)
+                        || ("Bridge NLLR bank".equals(variant)
+                        && "User volume NLLR bank".equals(assignment.variant()))));
     }
 
     private static String formatNumber(double value) {

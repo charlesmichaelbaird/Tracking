@@ -88,19 +88,21 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
             JTabbedPane outputTabs = outputTabsReference.get();
             if (outputTabs == null
                     || outputTabs.getSelectedIndex() != 0
-                    || !"Gaussian overlap 3D".equals(outputTabs.getTitleAt(0))
-                    || outputTabs.getTabCount() < 2
-                    || !"Gaussian overlap 6D".equals(outputTabs.getTitleAt(1))) {
-                throw new AssertionError("Analysis output should default to 3D Gaussian overlap");
+                    || !"Min log-likelihood".equals(outputTabs.getTitleAt(0))
+                    || outputTabs.getTabCount() < 3
+                    || !"Gaussian overlap 3D".equals(outputTabs.getTitleAt(1))
+                    || !"Gaussian overlap 6D".equals(outputTabs.getTitleAt(2))) {
+                throw new AssertionError("Analysis output should default to minimum NLL");
             }
             if (table == null || table.getColumnCount() != 7) {
                 throw new AssertionError(
-                        "Stitching metrics table should include overlap metrics and toggles");
+                        "Stitching metrics table should include minimum NLL and toggles");
             }
-            if (!"Bhattacharyya Distance".equals(table.getColumnName(2))
-                    || !"Bhattacharyya Coefficient".equals(table.getColumnName(3))
-                    || !"Hellinger Distance".equals(table.getColumnName(4))) {
-                throw new AssertionError("Gaussian-overlap metric columns should be visible");
+            if (!"Time of min log-likelihood".equals(table.getColumnName(1))
+                    || !"NLL".equals(table.getColumnName(2))
+                    || !"NLLR".equals(table.getColumnName(3))
+                    || !"NLLR-static".equals(table.getColumnName(4))) {
+                throw new AssertionError("Minimum-NLL metric columns should be visible");
             }
             if (!"State".equals(table.getColumnName(5))
                     || !"Poly".equals(table.getColumnName(6))

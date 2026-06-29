@@ -70,6 +70,14 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 || !Double.isFinite(pair.statisticalNegativeLogLikelihood())) {
             throw new AssertionError("Truth identity and NLL cost should be available");
         }
+        if (!Double.isFinite(pair.minimumNllTimeSeconds())
+                || !Double.isFinite(pair.minimumNegativeLogLikelihood())
+                || !Double.isFinite(pair.minimumNllBridgeNegativeLogLikelihoodRatio())
+                || !Double.isFinite(pair.minimumNllUserVolumeNegativeLogLikelihoodRatio())
+                || pair.minimumNllTimeSeconds() < 0.0
+                || pair.minimumNllTimeSeconds() > 5.0) {
+            throw new AssertionError("Minimum-NLL bank result should be available");
+        }
         if (!Double.isFinite(pair.simpleBhattacharyyaDistance())
                 || !Double.isFinite(pair.simpleBhattacharyyaCoefficient())
                 || !Double.isFinite(pair.simpleHellingerDistance())
@@ -90,6 +98,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
         }
         if (events.get(0).nllAssignments().size() != 1
                 || events.get(0).mahalanobisAssignments().size() != 1
+                || events.get(0).minimumNllAssignments().size() != 1
                 || !events.get(0).nllAssignments().get(0).oldTrackId().equals("TRK-001")
                 || !events.get(0).nllAssignments().get(0).newTrackId().equals("TRK-002")) {
             throw new AssertionError("Expected Hungarian optimum for the single feasible pair");
@@ -111,6 +120,12 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
                 || events.get(0).mahalanobisAssignments().stream()
                 .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).minimumNllAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).bridgeNllrAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).userVolumeNllrAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
                 || events.get(0).staticNllrAssignments().stream()
                 .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
                 || events.get(0).learnedNllrAssignments().stream()
@@ -119,8 +134,12 @@ public final class TrackStitchingAnalyzerSmokeTest {
         }
         if (events.get(0).staticNllrAssignments().size() != 1
                 || events.get(0).learnedNllrAssignments().size() != 1
+                || events.get(0).bridgeNllrAssignments().size() != 1
+                || events.get(0).userVolumeNllrAssignments().size() != 1
                 || !Double.isFinite(pair.simpleStaticNegativeLogLikelihoodRatio())
                 || !Double.isFinite(pair.simpleLearnedNegativeLogLikelihoodRatio())
+                || !Double.isFinite(pair.bridgeNegativeLogLikelihoodRatio())
+                || !Double.isFinite(pair.userVolumeNegativeLogLikelihoodRatio())
                 || !Double.isFinite(events.get(0)
                 .learnedBirthDensityPerCubicKilometer())) {
             throw new AssertionError("Alternative-hypothesis NLLR outputs should be available");

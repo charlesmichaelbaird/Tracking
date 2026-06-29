@@ -95,6 +95,12 @@ public final class TrackStitchingAnalysisExporter {
                     configuration.falseAlarmRatePerCubicKilometer());
             writeNameValue(writer, "birth_rate_prior_per_km3",
                     configuration.birthRatePerCubicKilometer());
+            writeNameValue(writer, "bridge_acceleration_gate_mps2",
+                    configuration.bridgeAccelerationGateMetersPerSecondSquared());
+            writeNameValue(writer, "bridge_volume_gate",
+                    configuration.bridgeVolumeGate());
+            writeNameValue(writer, "user_nllr_volume_km3",
+                    configuration.userNllrVolumeCubicKilometers());
         }
     }
 
@@ -228,7 +234,17 @@ public final class TrackStitchingAnalysisExporter {
                     "simple_learned_nllr",
                     "kinematic_learned_nllr",
                     "mahalanobis_bank_learned_nllr",
-                    "truth_rms_learned_nllr"));
+                    "truth_rms_learned_nllr",
+                    "minimum_nll_time_seconds",
+                    "minimum_nll",
+                    "minimum_nll_bridge_nllr",
+                    "minimum_nll_static_nllr",
+                    "bridge_nllr_time_seconds",
+                    "bridge_admissible_volume_km3",
+                    "bridge_different_target_nll",
+                    "bridge_nllr",
+                    "user_volume_nllr_time_seconds",
+                    "user_volume_nllr"));
             writer.newLine();
             for (int eventIndex = 0; eventIndex < events.size(); eventIndex++) {
                 TrackStitchingAnalyzer.EventResult event = events.get(eventIndex);
@@ -282,7 +298,17 @@ public final class TrackStitchingAnalysisExporter {
                             pair.simpleLearnedNegativeLogLikelihoodRatio(),
                             pair.kinematicLearnedNegativeLogLikelihoodRatio(),
                             pair.statisticalLearnedNegativeLogLikelihoodRatio(),
-                            pair.actualLearnedNegativeLogLikelihoodRatio());
+                            pair.actualLearnedNegativeLogLikelihoodRatio(),
+                            pair.minimumNllTimeSeconds(),
+                            pair.minimumNegativeLogLikelihood(),
+                            pair.minimumNllBridgeNegativeLogLikelihoodRatio(),
+                            pair.minimumNllUserVolumeNegativeLogLikelihoodRatio(),
+                            pair.bridgeNllrTimeSeconds(),
+                            pair.bridgeAdmissibleVolumeCubicKilometers(),
+                            pair.bridgeDifferentTargetNegativeLogLikelihood(),
+                            pair.bridgeNegativeLogLikelihoodRatio(),
+                            pair.userVolumeNllrTimeSeconds(),
+                            pair.userVolumeNegativeLogLikelihoodRatio());
                 }
             }
         }
@@ -318,6 +344,12 @@ public final class TrackStitchingAnalysisExporter {
                         event.sixDimensionalHellingerDistanceAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(), event.nllAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(), event.mahalanobisAssignments());
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.minimumNllAssignments());
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.bridgeNllrAssignments());
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.userVolumeNllrAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(), event.staticNllrAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(), event.learnedNllrAssignments());
             }
@@ -363,6 +395,17 @@ public final class TrackStitchingAnalysisExporter {
                     "innovation_quadratic",
                     "log_det_innovation_covariance",
                     "negative_log_likelihood",
+                    "bridge_endpoint_rms_acceleration_mps2",
+                    "bridge_endpoint_peak_acceleration_mps2",
+                    "bridge_endpoint_admissible",
+                    "bridge_admissibility_quadratic",
+                    "bridge_admissible_volume_m3",
+                    "bridge_admissible_volume_km3",
+                    "bridge_bank_admissible",
+                    "bridge_different_target_nll",
+                    "bridge_nllr",
+                    "user_nllr_volume_km3",
+                    "user_volume_nllr",
                     "innovation_volume_km3",
                     "static_lambda_ex",
                     "static_negative_log_likelihood_ratio",
@@ -396,6 +439,17 @@ public final class TrackStitchingAnalysisExporter {
                         row.add(evaluation.innovationQuadratic());
                         row.add(evaluation.logDeterminant());
                         row.add(evaluation.negativeLogLikelihood());
+                        row.add(evaluation.bridgeEndpointRmsAccelerationMetersPerSecondSquared());
+                        row.add(evaluation.bridgeEndpointPeakAccelerationMetersPerSecondSquared());
+                        row.add(evaluation.bridgeEndpointAdmissible());
+                        row.add(evaluation.bridgeAdmissibilityQuadratic());
+                        row.add(evaluation.bridgeAdmissibleVolumeCubicMeters());
+                        row.add(evaluation.bridgeAdmissibleVolumeCubicKilometers());
+                        row.add(evaluation.bridgeAdmissible());
+                        row.add(evaluation.bridgeDifferentTargetNegativeLogLikelihood());
+                        row.add(evaluation.bridgeNegativeLogLikelihoodRatio());
+                        row.add(evaluation.userNllrVolumeCubicKilometers());
+                        row.add(evaluation.userVolumeNegativeLogLikelihoodRatio());
                         row.add(evaluation.innovationVolumeCubicKilometers());
                         row.add(evaluation.staticLambdaEx());
                         row.add(evaluation.staticNegativeLogLikelihoodRatio());
@@ -485,16 +539,19 @@ public final class TrackStitchingAnalysisExporter {
             writer.write("- `summary/segments.csv`: all track segments available at each candidate "
                     + "timestamp, including old/new candidate flags and anchor states/covariances.\n");
             writer.write("- `summary/pair_time_estimates.csv`: all join-time estimates and metric values "
-                    + "for each old-track/new-track pair.\n");
+                    + "for each old-track/new-track pair, plus bank-minimum NLL and "
+                    + "bridge/user-volume NLLR summaries.\n");
             writer.write("- `summary/optimal_assignments.csv`: Hungarian-solver assignments for "
                     + "3D and 6D Bhattacharyya Distance, Bhattacharyya Coefficient, "
-                    + "Hellinger Distance, NLL, Mahalanobis, static/uniform NLLR, and "
+                    + "Hellinger Distance, NLL, Mahalanobis, minimum bank NLL, "
+                    + "bridge-volume NLLR, user-volume NLLR, static/uniform NLLR, and "
                     + "learned-spatial NLLR.\n");
             writer.write("- `bank_evaluations/bank_evaluations.csv`: one row per candidate pair per "
                     + "time-bank sample. It includes old predicted state/covariance, new retrodicted "
                     + "state/covariance, 3D position innovation, 3x3 position innovation "
-                    + "covariance, Mahalanobis distance, NLL, NLLR values, and "
-                    + "learned-density query values.\n");
+                    + "covariance, Mahalanobis distance, NLL, double-integrator bridge "
+                    + "admissibility/volume fields, NLLR values, and learned-density "
+                    + "query values.\n");
             writer.write("  Bank states are independently propagated from fixed updated anchors: "
                     + "the old track's last measurement update and the new track's latest "
                     + "measurement update available at the candidate event. Stitch-gap "
