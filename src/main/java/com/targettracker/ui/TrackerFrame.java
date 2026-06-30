@@ -69,7 +69,7 @@ public final class TrackerFrame extends JFrame {
     private final JPanel mapArea = new JPanel(new BorderLayout());
 
     private final JLabel statusLabel = new JLabel("Ready");
-    private final JLabel scenarioTimeLabel = new JLabel("t = 0.0 s");
+    private final JLabel scenarioTimeLabel = new JLabel(formatScenarioClock(0.0));
     private final JButton pauseButton = new JButton("Pause");
     private final JButton precomputeButton = new JButton("Pre-compute scenario");
     private final JButton replayButton = new JButton("Replay scenario");
@@ -479,8 +479,8 @@ public final class TrackerFrame extends JFrame {
         } else if (!model.hasScenarioLength()) {
             statusLabel.setText("Set a scenario length before extrapolating a path");
         } else if (target.extrapolateToDuration(model.explicitScenarioLengthSeconds())) {
-            statusLabel.setText("%s extrapolated to %.1f s".formatted(
-                    target.id(), model.explicitScenarioLengthSeconds()));
+            statusLabel.setText("%s extrapolated to %s".formatted(
+                    target.id(), formatClockTime(model.explicitScenarioLengthSeconds())));
         } else {
             statusLabel.setText("%s already reaches the scenario length".formatted(target.id()));
         }
@@ -594,7 +594,7 @@ public final class TrackerFrame extends JFrame {
         earthMapCanvas.focusOnTargets();
         refreshTelemetry();
         timelinePanel.refresh();
-        scenarioTimeLabel.setText("t = 0.0 / %.1f s".formatted(model.durationSeconds()));
+        scenarioTimeLabel.setText(formatScenarioClock(0.0, model.durationSeconds()));
         statusLabel.setText("Loaded %s — preset target structure is locked".formatted(preset));
     }
 
@@ -626,7 +626,7 @@ public final class TrackerFrame extends JFrame {
         earthMapCanvas.focusOnTargets();
         refreshTelemetry();
         timelinePanel.refresh();
-        scenarioTimeLabel.setText("t = 0.0 / %.1f s".formatted(model.durationSeconds()));
+        scenarioTimeLabel.setText(formatScenarioClock(0.0, model.durationSeconds()));
         statusLabel.setText("Loaded saved user scenario %s — editing enabled"
                 .formatted(scenario.name()));
     }
@@ -647,10 +647,10 @@ public final class TrackerFrame extends JFrame {
         timelinePanel.refresh();
         earthMapCanvas.repaint();
         scenarioTimeLabel.setText(model.hasScenarioLength()
-                ? "t = 0.0 / %.1f s".formatted(model.durationSeconds())
-                : "t = 0.0 s");
+                ? formatScenarioClock(0.0, model.durationSeconds())
+                : formatScenarioClock(0.0));
         statusLabel.setText(model.hasScenarioLength()
-                ? "Scenario length set to %.1f s".formatted(model.durationSeconds())
+                ? "Scenario length set to %s".formatted(formatClockTime(model.durationSeconds()))
                 : "Scenario length cleared");
     }
 
@@ -732,7 +732,7 @@ public final class TrackerFrame extends JFrame {
         earthMapCanvas.resetView();
         refreshTelemetry();
         timelinePanel.refresh();
-        scenarioTimeLabel.setText("t = 0.0 s");
+        scenarioTimeLabel.setText(formatScenarioClock(0.0));
         statusLabel.setText("User-generated mode — draw a target trajectory");
     }
 
@@ -832,7 +832,7 @@ public final class TrackerFrame extends JFrame {
             refreshTelemetry();
             timelinePanel.refresh();
             earthMapCanvas.repaint();
-            scenarioTimeLabel.setText("t = 0.0 s");
+            scenarioTimeLabel.setText(formatScenarioClock(0.0));
             statusLabel.setText("Scenario reset — editing unlocked");
             return;
         }
@@ -844,7 +844,8 @@ public final class TrackerFrame extends JFrame {
                     JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        statusLabel.setText("Replay reset to t = 0.0 s — press Resume to continue");
+        statusLabel.setText("Replay reset to t = %s — press Resume to continue"
+                .formatted(formatClockTime(0.0)));
     }
 
     private void onPathChanged() {
@@ -885,7 +886,7 @@ public final class TrackerFrame extends JFrame {
     private void onPlaybackUpdated() {
         earthMapCanvas.repaint();
         refreshTelemetry();
-        scenarioTimeLabel.setText("t = %.1f / %.1f s".formatted(
+        scenarioTimeLabel.setText(formatScenarioClock(
                 playback.elapsedSeconds(), playback.durationSeconds()));
         pauseButton.setEnabled(playback.isRunning());
         pauseButton.setText(playback.isPaused() ? "Resume" : "Pause");
@@ -903,8 +904,8 @@ public final class TrackerFrame extends JFrame {
         } else if (playback.isRunning()) {
             statusLabel.setText("Replaying pre-computed scenario");
         } else if (playback.isReplayDisplayActive()) {
-            statusLabel.setText("Replay at %.1f s — drag the timeline to seek"
-                    .formatted(playback.elapsedSeconds()));
+            statusLabel.setText("Replay at %s — drag the timeline to seek"
+                    .formatted(formatClockTime(playback.elapsedSeconds())));
         } else if (playback.elapsedSeconds() > 0.0
                 && playback.elapsedSeconds() >= playback.durationSeconds()) {
             statusLabel.setText("Scenario complete");
@@ -1044,14 +1045,14 @@ public final class TrackerFrame extends JFrame {
             playback.rewindReplayPaused();
             earthMapCanvas.focusOnPoints(playback.scenarioExtentPoints());
             timelinePanel.refresh();
-            scenarioTimeLabel.setText("t = 0.0 / %.1f s".formatted(
-                    scenario.durationSeconds()));
+            scenarioTimeLabel.setText(formatScenarioClock(0.0, scenario.durationSeconds()));
             long trackCount = scenario.records().stream()
                     .map(record -> record.trackId())
                     .distinct()
                     .count();
-            statusLabel.setText("Loaded %s — %d track(s), %.1f seconds"
-                    .formatted(scenario.scenarioName(), trackCount, scenario.durationSeconds()));
+            statusLabel.setText("Loaded %s — %d track(s), %s"
+                    .formatted(scenario.scenarioName(), trackCount,
+                            formatClockTime(scenario.durationSeconds())));
             analysisLoadPanel.setStitchingEnabled(true);
         } catch (IOException | IllegalArgumentException exception) {
             JOptionPane.showMessageDialog(
@@ -1109,6 +1110,23 @@ public final class TrackerFrame extends JFrame {
         JSeparator separator = new JSeparator(SwingConstants.VERTICAL);
         separator.setPreferredSize(new Dimension(1, 24));
         return separator;
+    }
+
+    private static String formatScenarioClock(double elapsedSeconds) {
+        return "t = " + formatClockTime(elapsedSeconds);
+    }
+
+    private static String formatScenarioClock(double elapsedSeconds, double durationSeconds) {
+        return "t = " + formatClockTime(elapsedSeconds)
+                + " / " + formatClockTime(durationSeconds);
+    }
+
+    private static String formatClockTime(double seconds) {
+        if (!Double.isFinite(seconds)) {
+            return "--:--";
+        }
+        int totalSeconds = Math.max(0, (int) Math.round(seconds));
+        return "%02d:%02d".formatted(totalSeconds / 60, totalSeconds % 60);
     }
 
     private final class MoveToolIcon implements Icon {

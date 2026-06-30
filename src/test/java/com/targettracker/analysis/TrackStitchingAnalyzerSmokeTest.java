@@ -23,6 +23,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
     public static void main(String[] args) {
         verifyCanonicalInnovationMetrics();
         verifyBackwardPropagationAndAnchors();
+        verifyPhysicsAwareCovarianceScaleAffectsOnlyPhysicsAwareNll();
         verifyMidpointCovarianceMatchesTrackerScale();
 
         List<TrackRecord> tracks = new ArrayList<>();
@@ -78,6 +79,15 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 || pair.minimumNllTimeSeconds() > 5.0) {
             throw new AssertionError("Minimum-NLL bank result should be available");
         }
+        if (!Double.isFinite(pair.physicsAwareTimeSeconds())
+                || !Double.isFinite(pair.physicsAwareVolume())
+                || !Double.isFinite(pair.physicsAwareNegativeLogLikelihood())
+                || !Double.isFinite(pair.physicsAwareOpportunityCost())
+                || !Double.isFinite(pair.physicsAwareCost())
+                || pair.physicsAwareTimeSeconds() < 0.0
+                || pair.physicsAwareTimeSeconds() > 5.0) {
+            throw new AssertionError("Physics-Aware bank result should be available");
+        }
         if (!Double.isFinite(pair.simpleBhattacharyyaDistance())
                 || !Double.isFinite(pair.simpleBhattacharyyaCoefficient())
                 || !Double.isFinite(pair.simpleHellingerDistance())
@@ -122,6 +132,8 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
                 || events.get(0).minimumNllAssignments().stream()
                 .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
+                || events.get(0).physicsAwareAssignments().stream()
+                .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
                 || events.get(0).bridgeNllrAssignments().stream()
                 .anyMatch(assignment -> assignment.variant().equals("Truth RMS"))
                 || events.get(0).userVolumeNllrAssignments().stream()
@@ -134,6 +146,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
         }
         if (events.get(0).staticNllrAssignments().size() != 1
                 || events.get(0).learnedNllrAssignments().size() != 1
+                || events.get(0).physicsAwareAssignments().size() != 1
                 || events.get(0).bridgeNllrAssignments().size() != 1
                 || events.get(0).userVolumeNllrAssignments().size() != 1
                 || !Double.isFinite(pair.simpleStaticNegativeLogLikelihoodRatio())
@@ -165,9 +178,125 @@ public final class TrackStitchingAnalyzerSmokeTest {
         verifyEventLimitedJoinSeeds(analyzer);
         verifyDeadTrackJoinSeeds(analyzer);
         verifyOverlappingTrackletsRejected(analyzer);
+        verifyEligibilityUsesTrackUpdateAges(analyzer);
+        verifyLongGapBankIsCapped(analyzer);
         verifyClusteredBirthDensity(analyzer);
         verifyBirthDensityMaturesAfterNewTrackWindow(analyzer);
         System.out.println("TrackStitchingAnalyzerSmokeTest passed");
+    }
+
+    private static void verifyEligibilityUsesTrackUpdateAges(
+            TrackStitchingAnalyzer analyzer) {
+        List<TrackRecord> tracks = List.of(
+                track("TRK-OLD", 2.0, 20.0, 10.0, true),
+                track("TRK-OLD", 8.0, 80.0, 10.0, false),
+                track("TRK-OLD", 10.0, 100.0, 10.0, false),
+                track("TRK-NEW", 9.0, 90.0, 10.0, true),
+                track("TRK-NEW", 10.0, 100.0, 10.0, true));
+        List<GroundTruthRecord> truth = new ArrayList<>();
+        for (int second = 0; second <= 10; second++) {
+            truth.add(new GroundTruthRecord(
+                    "TGT-BLACKOUT",
+                    second,
+                    new double[]{10.0 * second, 0, 0, 10, 0, 0, 0, 0, 0}));
+        }
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("measurement_backed_age_windows"),
+                "Measurement-backed age windows",
+                10.0,
+                tracks,
+                truth,
+                List.of(
+                        measurement("TRK-OLD", 2.0, 20.0),
+                        measurement("TRK-NEW", 9.0, 90.0),
+                        measurement("TRK-NEW", 10.0, 100.0)));
+        TrackStitchingAnalyzer.AnalysisResult result = analyzer.analyzeDetailed(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(
+                        7.5, 8.5, 1.0, 1.0, false, 1.0));
+        if (result.events().size() != 1
+                || Math.abs(result.events().get(0).timeSeconds() - 10.0) > 1.0e-6) {
+            throw new AssertionError(
+                    "Expected eligibility to use ages from track updates");
+        }
+        if (hasEventAt(analyzer.analyzeDetailed(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(
+                        0.0, 7.9, 0.0, 1.0, false, 1.0)),
+                10.0)) {
+            throw new AssertionError(
+                    "Coasted max should be added to the last measurement update time");
+        }
+        if (hasEventAt(analyzer.analyzeDetailed(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(
+                        0.0, 8.5, 0.0, 0.9, false, 1.0)),
+                10.0)) {
+            throw new AssertionError("New max should be added to the spawn measurement time");
+        }
+        TrackStitchingAnalyzer.Segment oldSegment = result.events().get(0)
+                .oldSegments()
+                .stream()
+                .filter(segment -> segment.trackId().equals("TRK-OLD"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Missing old segment"));
+        TrackStitchingAnalyzer.Segment newSegment = result.events().get(0)
+                .newSegments()
+                .stream()
+                .filter(segment -> segment.trackId().equals("TRK-NEW"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Missing new segment"));
+        requireClose(2.0, oldSegment.lastUpdateTimeSeconds(),
+                "coasted window should ignore predicted/coasted records");
+        requireClose(9.0, newSegment.formationTimeSeconds(),
+                "new window should use first track update, not target truth start");
+    }
+
+    private static boolean hasEventAt(
+            TrackStitchingAnalyzer.AnalysisResult result,
+            double timeSeconds) {
+        return result.events().stream()
+                .anyMatch(event -> Math.abs(event.timeSeconds() - timeSeconds) < 1.0e-6);
+    }
+
+    private static void verifyLongGapBankIsCapped(TrackStitchingAnalyzer analyzer) {
+        List<TrackRecord> tracks = List.of(
+                track("TRK-OLD", 0.0, 0.0, 10.0, true),
+                track("TRK-OLD", 500.0, 5_000.0, 10.0, false),
+                track("TRK-NEW", 400.0, 4_000.0, 10.0, true),
+                track("TRK-NEW", 500.0, 5_000.0, 10.0, false));
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("long_gap_bank_cap"),
+                "Long-gap bank cap",
+                500.0,
+                tracks,
+                List.of(),
+                List.of(
+                        measurement("TRK-NEW", 400.0, 4_000.0),
+                        measurement("TRK-NEW", 500.0, 5_000.0)));
+        TrackStitchingAnalyzer.AnalysisResult result = analyzer.analyzeDetailed(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(
+                        1.0, 1_000.0, 0.0, 200.0, false, 0.1));
+        if (result.events().size() != 1) {
+            throw new AssertionError("Expected one long-gap stitching event");
+        }
+        TrackStitchingAnalyzer.PairDiagnostics diagnostics =
+                diagnostics(result.events().get(0), "TRK-OLD", "TRK-NEW");
+        int bankSampleCount = diagnostics.bankEvaluations().size();
+        if (bankSampleCount != 241) {
+            throw new AssertionError("Long-gap bank should be capped at 241 samples, got "
+                    + bankSampleCount);
+        }
+        requireClose(0.1, diagnostics.bankEvaluations().get(0).timeSeconds(),
+                "long-gap bank start");
+        requireClose(399.9,
+                diagnostics.bankEvaluations().get(bankSampleCount - 1).timeSeconds(),
+                "long-gap bank end");
+        if (!Double.isFinite(diagnostics.result().physicsAwareCost())
+                || !Double.isFinite(diagnostics.result().minimumNegativeLogLikelihood())) {
+            throw new AssertionError("Long-gap capped bank should still produce finite costs");
+        }
     }
 
     private static void verifyClusteredBirthDensity(TrackStitchingAnalyzer analyzer) {
@@ -323,7 +452,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
         tracks.add(track("TRK-OLD", 2.0, 20.0, 10.0, false));
         tracks.add(track("TRK-NEW", 3.0, 30.0, 10.0, true));
         tracks.add(track("TRK-NEW", 4.0, 40.0, 10.0, false));
-        tracks.add(track("TRK-NEW", 5.0, 50.0, 10.0, false));
+        tracks.add(track("TRK-NEW", 5.0, 50.0, 10.0, true));
 
         List<GroundTruthRecord> truth = new ArrayList<>();
         for (int second = 0; second <= 5; second++) {
@@ -337,10 +466,12 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 5.0,
                 tracks,
                 truth,
-                List.of(measurement("TRK-NEW", 5.0, 50.0)));
+                List.of(
+                        measurement("TRK-NEW", 3.0, 30.0),
+                        measurement("TRK-NEW", 5.0, 50.0)));
         List<TrackStitchingAnalyzer.EventResult> events = analyzer.analyze(
                 scenario,
-                new TrackStitchingAnalyzer.Configuration(1.0, 10.0, 0.0, 3.0, true, 0.5));
+                new TrackStitchingAnalyzer.Configuration(4.0, 10.0, 0.0, 3.0, true, 0.5));
         if (events.size() != 1 || events.get(0).oldSegments().stream()
                 .noneMatch(TrackStitchingAnalyzer.Segment::deadAtEvent)) {
             throw new AssertionError("Dead track should be eligible for stitching when enabled");
@@ -362,14 +493,16 @@ public final class TrackStitchingAnalyzerSmokeTest {
         tracks.add(track("TRK-OLD", 2.0, 20.0, 10.0, true));
         tracks.add(track("TRK-OLD", 3.0, 30.0, 10.0, false));
         tracks.add(track("TRK-NEW", 1.5, 15.0, 10.0, true));
-        tracks.add(track("TRK-NEW", 3.0, 30.0, 10.0, false));
+        tracks.add(track("TRK-NEW", 3.0, 30.0, 10.0, true));
         RecordedScenario scenario = new RecordedScenario(
                 Path.of("overlapping_tracklets_rejected"),
                 "Overlapping tracklets rejected",
                 3.0,
                 tracks,
                 List.of(),
-                List.of(measurement("TRK-NEW", 3.0, 30.0)));
+                List.of(
+                        measurement("TRK-NEW", 1.5, 15.0),
+                        measurement("TRK-NEW", 3.0, 30.0)));
         if (!analyzer.analyze(
                 scenario,
                 new TrackStitchingAnalyzer.Configuration(
@@ -521,6 +654,10 @@ public final class TrackStitchingAnalyzerSmokeTest {
         TrackRecord newMiddleUpdate = track("TRK-NEW", 6.0, 60.0, 10.0, true);
         TrackRecord newLatestUpdate = track("TRK-NEW", 8.0, 80.0, 10.0, true);
         double[][] measurementCovariance = diagonal(6, 0.01);
+        RecordedMeasurement formationMeasurement = new RecordedMeasurement(
+                "GOD-SENSOR-001", "TGT-001", "TRK-NEW", 4.0,
+                new double[]{40.0, 0, 0, 10, 0, 0},
+                measurementCovariance, 0.1, 0.1);
         RecordedMeasurement distractingMiddleMeasurement = new RecordedMeasurement(
                 "GOD-SENSOR-001", "TGT-001", "TRK-NEW", 6.0,
                 new double[]{-500.0, 0, 0, 0, 0, 0},
@@ -535,7 +672,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
                 8.0,
                 List.of(oldAnchor, oldCoast, newFormation, newMiddleUpdate, newLatestUpdate),
                 List.of(),
-                List.of(distractingMiddleMeasurement, latestMeasurement));
+                List.of(formationMeasurement, distractingMiddleMeasurement, latestMeasurement));
         TrackStitchingAnalyzer.AnalysisResult result = analyzer.analyzeDetailed(
                 scenario,
                 new TrackStitchingAnalyzer.Configuration(
@@ -559,19 +696,113 @@ public final class TrackStitchingAnalyzerSmokeTest {
                             time);
             TrackStitchingAnalyzer.PropagatedState expectedNew =
                     TrackStitchingAnalyzer.propagate(
-                            new TrackStitchingAnalyzer.PropagatedState(
-                                    newLatestUpdate.state(), newLatestUpdate.covariance()),
-                            newLatestUpdate.timeSeconds(),
+                            TrackStitchingAnalyzer.propagate(
+                                    new TrackStitchingAnalyzer.PropagatedState(
+                                            newLatestUpdate.state(),
+                                            newLatestUpdate.covariance()),
+                                    newLatestUpdate.timeSeconds(),
+                                    newFormation.timeSeconds()),
+                            newFormation.timeSeconds(),
                             time);
             requireVectorClose(expectedOld.state(), evaluation.oldState(),
                     "old bank state should be direct from last update");
             requireMatrixClose(expectedOld.covariance(), evaluation.oldCovariance(),
                     "old bank covariance should be direct from last update");
             requireVectorClose(expectedNew.state(), evaluation.newState(),
-                    "new bank state should be direct from latest update");
+                    "new bank state should use current-event formation estimate");
             requireMatrixClose(expectedNew.covariance(), evaluation.newCovariance(),
-                    "new bank covariance should be direct from latest update");
+                    "new bank covariance should use current-event formation estimate");
+            double gapSeconds = newFormation.timeSeconds() - oldAnchor.timeSeconds();
+            double oldDuration = time - oldAnchor.timeSeconds();
+            double newDuration = newFormation.timeSeconds() - time;
+            double positionShape = (oldDuration * oldDuration * oldDuration
+                    + newDuration * newDuration * newDuration) / 3.0;
+            double expectedLogDeterminant = 3.0 * Math.log(positionShape);
+            double expectedLogVolume = 1.5 * Math.log(gapSeconds)
+                    + 0.5 * expectedLogDeterminant;
+            requireClose(gapSeconds, evaluation.physicsAwareGapSeconds(),
+                    "Physics-Aware gap should use old update to new formation");
+            requireClose(expectedLogDeterminant,
+                    evaluation.physicsAwareBridgeGeometryLogDeterminant(),
+                    "Physics-Aware bridge log determinant");
+            requireClose(Math.exp(expectedLogVolume), evaluation.physicsAwareVolume(),
+                    "Physics-Aware volume");
+            requireClose(expectedLogVolume, evaluation.physicsAwareOpportunityCost(),
+                    "Physics-Aware alpha-weighted opportunity cost");
+            requireClose(evaluation.negativeLogLikelihood(),
+                    evaluation.physicsAwareNegativeLogLikelihood(),
+                    "default Physics-Aware NLL should match unscaled NLL");
+            requireClose(evaluation.physicsAwareNegativeLogLikelihood() + expectedLogVolume,
+                    evaluation.physicsAwareCost(),
+                    "Physics-Aware final bank cost");
         }
+    }
+
+    private static void verifyPhysicsAwareCovarianceScaleAffectsOnlyPhysicsAwareNll() {
+        double covarianceScale = 4.0;
+        TrackStitchingAnalyzer analyzer = new TrackStitchingAnalyzer();
+        TrackRecord oldAnchor = track("TRK-OLD", 0.0, 0.0, 10.0, true);
+        TrackRecord oldCoast = track("TRK-OLD", 8.0, 80.0, 10.0, false);
+        TrackRecord newFormation = track("TRK-NEW", 4.0, 40.0, 10.0, true);
+        TrackRecord newLatestUpdate = track("TRK-NEW", 8.0, 80.0, 10.0, true);
+        double[][] measurementCovariance = diagonal(6, 0.01);
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("physics_aware_covariance_scale"),
+                "Physics-aware covariance scale",
+                8.0,
+                List.of(oldAnchor, oldCoast, newFormation, newLatestUpdate),
+                List.of(),
+                List.of(
+                        new RecordedMeasurement(
+                                "GOD-SENSOR-001", "TGT-001", "TRK-NEW", 4.0,
+                                new double[]{40.0, 0, 0, 10, 0, 0},
+                                measurementCovariance, 0.1, 0.1),
+                        new RecordedMeasurement(
+                                "GOD-SENSOR-001", "TGT-001", "TRK-NEW", 8.0,
+                                new double[]{80.0, 0, 0, 10, 0, 0},
+                                measurementCovariance, 0.1, 0.1)));
+        TrackStitchingAnalyzer.AnalysisResult result = analyzer.analyzeDetailed(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(
+                        1.0, 10.0, 0.0, 10.0, false, 1.0,
+                        1.0e-6, 1.0e-6,
+                        50.0, 1.0, 1.0,
+                        1.0, covarianceScale));
+        if (result.events().size() != 1) {
+            throw new AssertionError("Expected one event for covariance scale test");
+        }
+        TrackStitchingAnalyzer.PairDiagnostics diagnostics =
+                diagnostics(result.events().get(0), "TRK-OLD", "TRK-NEW");
+        for (TrackStitchingAnalyzer.BankEvaluation evaluation
+                : diagnostics.bankEvaluations()) {
+            double expectedUnscaledNll = 0.5 * (3.0 * Math.log(2.0 * Math.PI)
+                    + evaluation.logDeterminant()
+                    + evaluation.innovationQuadratic());
+            double expectedScaledNll = 0.5 * (3.0 * Math.log(2.0 * Math.PI)
+                    + evaluation.logDeterminant()
+                    + 3.0 * Math.log(covarianceScale)
+                    + evaluation.innovationQuadratic() / covarianceScale);
+            requireClose(expectedUnscaledNll, evaluation.negativeLogLikelihood(),
+                    "unscaled bank NLL should remain canonical");
+            requireClose(expectedScaledNll, evaluation.physicsAwareNegativeLogLikelihood(),
+                    "Physics-Aware covariance-scaled NLL");
+            requireClose(evaluation.physicsAwareNegativeLogLikelihood()
+                            + evaluation.physicsAwareOpportunityCost(),
+                    evaluation.physicsAwareCost(),
+                    "Physics-Aware cost should use scaled NLL");
+        }
+        TrackStitchingAnalyzer.PairResult pair = diagnostics.result();
+        TrackStitchingAnalyzer.BankEvaluation selected =
+                diagnostics.bankEvaluations().stream()
+                        .filter(evaluation -> Math.abs(
+                                evaluation.timeSeconds()
+                                        - pair.physicsAwareTimeSeconds()) <= 1.0e-9)
+                        .findFirst()
+                        .orElseThrow(() -> new AssertionError(
+                                "Missing selected Physics-Aware bank evaluation"));
+        requireClose(selected.physicsAwareNegativeLogLikelihood(),
+                pair.physicsAwareNegativeLogLikelihood(),
+                "Pair row should expose scaled Physics-Aware NLL");
     }
 
     private static void verifyMidpointCovarianceMatchesTrackerScale() {

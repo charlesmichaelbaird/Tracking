@@ -7,8 +7,11 @@ import com.targettracker.tracking.TrackRecord;
 
 import javax.swing.JButton;
 import javax.swing.JTabbedPane;
+import javax.swing.JScrollPane;
+import javax.swing.JSlider;
 import javax.swing.JTable;
 import javax.swing.SwingUtilities;
+import javax.swing.border.TitledBorder;
 import java.awt.Component;
 import java.awt.Container;
 import java.nio.file.Path;
@@ -78,7 +81,9 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
         waitForAnalysis(tabsReference.get());
         SwingUtilities.invokeAndWait(() -> {
             JTabbedPane tabs = tabsReference.get();
-            if (tabs.getTabCount() != 1 || !"00:05.0".equals(tabs.getTitleAt(0))) {
+            if (tabs.getTabCount() != 2
+                    || !"00:05".equals(tabs.getTitleAt(0))
+                    || !"00:06".equals(tabs.getTitleAt(1))) {
                 throw new AssertionError("Embedded stitching tabs did not populate candidate time");
             }
             if (Math.abs(playbackReference.get().elapsedSeconds() - 5.0) > 1.0e-6) {
@@ -87,11 +92,12 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
             JTable table = tableReference.get();
             JTabbedPane outputTabs = outputTabsReference.get();
             if (outputTabs == null
-                    || outputTabs.getSelectedIndex() != 0
-                    || !"Min log-likelihood".equals(outputTabs.getTitleAt(0))
-                    || outputTabs.getTabCount() < 3
-                    || !"Gaussian overlap 3D".equals(outputTabs.getTitleAt(1))
-                    || !"Gaussian overlap 6D".equals(outputTabs.getTitleAt(2))) {
+                    || outputTabs.getSelectedIndex() != 1
+                    || !"Physics-Aware".equals(outputTabs.getTitleAt(0))
+                    || !"Min log-likelihood".equals(outputTabs.getTitleAt(1))
+                    || outputTabs.getTabCount() < 4
+                    || !"Gaussian overlap 3D".equals(outputTabs.getTitleAt(2))
+                    || !"Gaussian overlap 6D".equals(outputTabs.getTitleAt(3))) {
                 throw new AssertionError("Analysis output should default to minimum NLL");
             }
             if (table == null || table.getColumnCount() != 7) {
@@ -100,9 +106,19 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
             }
             if (!"Time of min log-likelihood".equals(table.getColumnName(1))
                     || !"NLL".equals(table.getColumnName(2))
-                    || !"NLLR".equals(table.getColumnName(3))
-                    || !"NLLR-static".equals(table.getColumnName(4))) {
+                    || !"Bridge NLLR".equals(table.getColumnName(3))
+                    || !"User-volume NLLR".equals(table.getColumnName(4))) {
                 throw new AssertionError("Minimum-NLL metric columns should be visible");
+            }
+            List<JSlider> sliders = new ArrayList<>();
+            findSliders(panelReference.get(), sliders);
+            long zeroMinimumSliders = sliders.stream()
+                    .filter(slider -> "Minimum allowed time".equals(slider.getToolTipText()))
+                    .filter(slider -> slider.getValue() == 0)
+                    .count();
+            if (zeroMinimumSliders < 2) {
+                throw new AssertionError(
+                        "Coasted and new-track minimum sliders should default to zero");
             }
             if (!"State".equals(table.getColumnName(5))
                     || !"Poly".equals(table.getColumnName(6))
@@ -110,9 +126,49 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                     || table.getColumnClass(6) != Boolean.class) {
                 throw new AssertionError("Overlay columns should be Boolean State/Poly toggles");
             }
+            if (!metricsTitle(table).contains("candidate 00:05")) {
+                throw new AssertionError("Minimum-NLL table should show selected candidate time");
+            }
+            String firstMinimumNllRow = rowText(table, 0);
+            tabs.setSelectedIndex(1);
+            if (!metricsTitle(table).contains("candidate 00:06")) {
+                throw new AssertionError("Minimum-NLL table should refresh candidate time");
+            }
+            String secondMinimumNllRow = rowText(table, 0);
+            if (firstMinimumNllRow.equals(secondMinimumNllRow)) {
+                throw new AssertionError("Minimum-NLL row should refresh from scenario time");
+            }
             if (table.getRowCount() > 0) {
                 table.setValueAt(Boolean.TRUE, 0, 5);
                 table.setValueAt(Boolean.TRUE, 0, 6);
+            }
+            outputTabs.setSelectedIndex(0);
+            if (!metricsTitle(table).contains("candidate 00:06")) {
+                throw new AssertionError("Physics-Aware table should keep selected candidate time");
+            }
+            String secondPhysicsAwareRow = rowText(table, 0);
+            tabs.setSelectedIndex(0);
+            if (!metricsTitle(table).contains("candidate 00:05")) {
+                throw new AssertionError("Physics-Aware table should refresh candidate time");
+            }
+            String firstPhysicsAwareRow = rowText(table, 0);
+            if (firstPhysicsAwareRow.equals(secondPhysicsAwareRow)) {
+                throw new AssertionError("Physics-Aware row should refresh from scenario time");
+            }
+            if (table.getColumnCount() != 9
+                    || !"Time of min C_ijl".equals(table.getColumnName(1))
+                    || !"V_ijl".equals(table.getColumnName(2))
+                    || !"NLL".equals(table.getColumnName(3))
+                    || !"Physics term".equals(table.getColumnName(4))
+                    || !"Cost C_ijl".equals(table.getColumnName(5))
+                    || !"State".equals(table.getColumnName(6))
+                    || !"Poly".equals(table.getColumnName(7))
+                    || !"Retro".equals(table.getColumnName(8))
+                    || table.getColumnClass(8) != Boolean.class) {
+                throw new AssertionError("Physics-Aware metric columns should be visible");
+            }
+            if (table.getRowCount() > 0) {
+                table.setValueAt(Boolean.TRUE, 0, 8);
             }
             JButton rocButton = findButton(panelReference.get(), "ROC Curve");
             if (rocButton == null) {
@@ -161,6 +217,40 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
             }
         }
         return null;
+    }
+
+    private static void findSliders(Container container, List<JSlider> sliders) {
+        for (Component component : container.getComponents()) {
+            if (component instanceof JSlider slider) {
+                sliders.add(slider);
+            }
+            if (component instanceof Container child) {
+                findSliders(child, sliders);
+            }
+        }
+    }
+
+    private static String metricsTitle(JTable table) {
+        if (table.getParent() != null
+                && table.getParent().getParent() instanceof JScrollPane scrollPane
+                && scrollPane.getBorder() instanceof TitledBorder titledBorder) {
+            return titledBorder.getTitle();
+        }
+        return "";
+    }
+
+    private static String rowText(JTable table, int row) {
+        if (table.getRowCount() <= row) {
+            return "";
+        }
+        StringBuilder text = new StringBuilder();
+        for (int column = 0; column < table.getColumnCount(); column++) {
+            if (column > 0) {
+                text.append('|');
+            }
+            text.append(table.getValueAt(row, column));
+        }
+        return text.toString();
     }
 
     private static JTabbedPane findTabbedPaneWithTitle(Container container, String title) {
@@ -218,13 +308,15 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
     private static RecordedScenario scenario() {
         List<TrackRecord> tracks = new ArrayList<>();
         tracks.add(track("TRK-001", 0.0, 0.0, 8.0, true));
-        for (int second = 1; second <= 5; second++) {
+        for (int second = 1; second <= 6; second++) {
             tracks.add(track("TRK-001", second, 8.0 * second, 8.0, false));
         }
         tracks.add(track("TRK-002", 5.0, 50.0, 12.0, true));
+        tracks.add(track("TRK-002", 6.0, 80.0, 20.0, true));
         tracks.add(track("TRK-003", 5.0, 120.0, -5.0, true));
+        tracks.add(track("TRK-003", 6.0, 90.0, -15.0, true));
         List<GroundTruthRecord> truth = new ArrayList<>();
-        for (int second = 0; second <= 5; second++) {
+        for (int second = 0; second <= 6; second++) {
             truth.add(new GroundTruthRecord(
                     "TGT-001", second,
                     new double[]{6_378_137.0, second * 10.0, 0, 0, 10, 0, 0, 0, 0}));
@@ -244,13 +336,26 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                 "GOD-SENSOR-001", "TGT-001", "TRK-002", 5.0,
                 new double[]{6_378_137.0, 50, 0, 0, 10, 0},
                 covariance, 1.0, 1.0);
+        RecordedMeasurement laterMeasurement = new RecordedMeasurement(
+                "GOD-SENSOR-001", "TGT-001", "TRK-002", 6.0,
+                new double[]{6_378_137.0, 80, 0, 0, 20, 0},
+                covariance, 1.0, 1.0);
         RecordedMeasurement falsePairMeasurement = new RecordedMeasurement(
                 "GOD-SENSOR-001", "TGT-002", "TRK-003", 5.0,
                 new double[]{6_378_137.0, 95, 0, 0, -5, 0},
                 covariance, 1.0, 1.0);
+        RecordedMeasurement laterFalsePairMeasurement = new RecordedMeasurement(
+                "GOD-SENSOR-001", "TGT-002", "TRK-003", 6.0,
+                new double[]{6_378_137.0, 90, 0, 0, -15, 0},
+                covariance, 1.0, 1.0);
         return new RecordedScenario(
-                Path.of("embedded_stitching"), "Embedded stitching", 5.0,
-                tracks, truth, List.of(oldMeasurement, measurement, falsePairMeasurement));
+                Path.of("embedded_stitching"), "Embedded stitching", 6.0,
+                tracks, truth, List.of(
+                        oldMeasurement,
+                        measurement,
+                        laterMeasurement,
+                        falsePairMeasurement,
+                        laterFalsePairMeasurement));
     }
 
     private static TrackRecord track(

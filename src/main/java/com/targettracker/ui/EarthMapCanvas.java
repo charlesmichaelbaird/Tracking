@@ -75,12 +75,27 @@ final class EarthMapCanvas extends JPanel {
             double[][] newPositionCovariance) {
     }
 
+    record StitchingRetrodictedStateOverlay(
+            EcefPoint newPosition,
+            double[][] newPositionCovariance) {
+    }
+
     record StitchingOverlay(
             List<StitchingStateOverlay> stateOverlays,
-            List<EcefPoint> polynomialPoints) {
+            List<EcefPoint> polynomialPoints,
+            List<StitchingRetrodictedStateOverlay> retrodictedNewStateOverlays) {
+        StitchingOverlay(
+                List<StitchingStateOverlay> stateOverlays,
+                List<EcefPoint> polynomialPoints) {
+            this(stateOverlays, polynomialPoints, List.of());
+        }
+
         StitchingOverlay {
             stateOverlays = stateOverlays == null ? List.of() : List.copyOf(stateOverlays);
             polynomialPoints = polynomialPoints == null ? List.of() : List.copyOf(polynomialPoints);
+            retrodictedNewStateOverlays = retrodictedNewStateOverlays == null
+                    ? List.of()
+                    : List.copyOf(retrodictedNewStateOverlays);
         }
     }
 
@@ -1076,6 +1091,7 @@ final class EarthMapCanvas extends JPanel {
                     RenderingHints.VALUE_ANTIALIAS_ON);
             Color oldColor = new Color(0, 214, 255);
             Color newColor = new Color(255, 145, 36);
+            Color retrodictedColor = new Color(68, 214, 137);
             Color curveColor = new Color(255, 232, 84, 178);
             for (StitchingOverlay stitchingOverlay : stitchingOverlays) {
                 if (stitchingOverlay.polynomialPoints().size() >= 2) {
@@ -1103,6 +1119,21 @@ final class EarthMapCanvas extends JPanel {
                             0.95f);
                     drawStitchingStateMarker(overlay, state.oldPosition(), oldColor, true);
                     drawStitchingStateMarker(overlay, state.newPosition(), newColor, false);
+                }
+                for (StitchingRetrodictedStateOverlay state
+                        : stitchingOverlay.retrodictedNewStateOverlays()) {
+                    drawPositionCovariance(
+                            overlay,
+                            state.newPosition(),
+                            state.newPositionCovariance(),
+                            retrodictedColor,
+                            132,
+                            1.2f);
+                    drawStitchingStateMarker(
+                            overlay,
+                            state.newPosition(),
+                            retrodictedColor,
+                            false);
                 }
             }
         } finally {
@@ -1371,8 +1402,9 @@ final class EarthMapCanvas extends JPanel {
 
     private void drawScenarioTimer(Graphics2D g) {
         Rectangle map = mapBounds();
-        String text = "%.1f s / %.1f s".formatted(
-                playback.elapsedSeconds(), playback.durationSeconds());
+        String text = "%s / %s".formatted(
+                formatClockTime(playback.elapsedSeconds()),
+                formatClockTime(playback.durationSeconds()));
         g.setFont(g.getFont().deriveFont(Font.BOLD, 14.0f));
         FontMetrics metrics = g.getFontMetrics();
         int width = metrics.stringWidth(text) + 20;
@@ -1382,6 +1414,14 @@ final class EarthMapCanvas extends JPanel {
         g.fillRoundRect(x, y, width, 27, 10, 10);
         g.setColor(new Color(31, 39, 47));
         g.drawString(text, x + 10, y + 19);
+    }
+
+    private static String formatClockTime(double seconds) {
+        if (!Double.isFinite(seconds)) {
+            return "--:--";
+        }
+        int totalSeconds = Math.max(0, (int) Math.round(seconds));
+        return "%02d:%02d".formatted(totalSeconds / 60, totalSeconds % 60);
     }
 
     private void drawScaleBar(Graphics2D g) {

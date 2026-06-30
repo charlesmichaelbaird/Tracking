@@ -25,6 +25,7 @@ import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.SwingWorker;
 import javax.swing.border.Border;
+import javax.swing.border.TitledBorder;
 import javax.swing.event.TableModelEvent;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
@@ -86,6 +87,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     };
     private final JTable metricsTable = new JTable(metricsModel);
     private final Border metricEmptyBorder = BorderFactory.createEmptyBorder(1, 4, 1, 4);
+    private final TitledBorder metricsTableBorder =
+            BorderFactory.createTitledBorder("Join time and Gaussian-overlap metrics");
     private List<MetricRow> metricRows = List.of();
     private final JLabel statusLabel = new JLabel("Ready");
     private final TimeRangeControl coastedWindow;
@@ -95,6 +98,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final JTextField falseAlarmRateField = new JTextField("1e-6", 8);
     private final JTextField birthRateField = new JTextField("1e-6", 8);
     private final JTextField userNllrVolumeField = new JTextField("1.0", 8);
+    private final JTextField physicsAwareAlphaField = new JTextField("1.0", 8);
+    private final JTextField physicsAwareCovarianceScaleField = new JTextField("1.0", 8);
     private final JTextField outputDirectoryField = new JTextField("", 18);
     private final JButton analyzeButton = new JButton("Run stitching analysis");
     private final JButton rocButton = new JButton("ROC Curve");
@@ -117,6 +122,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private static final String ROC_CURVE_SECTION = "ROC curve";
 
     private enum ScoreMode {
+        PHYSICS_AWARE,
         MINIMUM_NLL,
         OVERLAP_3D,
         OVERLAP_6D,
@@ -146,7 +152,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         int maximumWindowSeconds = Math.max(60, (int) Math.ceil(scenario.durationSeconds()));
         coastedWindow = new TimeRangeControl(
                 "Allowed coasted-track time", maximumWindowSeconds,
-                Math.min(5, maximumWindowSeconds), Math.min(120, maximumWindowSeconds));
+                0, Math.min(120, maximumWindowSeconds));
         newWindow = new TimeRangeControl(
                 "Allowed new-track age", maximumWindowSeconds,
                 0, Math.min(60, maximumWindowSeconds));
@@ -181,6 +187,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         falseAlarmRateField.addActionListener(event -> runAnalysis());
         birthRateField.addActionListener(event -> runAnalysis());
         userNllrVolumeField.addActionListener(event -> runAnalysis());
+        physicsAwareAlphaField.addActionListener(event -> runAnalysis());
+        physicsAwareCovarianceScaleField.addActionListener(event -> runAnalysis());
         allowDeadTracks.addActionListener(event -> runAnalysis());
         outputTabs.addChangeListener(event -> updateSelectedEvent());
         showAllButton.addActionListener(event -> updateSelectedEvent());
@@ -330,7 +338,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         JPanel panel = new JPanel(new BorderLayout(12, 0));
         panel.setOpaque(false);
         panel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 154));
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 206));
 
         JPanel timingPanel = new JPanel();
         timingPanel.setLayout(new BoxLayout(timingPanel, BoxLayout.Y_AXIS));
@@ -349,6 +357,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         alternativeColumn.add(createAlternativeHypothesisPanel());
         alternativeColumn.add(Box.createVerticalStrut(6));
         alternativeColumn.add(createBridgeNllrPanel());
+        alternativeColumn.add(Box.createVerticalStrut(6));
+        alternativeColumn.add(createPhysicsAwarePanel());
 
         panel.add(timingPanel, BorderLayout.CENTER);
         panel.add(alternativeColumn, BorderLayout.EAST);
@@ -383,9 +393,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         JPanel panel = new JPanel(new GridLayout(0, 2, 5, 2));
         panel.setOpaque(false);
         panel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.setPreferredSize(new Dimension(244, 44));
-        panel.setMinimumSize(new Dimension(244, 44));
-        panel.setMaximumSize(new Dimension(252, 48));
+        panel.setPreferredSize(new Dimension(244, 66));
+        panel.setMinimumSize(new Dimension(244, 66));
+        panel.setMaximumSize(new Dimension(252, 70));
         javax.swing.border.TitledBorder titleBorder =
                 BorderFactory.createTitledBorder("Bridge NLLR");
         titleBorder.setTitleFont(titleBorder.getTitleFont().deriveFont(Font.PLAIN, 11f));
@@ -397,6 +407,32 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         userNllrVolumeField.setColumns(7);
         panel.add(compactLabel("User volume km^3"));
         panel.add(userNllrVolumeField);
+        return panel;
+    }
+
+    private JPanel createPhysicsAwarePanel() {
+        JPanel panel = new JPanel(new GridLayout(0, 2, 5, 2));
+        panel.setOpaque(false);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setPreferredSize(new Dimension(244, 44));
+        panel.setMinimumSize(new Dimension(244, 44));
+        panel.setMaximumSize(new Dimension(252, 48));
+        javax.swing.border.TitledBorder titleBorder =
+                BorderFactory.createTitledBorder("Physics-Aware");
+        titleBorder.setTitleFont(titleBorder.getTitleFont().deriveFont(Font.PLAIN, 11f));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                titleBorder,
+                BorderFactory.createEmptyBorder(0, 4, 3, 4)));
+        physicsAwareAlphaField.setToolTipText(
+                "Alpha weight for the kinematic opportunity term");
+        physicsAwareCovarianceScaleField.setToolTipText(
+                "Multiplier applied to the Physics-Aware innovation covariance before NLL");
+        physicsAwareAlphaField.setColumns(7);
+        physicsAwareCovarianceScaleField.setColumns(7);
+        panel.add(compactLabel("Alpha"));
+        panel.add(physicsAwareAlphaField);
+        panel.add(compactLabel("Cov scale"));
+        panel.add(physicsAwareCovarianceScaleField);
         return panel;
     }
 
@@ -445,20 +481,20 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         JPanel metricsPanel = new JPanel(new BorderLayout(0, 4));
         metricsPanel.setOpaque(false);
         outputTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        outputTabs.addTab("Physics-Aware", emptyTabBody());
         outputTabs.addTab("Min log-likelihood", emptyTabBody());
         outputTabs.addTab("Gaussian overlap 3D", emptyTabBody());
         outputTabs.addTab("Gaussian overlap 6D", emptyTabBody());
         outputTabs.addTab("Feasibility", emptyTabBody());
         outputTabs.addTab("NLLR", emptyTabBody());
-        outputTabs.setSelectedIndex(0);
+        outputTabs.setSelectedIndex(1);
         outputTabs.setPreferredSize(new Dimension(0, 32));
         metricsPanel.add(outputTabs, BorderLayout.NORTH);
         JScrollPane metricsScroll = new JScrollPane(
                 metricsTable,
                 ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
                 ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        metricsScroll.setBorder(BorderFactory.createTitledBorder(
-                "Join time and Gaussian-overlap metrics"));
+        metricsScroll.setBorder(metricsTableBorder);
         metricsPanel.add(metricsScroll, BorderLayout.CENTER);
         panel.add(metricsPanel, BorderLayout.CENTER);
         return panel;
@@ -520,26 +556,39 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         }
         metricsTable.getColumnModel().getColumn(0).setPreferredWidth(82);
         metricsTable.getColumnModel().getColumn(1).setPreferredWidth(160);
-        for (int column = 2; column < columnCount - 2; column++) {
-            metricsTable.getColumnModel().getColumn(column).setPreferredWidth(104);
+        for (int column = 2; column < columnCount; column++) {
+            int width = isOverlayColumn(column) ? 46 : 104;
+            metricsTable.getColumnModel().getColumn(column).setPreferredWidth(width);
         }
-        metricsTable.getColumnModel().getColumn(columnCount - 2).setPreferredWidth(46);
-        metricsTable.getColumnModel().getColumn(columnCount - 1).setPreferredWidth(46);
     }
 
     private boolean isOverlayColumn(int column) {
         return column >= 0
                 && column < metricsModel.getColumnCount()
                 && ("State".equals(metricsModel.getColumnName(column))
-                || "Poly".equals(metricsModel.getColumnName(column)));
+                || "Poly".equals(metricsModel.getColumnName(column))
+                || "Retro".equals(metricsModel.getColumnName(column)));
     }
 
     private int stateColumnIndex() {
-        return Math.max(0, metricsModel.getColumnCount() - 2);
+        return columnIndex("State");
     }
 
     private int polyColumnIndex() {
-        return Math.max(0, metricsModel.getColumnCount() - 1);
+        return columnIndex("Poly");
+    }
+
+    private int retrodictedColumnIndex() {
+        return columnIndex("Retro");
+    }
+
+    private int columnIndex(String name) {
+        for (int column = 0; column < metricsModel.getColumnCount(); column++) {
+            if (name.equals(metricsModel.getColumnName(column))) {
+                return column;
+            }
+        }
+        return -1;
     }
 
     private TrackStitchingAnalyzer.Configuration readConfiguration() {
@@ -558,6 +607,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         final double falseAlarmRate;
         final double birthRate;
         final double userNllrVolume;
+        final double physicsAwareAlpha;
+        final double physicsAwareCovarianceScale;
         try {
             falseAlarmRate = parseNonNegative(falseAlarmRateField);
             birthRate = parseNonNegative(birthRateField);
@@ -571,6 +622,18 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             statusLabel.setText("Enter a positive user NLLR volume");
             throw exception;
         }
+        try {
+            physicsAwareAlpha = parseNonNegative(physicsAwareAlphaField);
+        } catch (NumberFormatException exception) {
+            statusLabel.setText("Enter a non-negative physics-aware alpha");
+            throw exception;
+        }
+        try {
+            physicsAwareCovarianceScale = parsePositive(physicsAwareCovarianceScaleField);
+        } catch (NumberFormatException exception) {
+            statusLabel.setText("Enter a positive physics-aware covariance scale");
+            throw exception;
+        }
         return new TrackStitchingAnalyzer.Configuration(
                 coastedWindow.minimumSeconds(),
                 coastedWindow.maximumSeconds(),
@@ -582,7 +645,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 birthRate,
                 50.0,
                 1.0,
-                userNllrVolume);
+                userNllrVolume,
+                physicsAwareAlpha,
+                physicsAwareCovarianceScale);
     }
 
     private void runAnalysis() {
@@ -919,9 +984,27 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         summaryArea.setText(formatSummary(event));
         assignmentArea.setText(formatAssignments(event, scoreMode()));
         populateMetricsTable(event);
+        updateMetricsTableTitle(event, scoreMode());
         summaryArea.setCaretPosition(0);
         assignmentArea.setCaretPosition(0);
         applyDisplayFocus(event);
+    }
+
+    private void updateMetricsTableTitle(
+            TrackStitchingAnalyzer.EventResult event,
+            ScoreMode mode) {
+        String metricName = switch (mode) {
+            case PHYSICS_AWARE -> "Physics-Aware bank costs";
+            case MINIMUM_NLL -> "Minimum bank log-likelihood";
+            case OVERLAP_3D -> "3D Gaussian-overlap metrics";
+            case OVERLAP_6D -> "6D Gaussian-overlap metrics";
+            case FEASIBILITY -> "Feasibility metrics";
+            case ALTERNATIVE -> "Alternative-hypothesis metrics";
+        };
+        metricsTableBorder.setTitle("%s for candidate %s".formatted(
+                metricName,
+                formatTime(event.timeSeconds())));
+        repaint();
     }
 
     private void applyDisplayFocus(TrackStitchingAnalyzer.EventResult event) {
@@ -957,10 +1040,11 @@ final class TrackStitchingAnalysisPanel extends JPanel {
 
     private ScoreMode scoreMode() {
         return switch (outputTabs.getSelectedIndex()) {
-            case 1 -> ScoreMode.OVERLAP_3D;
-            case 2 -> ScoreMode.OVERLAP_6D;
-            case 3 -> ScoreMode.FEASIBILITY;
-            case 4 -> ScoreMode.ALTERNATIVE;
+            case 0 -> ScoreMode.PHYSICS_AWARE;
+            case 2 -> ScoreMode.OVERLAP_3D;
+            case 3 -> ScoreMode.OVERLAP_6D;
+            case 4 -> ScoreMode.FEASIBILITY;
+            case 5 -> ScoreMode.ALTERNATIVE;
             default -> ScoreMode.MINIMUM_NLL;
         };
     }
@@ -1039,6 +1123,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 .append(formatScientific(event.learnedBirthDensityPerCubicKilometer()))
                 .append(" births / km^3\n\n");
         switch (mode) {
+            case PHYSICS_AWARE -> appendAssignments(text, "Physics-aware optimum",
+                    event.physicsAwareAssignments());
             case MINIMUM_NLL -> appendAssignments(text, "Minimum NLL optimum",
                     event.minimumNllAssignments());
             case OVERLAP_3D -> {
@@ -1101,9 +1187,12 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         metricsModel.setRowCount(0);
         ScoreMode mode = scoreMode();
         switch (mode) {
+            case PHYSICS_AWARE -> metricsModel.setColumnIdentifiers(new Object[]{
+                    "Pair", "Time of min C_ijl", "V_ijl", "NLL",
+                    "Physics term", "Cost C_ijl", "State", "Poly", "Retro"});
             case MINIMUM_NLL -> metricsModel.setColumnIdentifiers(new Object[]{
                     "Pair", "Time of min log-likelihood", "NLL",
-                    "NLLR", "NLLR-static", "State", "Poly"});
+                    "Bridge NLLR", "User-volume NLLR", "State", "Poly"});
             case OVERLAP_3D, OVERLAP_6D -> metricsModel.setColumnIdentifiers(new Object[]{
                     "Pair", "Estimated join time", "Bhattacharyya Distance",
                     "Bhattacharyya Coefficient", "Hellinger Distance", "State", "Poly"});
@@ -1117,6 +1206,18 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         List<MetricRow> rows = new ArrayList<>();
         for (TrackStitchingAnalyzer.PairResult pair : event.pairs()) {
             String pairName = pair.oldTrackId() + " -> " + pair.newTrackId();
+            if (mode == ScoreMode.PHYSICS_AWARE) {
+                rows.add(addMetricRow(
+                        event,
+                        pair,
+                        pairName,
+                        "Physics-Aware bank",
+                        formatTime(pair.physicsAwareTimeSeconds()),
+                        pair.physicsAwareVolume(),
+                        pair.physicsAwareNegativeLogLikelihood(),
+                        pair.physicsAwareOpportunityCost()));
+                continue;
+            }
             if (mode == ScoreMode.MINIMUM_NLL) {
                 rows.add(addMetricRow(
                         event,
@@ -1193,7 +1294,19 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             double secondMetric,
             double thirdMetric) {
         ScoreMode mode = scoreMode();
-        if (isOverlapMode(mode)) {
+        if (mode == ScoreMode.PHYSICS_AWARE) {
+            metricsModel.addRow(new Object[]{
+                    pairName,
+                    estimate,
+                    formatScientific(firstMetric),
+                    formatNumber(secondMetric),
+                    formatNumber(thirdMetric),
+                    formatNumber(pair.physicsAwareCost()),
+                    false,
+                    false,
+                    false
+            });
+        } else if (isOverlapMode(mode)) {
             metricsModel.addRow(new Object[]{
                     pairName,
                     estimate,
@@ -1240,6 +1353,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             String variant,
             ScoreMode mode) {
         return switch (mode) {
+            case PHYSICS_AWARE -> pair.physicsAwareVolume();
             case MINIMUM_NLL -> pair.minimumNegativeLogLikelihood();
             case OVERLAP_3D -> switch (variant) {
                 case "Simple midpoint" -> pair.simpleBhattacharyyaDistance();
@@ -1268,6 +1382,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             String variant,
             ScoreMode mode) {
         return switch (mode) {
+            case PHYSICS_AWARE -> pair.physicsAwareNegativeLogLikelihood();
             case MINIMUM_NLL -> pair.minimumNllBridgeNegativeLogLikelihoodRatio();
             case OVERLAP_3D -> switch (variant) {
                 case "Simple midpoint" -> pair.simpleBhattacharyyaCoefficient();
@@ -1295,6 +1410,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             TrackStitchingAnalyzer.PairResult pair,
             String variant,
             ScoreMode mode) {
+        if (mode == ScoreMode.PHYSICS_AWARE) {
+            return pair.physicsAwareOpportunityCost();
+        }
         if (mode == ScoreMode.MINIMUM_NLL) {
             return pair.minimumNllUserVolumeNegativeLogLikelihoodRatio();
         }
@@ -1326,6 +1444,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             TrackStitchingAnalyzer.EventResult event,
             ScoreMode mode) {
         return switch (mode) {
+            case PHYSICS_AWARE -> event.physicsAwareAssignments();
             case MINIMUM_NLL -> event.minimumNllAssignments();
             case OVERLAP_3D -> event.bhattacharyyaDistanceAssignments();
             case OVERLAP_6D -> event.sixDimensionalBhattacharyyaDistanceAssignments();
@@ -1338,6 +1457,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             TrackStitchingAnalyzer.EventResult event,
             ScoreMode mode) {
         return switch (mode) {
+            case PHYSICS_AWARE -> List.of();
             case MINIMUM_NLL -> List.of();
             case OVERLAP_3D -> event.bhattacharyyaCoefficientAssignments();
             case OVERLAP_6D -> event.sixDimensionalBhattacharyyaCoefficientAssignments();
@@ -1365,10 +1485,15 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         int rowCount = Math.min(metricRows.size(), metricsModel.getRowCount());
         int stateColumn = stateColumnIndex();
         int polyColumn = polyColumnIndex();
+        int retrodictedColumn = retrodictedColumnIndex();
         for (int row = 0; row < rowCount; row++) {
-            boolean showStates = Boolean.TRUE.equals(metricsModel.getValueAt(row, stateColumn));
-            boolean showPolynomial = Boolean.TRUE.equals(metricsModel.getValueAt(row, polyColumn));
-            if (!showStates && !showPolynomial) {
+            boolean showStates = stateColumn >= 0
+                    && Boolean.TRUE.equals(metricsModel.getValueAt(row, stateColumn));
+            boolean showPolynomial = polyColumn >= 0
+                    && Boolean.TRUE.equals(metricsModel.getValueAt(row, polyColumn));
+            boolean showRetrodicted = retrodictedColumn >= 0
+                    && Boolean.TRUE.equals(metricsModel.getValueAt(row, retrodictedColumn));
+            if (!showStates && !showPolynomial && !showRetrodicted) {
                 continue;
             }
             MetricRow metricRow = metricRows.get(row);
@@ -1376,8 +1501,13 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                     showStates ? stateOverlaysFor(metricRow) : List.of();
             List<EcefPoint> polynomial =
                     showPolynomial ? polynomialOverlayFor(metricRow) : List.of();
-            if (!stateOverlays.isEmpty() || polynomial.size() >= 2) {
-                overlays.add(new EarthMapCanvas.StitchingOverlay(stateOverlays, polynomial));
+            List<EarthMapCanvas.StitchingRetrodictedStateOverlay> retrodicted =
+                    showRetrodicted ? retrodictedNewStateOverlaysFor(metricRow) : List.of();
+            if (!stateOverlays.isEmpty() || polynomial.size() >= 2 || !retrodicted.isEmpty()) {
+                overlays.add(new EarthMapCanvas.StitchingOverlay(
+                        stateOverlays,
+                        polynomial,
+                        retrodicted));
             }
         }
         mapCanvas.setStitchingOverlays(overlays);
@@ -1410,6 +1540,17 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 evaluation.newState(),
                 evaluation.newCovariance()));
         return List.copyOf(overlays);
+    }
+
+    private static List<EarthMapCanvas.StitchingRetrodictedStateOverlay>
+            retrodictedNewStateOverlaysFor(MetricRow row) {
+        TrackStitchingAnalyzer.BankEvaluation evaluation = bankEvaluationFor(row);
+        if (evaluation == null || !Double.isFinite(evaluation.timeSeconds())) {
+            return List.of();
+        }
+        return List.of(new EarthMapCanvas.StitchingRetrodictedStateOverlay(
+                pointFromState(evaluation.newState()),
+                positionCovariance(evaluation.newCovariance())));
     }
 
     private static EarthMapCanvas.StitchingStateOverlay stateOverlay(
@@ -1500,6 +1641,26 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         }
         return row.diagnostics().joinEvaluations().stream()
                 .filter(evaluation -> evaluation.variant().equals(row.variant()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static TrackStitchingAnalyzer.BankEvaluation bankEvaluationFor(MetricRow row) {
+        if (row.diagnostics() == null || row.pair() == null) {
+            return null;
+        }
+        double timeSeconds = switch (row.variant()) {
+            case "Physics-Aware bank" -> row.pair().physicsAwareTimeSeconds();
+            case "Minimum NLL bank" -> row.pair().minimumNllTimeSeconds();
+            case "Bridge NLLR bank" -> row.pair().bridgeNllrTimeSeconds();
+            case "User volume NLLR bank" -> row.pair().userVolumeNllrTimeSeconds();
+            default -> Double.NaN;
+        };
+        if (!Double.isFinite(timeSeconds)) {
+            return null;
+        }
+        return row.diagnostics().bankEvaluations().stream()
+                .filter(evaluation -> Math.abs(evaluation.timeSeconds() - timeSeconds) < 1.0e-6)
                 .findFirst()
                 .orElse(null);
     }
@@ -1802,12 +1963,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         if (!Double.isFinite(seconds)) {
             return "-";
         }
-        int whole = Math.max(0, (int) Math.floor(seconds));
-        int tenths = (int) Math.round((seconds - whole) * 10.0);
-        if (tenths == 10) {
-            whole++;
-            tenths = 0;
-        }
-        return "%02d:%02d.%d".formatted(whole / 60, whole % 60, tenths);
+        int totalSeconds = Math.max(0, (int) Math.round(seconds));
+        return "%02d:%02d".formatted(totalSeconds / 60, totalSeconds % 60);
     }
 }

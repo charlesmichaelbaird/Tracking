@@ -101,6 +101,10 @@ public final class TrackStitchingAnalysisExporter {
                     configuration.bridgeVolumeGate());
             writeNameValue(writer, "user_nllr_volume_km3",
                     configuration.userNllrVolumeCubicKilometers());
+            writeNameValue(writer, "physics_aware_alpha",
+                    configuration.physicsAwareAlpha());
+            writeNameValue(writer, "physics_aware_covariance_scale",
+                    configuration.physicsAwareInnovationCovarianceScale());
         }
     }
 
@@ -239,6 +243,11 @@ public final class TrackStitchingAnalysisExporter {
                     "minimum_nll",
                     "minimum_nll_bridge_nllr",
                     "minimum_nll_static_nllr",
+                    "physics_aware_time_seconds",
+                    "physics_aware_volume",
+                    "physics_aware_nll",
+                    "physics_aware_opportunity_cost",
+                    "physics_aware_cost",
                     "bridge_nllr_time_seconds",
                     "bridge_admissible_volume_km3",
                     "bridge_different_target_nll",
@@ -303,6 +312,11 @@ public final class TrackStitchingAnalysisExporter {
                             pair.minimumNegativeLogLikelihood(),
                             pair.minimumNllBridgeNegativeLogLikelihoodRatio(),
                             pair.minimumNllUserVolumeNegativeLogLikelihoodRatio(),
+                            pair.physicsAwareTimeSeconds(),
+                            pair.physicsAwareVolume(),
+                            pair.physicsAwareNegativeLogLikelihood(),
+                            pair.physicsAwareOpportunityCost(),
+                            pair.physicsAwareCost(),
                             pair.bridgeNllrTimeSeconds(),
                             pair.bridgeAdmissibleVolumeCubicKilometers(),
                             pair.bridgeDifferentTargetNegativeLogLikelihood(),
@@ -346,6 +360,8 @@ public final class TrackStitchingAnalysisExporter {
                 writeAssignments(writer, eventIndex, event.timeSeconds(), event.mahalanobisAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(),
                         event.minimumNllAssignments());
+                writeAssignments(writer, eventIndex, event.timeSeconds(),
+                        event.physicsAwareAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(),
                         event.bridgeNllrAssignments());
                 writeAssignments(writer, eventIndex, event.timeSeconds(),
@@ -395,6 +411,13 @@ public final class TrackStitchingAnalysisExporter {
                     "innovation_quadratic",
                     "log_det_innovation_covariance",
                     "negative_log_likelihood",
+                    "physics_aware_negative_log_likelihood",
+                    "physics_aware_gap_seconds",
+                    "physics_aware_bridge_geometry_log_det",
+                    "physics_aware_volume",
+                    "physics_aware_log_volume",
+                    "physics_aware_opportunity_cost",
+                    "physics_aware_cost",
                     "bridge_endpoint_rms_acceleration_mps2",
                     "bridge_endpoint_peak_acceleration_mps2",
                     "bridge_endpoint_admissible",
@@ -439,6 +462,13 @@ public final class TrackStitchingAnalysisExporter {
                         row.add(evaluation.innovationQuadratic());
                         row.add(evaluation.logDeterminant());
                         row.add(evaluation.negativeLogLikelihood());
+                        row.add(evaluation.physicsAwareNegativeLogLikelihood());
+                        row.add(evaluation.physicsAwareGapSeconds());
+                        row.add(evaluation.physicsAwareBridgeGeometryLogDeterminant());
+                        row.add(evaluation.physicsAwareVolume());
+                        row.add(evaluation.physicsAwareLogVolume());
+                        row.add(evaluation.physicsAwareOpportunityCost());
+                        row.add(evaluation.physicsAwareCost());
                         row.add(evaluation.bridgeEndpointRmsAccelerationMetersPerSecondSquared());
                         row.add(evaluation.bridgeEndpointPeakAccelerationMetersPerSecondSquared());
                         row.add(evaluation.bridgeEndpointAdmissible());
@@ -539,22 +569,24 @@ public final class TrackStitchingAnalysisExporter {
             writer.write("- `summary/segments.csv`: all track segments available at each candidate "
                     + "timestamp, including old/new candidate flags and anchor states/covariances.\n");
             writer.write("- `summary/pair_time_estimates.csv`: all join-time estimates and metric values "
-                    + "for each old-track/new-track pair, plus bank-minimum NLL and "
-                    + "bridge/user-volume NLLR summaries.\n");
+                    + "for each old-track/new-track pair, plus bank-minimum NLL, "
+                    + "Physics-Aware, and bridge/user-volume NLLR summaries.\n");
             writer.write("- `summary/optimal_assignments.csv`: Hungarian-solver assignments for "
                     + "3D and 6D Bhattacharyya Distance, Bhattacharyya Coefficient, "
                     + "Hellinger Distance, NLL, Mahalanobis, minimum bank NLL, "
-                    + "bridge-volume NLLR, user-volume NLLR, static/uniform NLLR, and "
-                    + "learned-spatial NLLR.\n");
+                    + "Physics-Aware, bridge-volume NLLR, user-volume NLLR, "
+                    + "static/uniform NLLR, and learned-spatial NLLR.\n");
             writer.write("- `bank_evaluations/bank_evaluations.csv`: one row per candidate pair per "
                     + "time-bank sample. It includes old predicted state/covariance, new retrodicted "
                     + "state/covariance, 3D position innovation, 3x3 position innovation "
-                    + "covariance, Mahalanobis distance, NLL, double-integrator bridge "
-                    + "admissibility/volume fields, NLLR values, and learned-density "
+                    + "covariance, Mahalanobis distance, NLL, Physics-Aware bridge "
+                    + "geometry fields, double-integrator bridge admissibility/volume fields, "
+                    + "NLLR values, and learned-density "
                     + "query values.\n");
             writer.write("  Bank states are independently propagated from fixed updated anchors: "
-                    + "the old track's last measurement update and the new track's latest "
-                    + "measurement update available at the candidate event. Stitch-gap "
+                    + "the old track's last measurement update and the selected event's "
+                    + "current new-tracklet estimate retrodicted to the new-tracklet spawn "
+                    + "time. Stitch-gap "
                     + "propagation uses the tracker-style constant-velocity/DCWNA transition "
                     + "with the signed interval to each bank time.\n");
             writer.write("- `spatial_density/spatial_density_history.csv`: learned extraneous-track "

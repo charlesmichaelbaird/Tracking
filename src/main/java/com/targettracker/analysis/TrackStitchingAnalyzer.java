@@ -32,6 +32,8 @@ public final class TrackStitchingAnalyzer {
             50.0;
     private static final double DEFAULT_BRIDGE_VOLUME_GATE = 1.0;
     private static final double DEFAULT_USER_NLLR_VOLUME_CUBIC_KILOMETERS = 1.0;
+    private static final double DEFAULT_PHYSICS_AWARE_ALPHA = 1.0;
+    private static final double DEFAULT_PHYSICS_AWARE_COVARIANCE_SCALE = 1.0;
     private static final double UNIT_BALL_VOLUME_3D = 4.0 / 3.0 * Math.PI;
     private static final double MINIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e-12;
     private static final double MAXIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e3;
@@ -41,6 +43,7 @@ public final class TrackStitchingAnalyzer {
     private static final double MAXIMUM_SPATIAL_CELL_METERS = 5_000.0;
     private static final double TARGET_GRID_AXIS_CELLS = 28.0;
     private static final int MAXIMUM_SMOOTHING_RADIUS_CELLS = 4;
+    private static final int MAXIMUM_BANK_TIMES = 241;
 
     public List<EventResult> analyze(RecordedScenario scenario, Configuration configuration) {
         return analyzeDetailed(scenario, configuration).events();
@@ -72,19 +75,13 @@ public final class TrackStitchingAnalyzer {
                     continue;
                 }
                 allSegments.add(segment);
-                double coastAge = eventTime - segment.lastUpdateTimeSeconds();
-                if (coastAge > EPSILON
-                        && inWindow(coastAge,
-                        configuration.coastedMinimumSeconds(),
-                        configuration.coastedMaximumSeconds())
+                if (eventTime > segment.lastUpdateTimeSeconds() + EPSILON
+                        && inCoastedEventWindow(segment, eventTime, configuration)
                         && (segment.liveAtEvent() || configuration.allowDeadTracks())) {
                     oldSegments.add(segment);
                 }
-                double newAge = eventTime - segment.formationTimeSeconds();
                 if (segment.liveAtEvent()
-                        && inWindow(newAge,
-                        configuration.newMinimumSeconds(),
-                        configuration.newMaximumSeconds())) {
+                        && inNewEventWindow(segment, eventTime, configuration)) {
                     newSegments.add(segment);
                 }
             }
@@ -147,6 +144,7 @@ public final class TrackStitchingAnalyzer {
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.NLL),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.MAHALANOBIS),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.MINIMUM_NLL),
+                    optimalAssignments(oldSegments, newSegments, pairs, Metric.PHYSICS_AWARE),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.BRIDGE_VOLUME_NLLR),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.USER_VOLUME_NLLR),
                     optimalAssignments(oldSegments, newSegments, pairs, Metric.STATIC_NLLR),
@@ -209,6 +207,9 @@ public final class TrackStitchingAnalyzer {
         BankEvaluation minimumNllEvaluation = bestBankEvaluation(
                 bankEvaluations,
                 BankEvaluation::negativeLogLikelihood);
+        BankEvaluation physicsAwareEvaluation = bestBankEvaluation(
+                bankEvaluations,
+                BankEvaluation::physicsAwareCost);
         BankEvaluation bridgeNllrEvaluation = bestBankEvaluation(
                 bankEvaluations,
                 evaluation -> evaluation.bridgeAdmissible()
@@ -238,6 +239,8 @@ public final class TrackStitchingAnalyzer {
                 statisticalTime, configuration, learnedBirthDensityField);
         JoinEvaluation minimumNllJoinEvaluation = joinEvaluationFromBank(
                 "Minimum NLL bank", minimumNllEvaluation);
+        JoinEvaluation physicsAwareJoinEvaluation = joinEvaluationFromBank(
+                "Physics-Aware bank", physicsAwareEvaluation);
         JoinEvaluation bridgeNllrJoinEvaluation = joinEvaluationFromBank(
                 "Bridge NLLR bank", bridgeNllrEvaluation);
         JoinEvaluation userVolumeNllrJoinEvaluation = joinEvaluationFromBank(
@@ -251,6 +254,7 @@ public final class TrackStitchingAnalyzer {
         joinEvaluations.add(kinematicEvaluation);
         joinEvaluations.add(statisticalEvaluation);
         joinEvaluations.add(minimumNllJoinEvaluation);
+        joinEvaluations.add(physicsAwareJoinEvaluation);
         joinEvaluations.add(bridgeNllrJoinEvaluation);
         joinEvaluations.add(userVolumeNllrJoinEvaluation);
         joinEvaluations.add(actualEvaluation);
@@ -313,6 +317,19 @@ public final class TrackStitchingAnalyzer {
                 evaluationScore(
                         minimumNllEvaluation,
                         BankEvaluation::userVolumeNegativeLogLikelihoodRatio),
+                evaluationTime(physicsAwareEvaluation),
+                evaluationScore(
+                        physicsAwareEvaluation,
+                        BankEvaluation::physicsAwareVolume),
+                evaluationScore(
+                        physicsAwareEvaluation,
+                        BankEvaluation::physicsAwareNegativeLogLikelihood),
+                evaluationScore(
+                        physicsAwareEvaluation,
+                        BankEvaluation::physicsAwareOpportunityCost),
+                evaluationScore(
+                        physicsAwareEvaluation,
+                        BankEvaluation::physicsAwareCost),
                 evaluationTime(bridgeNllrEvaluation),
                 evaluationScore(
                         bridgeNllrEvaluation,
@@ -365,7 +382,8 @@ public final class TrackStitchingAnalyzer {
                     continue;
                 }
                 VariantScore score = bestVariant(pair, metric);
-                if (score != null) {
+                if (score != null && Double.isFinite(score.score())
+                        && Double.isFinite(score.cost())) {
                     scores[row][column] = score;
                     costs[row][column] = score.cost();
                 }
@@ -398,6 +416,13 @@ public final class TrackStitchingAnalyzer {
             return variant(pair, "Minimum NLL bank",
                     pair.minimumNllTimeSeconds(),
                     pair.minimumNegativeLogLikelihood(),
+                    Double.NaN,
+                    metric);
+        }
+        if (metric == Metric.PHYSICS_AWARE) {
+            return variant(pair, "Physics-Aware bank",
+                    pair.physicsAwareTimeSeconds(),
+                    pair.physicsAwareNegativeLogLikelihood(),
                     Double.NaN,
                     metric);
         }
@@ -485,6 +510,7 @@ public final class TrackStitchingAnalyzer {
             case NLL -> negativeLogLikelihood;
             case MAHALANOBIS -> mahalanobisDistance;
             case MINIMUM_NLL -> pair.minimumNegativeLogLikelihood();
+            case PHYSICS_AWARE -> pair.physicsAwareCost();
             case BRIDGE_VOLUME_NLLR -> pair.bridgeNegativeLogLikelihoodRatio();
             case USER_VOLUME_NLLR -> pair.userVolumeNegativeLogLikelihoodRatio();
             case STATIC_NLLR -> switch (label) {
@@ -525,7 +551,12 @@ public final class TrackStitchingAnalyzer {
             for (int column = 1; column <= size; column++) {
                 minimum[column] = Double.POSITIVE_INFINITY;
             }
+            int augmentSteps = 0;
             do {
+                if (++augmentSteps > size + 1) {
+                    throw new IllegalStateException(
+                            "Hungarian assignment exceeded the finite augmenting path limit");
+                }
                 used[column0] = true;
                 int row0 = matchingRowForColumn[column0];
                 double delta = Double.POSITIVE_INFINITY;
@@ -545,6 +576,10 @@ public final class TrackStitchingAnalyzer {
                         delta = minimum[column];
                         column1 = column;
                     }
+                }
+                if (column1 == 0 || !Double.isFinite(delta)) {
+                    throw new IllegalStateException(
+                            "Hungarian assignment could not find a finite augmenting path");
                 }
                 for (int column = 0; column <= size; column++) {
                     if (used[column]) {
@@ -588,7 +623,7 @@ public final class TrackStitchingAnalyzer {
             if (record.timeSeconds() > eventTime + EPSILON) {
                 break;
             }
-            if (formation == null) {
+            if (record.updated() && formation == null) {
                 formation = record;
             }
             history.add(record);
@@ -644,6 +679,18 @@ public final class TrackStitchingAnalyzer {
         if (start > end + EPSILON) {
             return bank;
         }
+        double span = end - start;
+        if (!Double.isFinite(span) || !Double.isFinite(resolution) || resolution <= 0.0) {
+            return bank;
+        }
+        double estimatedSamples = Math.ceil(span / resolution) + 1.0;
+        if (estimatedSamples > MAXIMUM_BANK_TIMES) {
+            for (int index = 0; index < MAXIMUM_BANK_TIMES; index++) {
+                double fraction = index / (double) (MAXIMUM_BANK_TIMES - 1);
+                bank.add(start + span * fraction);
+            }
+            return bank;
+        }
         for (double time = start; time < end - EPSILON; time += resolution) {
             bank.add(time);
         }
@@ -664,14 +711,27 @@ public final class TrackStitchingAnalyzer {
             Configuration configuration,
             BirthDensityField learnedBirthDensityField) {
         PropagatedState oldState = predictOld(oldAnchor, timeSeconds);
-        PropagatedState newState = retrodictNew(newSegment, timeSeconds);
+        PropagatedState newState = retrodictNewFromCurrentFormationEstimate(
+                newSegment,
+                timeSeconds);
         InnovationScore score = innovationScore(oldState, newState);
         double nll = canonicalNegativeLogLikelihood(score);
+        InnovationScore physicsAwareScoreBasis = scaledInnovationCovariance(
+                score,
+                configuration.physicsAwareInnovationCovarianceScale());
+        double physicsAwareNll =
+                canonicalNegativeLogLikelihood(physicsAwareScoreBasis);
         BridgeScore bridgeScore = bridgeScore(
                 oldAnchor,
                 newSegment.formationRecord(),
                 timeSeconds,
                 score.innovation(),
+                configuration);
+        PhysicsAwareScore physicsAwareScore = physicsAwareScore(
+                oldAnchor,
+                newSegment.formationRecord(),
+                timeSeconds,
+                physicsAwareNll,
                 configuration);
         double bridgeNllr = bridgeScore.admissible()
                 ? nll - bridgeScore.differentTargetNegativeLogLikelihood()
@@ -704,6 +764,13 @@ public final class TrackStitchingAnalyzer {
                 score.innovationQuadratic(),
                 score.logDeterminant(),
                 nll,
+                physicsAwareNll,
+                physicsAwareScore.gapSeconds(),
+                physicsAwareScore.bridgeGeometryLogDeterminant(),
+                physicsAwareScore.volume(),
+                physicsAwareScore.logVolume(),
+                physicsAwareScore.opportunityCost(),
+                physicsAwareScore.cost(),
                 bridgeScore.endpointRmsAccelerationMetersPerSecondSquared(),
                 bridgeScore.endpointPeakAccelerationMetersPerSecondSquared(),
                 bridgeScore.endpointAdmissible(),
@@ -883,6 +950,65 @@ public final class TrackStitchingAnalyzer {
                 differentTargetNll);
     }
 
+    private static PhysicsAwareScore physicsAwareScore(
+            TrackRecord oldAnchor,
+            TrackRecord newAnchor,
+            double bankTimeSeconds,
+            double negativeLogLikelihood,
+            Configuration configuration) {
+        double gapSeconds = newAnchor.timeSeconds() - oldAnchor.timeSeconds();
+        double oldDuration = bankTimeSeconds - oldAnchor.timeSeconds();
+        double newDuration = newAnchor.timeSeconds() - bankTimeSeconds;
+        if (!(gapSeconds > EPSILON)
+                || !(oldDuration > EPSILON)
+                || !(newDuration > EPSILON)
+                || !Double.isFinite(negativeLogLikelihood)) {
+            return PhysicsAwareScore.nan();
+        }
+        double[][] bridgeGeometry = positionBridgeGeometry(oldDuration, newDuration);
+        double logDeterminant;
+        try {
+            logDeterminant = LinearAlgebra.solveSpd(
+                    bridgeGeometry,
+                    new double[POSITION_SIZE]).logDeterminant();
+        } catch (IllegalArgumentException exception) {
+            return PhysicsAwareScore.nan();
+        }
+        double logVolume = POSITION_SIZE / 2.0 * Math.log(gapSeconds)
+                + 0.5 * logDeterminant;
+        double opportunityCost = configuration.physicsAwareAlpha() * logVolume;
+        double cost = negativeLogLikelihood + opportunityCost;
+        return new PhysicsAwareScore(
+                gapSeconds,
+                logDeterminant,
+                volumeFromLog(logVolume),
+                logVolume,
+                opportunityCost,
+                cost);
+    }
+
+    private static double[][] positionBridgeGeometry(
+            double oldDuration,
+            double newDuration) {
+        double positionShape = (Math.pow(oldDuration, 3.0)
+                + Math.pow(newDuration, 3.0)) / 3.0;
+        double[][] geometry = new double[POSITION_SIZE][POSITION_SIZE];
+        for (int axis = 0; axis < POSITION_SIZE; axis++) {
+            geometry[axis][axis] = positionShape;
+        }
+        return geometry;
+    }
+
+    private static double volumeFromLog(double logVolume) {
+        if (!Double.isFinite(logVolume)) {
+            return Double.NaN;
+        }
+        if (logVolume > Math.log(Double.MAX_VALUE)) {
+            return Double.POSITIVE_INFINITY;
+        }
+        return Math.exp(logVolume);
+    }
+
     private static EndpointBridge endpointBridge(
             TrackRecord oldAnchor,
             TrackRecord newAnchor,
@@ -966,6 +1092,29 @@ public final class TrackStitchingAnalyzer {
                 likelihood.logDeterminant());
     }
 
+    private static InnovationScore scaledInnovationCovariance(
+            InnovationScore score,
+            double covarianceScale) {
+        if (Math.abs(covarianceScale - 1.0) <= EPSILON) {
+            return score;
+        }
+        double[][] covariance = new double[POSITION_SIZE][POSITION_SIZE];
+        double[][] source = score.innovationCovariance();
+        for (int row = 0; row < POSITION_SIZE; row++) {
+            for (int column = 0; column < POSITION_SIZE; column++) {
+                covariance[row][column] = source[row][column] * covarianceScale;
+            }
+        }
+        LinearAlgebra.GaussianLikelihood likelihood =
+                LinearAlgebra.gaussianLikelihood(score.innovation(), covariance);
+        return new InnovationScore(
+                score.innovation(),
+                covariance,
+                likelihood.mahalanobisDistance(),
+                likelihood.squaredMahalanobisDistance(),
+                likelihood.logDeterminant());
+    }
+
     static DistributionScore distributionScore(
             PropagatedState oldState,
             PropagatedState newState) {
@@ -1034,6 +1183,21 @@ public final class TrackStitchingAnalyzer {
         return propagate(
                 new PropagatedState(futureRecord.state(), futureRecord.covariance()),
                 futureRecord.timeSeconds(),
+                wantedTime);
+    }
+
+    static PropagatedState retrodictNewFromCurrentFormationEstimate(
+            Segment newSegment,
+            double wantedTime) {
+        TrackRecord formationRecord = newSegment.formationRecord();
+        TrackRecord currentRecord = newSegment.lastUpdateRecord();
+        PropagatedState currentFormationEstimate = propagate(
+                new PropagatedState(currentRecord.state(), currentRecord.covariance()),
+                currentRecord.timeSeconds(),
+                formationRecord.timeSeconds());
+        return propagate(
+                currentFormationEstimate,
+                formationRecord.timeSeconds(),
                 wantedTime);
     }
 
@@ -1374,8 +1538,37 @@ public final class TrackStitchingAnalyzer {
         return grouped;
     }
 
-    private static boolean inWindow(double value, double minimum, double maximum) {
-        return value + EPSILON >= minimum && value <= maximum + EPSILON;
+    private static boolean inCoastedEventWindow(
+            Segment segment,
+            double eventTime,
+            Configuration configuration) {
+        return inAnchoredWindow(
+                eventTime,
+                segment.lastUpdateTimeSeconds(),
+                configuration.coastedMinimumSeconds(),
+                configuration.coastedMaximumSeconds());
+    }
+
+    private static boolean inNewEventWindow(
+            Segment segment,
+            double eventTime,
+            Configuration configuration) {
+        return inAnchoredWindow(
+                eventTime,
+                segment.formationTimeSeconds(),
+                configuration.newMinimumSeconds(),
+                configuration.newMaximumSeconds());
+    }
+
+    private static boolean inAnchoredWindow(
+            double eventTime,
+            double anchorTime,
+            double minimumOffsetSeconds,
+            double maximumOffsetSeconds) {
+        double minimumTime = anchorTime + minimumOffsetSeconds;
+        double maximumTime = anchorTime + maximumOffsetSeconds;
+        return eventTime + EPSILON >= minimumTime
+                && eventTime <= maximumTime + EPSILON;
     }
 
     private static double positionDistanceSquared(double[] left, double[] right) {
@@ -1421,7 +1614,55 @@ public final class TrackStitchingAnalyzer {
             double birthRatePerCubicKilometer,
             double bridgeAccelerationGateMetersPerSecondSquared,
             double bridgeVolumeGate,
-            double userNllrVolumeCubicKilometers) {
+            double userNllrVolumeCubicKilometers,
+            double physicsAwareAlpha,
+            double physicsAwareInnovationCovarianceScale) {
+        public Configuration(
+                double coastedMinimumSeconds,
+                double coastedMaximumSeconds,
+                double newMinimumSeconds,
+                double newMaximumSeconds,
+                boolean allowDeadTracks,
+                double resolutionSeconds,
+                double falseAlarmRatePerCubicKilometer,
+                double birthRatePerCubicKilometer,
+                double bridgeAccelerationGateMetersPerSecondSquared,
+                double bridgeVolumeGate,
+                double userNllrVolumeCubicKilometers) {
+            this(coastedMinimumSeconds, coastedMaximumSeconds,
+                    newMinimumSeconds, newMaximumSeconds, allowDeadTracks,
+                    resolutionSeconds, falseAlarmRatePerCubicKilometer,
+                    birthRatePerCubicKilometer,
+                    bridgeAccelerationGateMetersPerSecondSquared,
+                    bridgeVolumeGate,
+                    userNllrVolumeCubicKilometers,
+                    DEFAULT_PHYSICS_AWARE_ALPHA);
+        }
+
+        public Configuration(
+                double coastedMinimumSeconds,
+                double coastedMaximumSeconds,
+                double newMinimumSeconds,
+                double newMaximumSeconds,
+                boolean allowDeadTracks,
+                double resolutionSeconds,
+                double falseAlarmRatePerCubicKilometer,
+                double birthRatePerCubicKilometer,
+                double bridgeAccelerationGateMetersPerSecondSquared,
+                double bridgeVolumeGate,
+                double userNllrVolumeCubicKilometers,
+                double physicsAwareAlpha) {
+            this(coastedMinimumSeconds, coastedMaximumSeconds,
+                    newMinimumSeconds, newMaximumSeconds, allowDeadTracks,
+                    resolutionSeconds, falseAlarmRatePerCubicKilometer,
+                    birthRatePerCubicKilometer,
+                    bridgeAccelerationGateMetersPerSecondSquared,
+                    bridgeVolumeGate,
+                    userNllrVolumeCubicKilometers,
+                    physicsAwareAlpha,
+                    DEFAULT_PHYSICS_AWARE_COVARIANCE_SCALE);
+        }
+
         public Configuration(
                 double coastedMinimumSeconds,
                 double coastedMaximumSeconds,
@@ -1437,7 +1678,8 @@ public final class TrackStitchingAnalyzer {
                     birthRatePerCubicKilometer,
                     DEFAULT_BRIDGE_ACCELERATION_GATE_METERS_PER_SECOND_SQUARED,
                     DEFAULT_BRIDGE_VOLUME_GATE,
-                    DEFAULT_USER_NLLR_VOLUME_CUBIC_KILOMETERS);
+                    DEFAULT_USER_NLLR_VOLUME_CUBIC_KILOMETERS,
+                    DEFAULT_PHYSICS_AWARE_ALPHA);
         }
 
         public Configuration(
@@ -1452,7 +1694,8 @@ public final class TrackStitchingAnalyzer {
                     resolutionSeconds, 1.0e-6, 1.0e-6,
                     DEFAULT_BRIDGE_ACCELERATION_GATE_METERS_PER_SECOND_SQUARED,
                     DEFAULT_BRIDGE_VOLUME_GATE,
-                    DEFAULT_USER_NLLR_VOLUME_CUBIC_KILOMETERS);
+                    DEFAULT_USER_NLLR_VOLUME_CUBIC_KILOMETERS,
+                    DEFAULT_PHYSICS_AWARE_ALPHA);
         }
 
         public Configuration {
@@ -1475,7 +1718,11 @@ public final class TrackStitchingAnalyzer {
                     || !Double.isFinite(bridgeVolumeGate)
                     || bridgeVolumeGate <= 0.0
                     || !Double.isFinite(userNllrVolumeCubicKilometers)
-                    || userNllrVolumeCubicKilometers <= 0.0) {
+                    || userNllrVolumeCubicKilometers <= 0.0
+                    || !Double.isFinite(physicsAwareAlpha)
+                    || physicsAwareAlpha < 0.0
+                    || !Double.isFinite(physicsAwareInnovationCovarianceScale)
+                    || physicsAwareInnovationCovarianceScale <= 0.0) {
                 throw new IllegalArgumentException("Invalid stitching time-window configuration");
             }
         }
@@ -1521,6 +1768,7 @@ public final class TrackStitchingAnalyzer {
             List<OptimalAssignment> nllAssignments,
             List<OptimalAssignment> mahalanobisAssignments,
             List<OptimalAssignment> minimumNllAssignments,
+            List<OptimalAssignment> physicsAwareAssignments,
             List<OptimalAssignment> bridgeNllrAssignments,
             List<OptimalAssignment> userVolumeNllrAssignments,
             List<OptimalAssignment> staticNllrAssignments,
@@ -1560,6 +1808,9 @@ public final class TrackStitchingAnalyzer {
             minimumNllAssignments = minimumNllAssignments == null
                     ? List.of()
                     : List.copyOf(minimumNllAssignments);
+            physicsAwareAssignments = physicsAwareAssignments == null
+                    ? List.of()
+                    : List.copyOf(physicsAwareAssignments);
             bridgeNllrAssignments = bridgeNllrAssignments == null
                     ? List.of()
                     : List.copyOf(bridgeNllrAssignments);
@@ -1628,6 +1879,11 @@ public final class TrackStitchingAnalyzer {
             double minimumNegativeLogLikelihood,
             double minimumNllBridgeNegativeLogLikelihoodRatio,
             double minimumNllUserVolumeNegativeLogLikelihoodRatio,
+            double physicsAwareTimeSeconds,
+            double physicsAwareVolume,
+            double physicsAwareNegativeLogLikelihood,
+            double physicsAwareOpportunityCost,
+            double physicsAwareCost,
             double bridgeNllrTimeSeconds,
             double bridgeAdmissibleVolumeCubicKilometers,
             double bridgeDifferentTargetNegativeLogLikelihood,
@@ -1756,6 +2012,13 @@ public final class TrackStitchingAnalyzer {
             double innovationQuadratic,
             double logDeterminant,
             double negativeLogLikelihood,
+            double physicsAwareNegativeLogLikelihood,
+            double physicsAwareGapSeconds,
+            double physicsAwareBridgeGeometryLogDeterminant,
+            double physicsAwareVolume,
+            double physicsAwareLogVolume,
+            double physicsAwareOpportunityCost,
+            double physicsAwareCost,
             double bridgeEndpointRmsAccelerationMetersPerSecondSquared,
             double bridgeEndpointPeakAccelerationMetersPerSecondSquared,
             boolean bridgeEndpointAdmissible,
@@ -1879,6 +2142,24 @@ public final class TrackStitchingAnalyzer {
             double differentTargetNegativeLogLikelihood) {
     }
 
+    private record PhysicsAwareScore(
+            double gapSeconds,
+            double bridgeGeometryLogDeterminant,
+            double volume,
+            double logVolume,
+            double opportunityCost,
+            double cost) {
+        static PhysicsAwareScore nan() {
+            return new PhysicsAwareScore(
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN);
+        }
+    }
+
     record DistributionScore(
             double bhattacharyyaDistance,
             double bhattacharyyaCoefficient,
@@ -1909,6 +2190,7 @@ public final class TrackStitchingAnalyzer {
         NLL("NLL"),
         MAHALANOBIS("Mahalanobis"),
         MINIMUM_NLL("Minimum NLL"),
+        PHYSICS_AWARE("Physics-aware"),
         BRIDGE_VOLUME_NLLR("Bridge-volume NLLR"),
         USER_VOLUME_NLLR("User-volume NLLR"),
         STATIC_NLLR("Static/uniform NLLR"),

@@ -49,6 +49,7 @@ public final class TrackStitchingAnalysisExporterSmokeTest {
         String bankCsv = Files.readString(bank);
         if (!bankCsv.contains("old_state_0")
                 || !bankCsv.contains("position_innovation_covariance_2_2")
+                || !bankCsv.contains("physics_aware_cost")
                 || !bankCsv.contains("bridge_admissible_volume_km3")
                 || !bankCsv.contains("user_volume_nllr")
                 || !bankCsv.contains("learned_negative_log_likelihood_ratio")) {
@@ -63,6 +64,7 @@ public final class TrackStitchingAnalysisExporterSmokeTest {
                 || !pairsCsv.contains("simple_hellinger_distance_6d")
                 || !pairsCsv.contains("minimum_nll")
                 || !pairsCsv.contains("minimum_nll_static_nllr")
+                || !pairsCsv.contains("physics_aware_cost")
                 || !pairsCsv.contains("bridge_nllr")) {
             throw new AssertionError("Pair export should include Gaussian-overlap metrics");
         }
@@ -74,6 +76,7 @@ public final class TrackStitchingAnalysisExporterSmokeTest {
                 || !assignmentsCsv.contains("6D Bhattacharyya Coefficient")
                 || !assignmentsCsv.contains("6D Hellinger Distance")
                 || !assignmentsCsv.contains("Minimum NLL")
+                || !assignmentsCsv.contains("Physics-aware")
                 || !assignmentsCsv.contains("Bridge-volume NLLR")
                 || !assignmentsCsv.contains("User-volume NLLR")) {
             throw new AssertionError("Assignment export should include Gaussian-overlap optima");
