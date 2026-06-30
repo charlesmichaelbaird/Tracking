@@ -1,0 +1,2277 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 7
+/Kids [ 4 0 R 10 0 R 12 0 R 14 0 R 16 0 R 21 0 R 23 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+4 0 obj
+<<
+/Contents 5 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font <<
+/F1 6 0 R
+/F1-0 7 0 R
+/F2 8 0 R
+/F3 9 0 R
+>>
+/ProcSet [ /ImageB /ImageC /ImageI /PDF /Text ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Annots [ ]
+/Parent 2 0 R
+>>
+endobj
+5 0 obj
+<<
+/Length 4518
+>>
+stream
+q
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+q
+.819608 .835294 .858824 RG
+.4 w
+n 44.64 39.6 m 567.36 39.6 l S
+BT /F1 7 Tf 8.4 TL ET
+.419608 .447059 .501961 rg
+BT 1 0 0 1 44.64 26.64 Tm (Track Stitching Algorithms) Tj T* ET
+BT 1 0 0 1 545.177 26.64 Tm (Page 1) Tj T* ET
+Q
+q
+1 0 0 1 50.64 687.36 cm
+Q
+q
+1 0 0 1 50.64 656.36 cm
+q
+.105882 .121569 .141176 rg
+BT 1 0 0 1 0 5 Tm /F2 26 Tf 31 TL 89.22 0 Td (Track Stitching Algorithms) Tj T* -89.22 0 Td ET
+Q
+Q
+q
+1 0 0 1 50.64 614.36 cm
+q
+BT 1 0 0 1 0 19 Tm 156.9265 0 Td 15 TL /F1 11 Tf .294118 .333333 .388235 rg (Implementation guide with code pointers) Tj  T* -55.3245 0 Td (Generated 2026-06-30 for the ECEF Target Tracker repository.) Tj T* -101.602 0 Td ET
+Q
+Q
+q
+1 0 0 1 50.64 553.16 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (This document explains the track-stitching methods implemented in the application. It focuses on what each method) Tj T* (optimizes, how bank-time states are generated, where the user-interface values come from, and which code locations should) Tj T* (be checked when changing the behavior.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 535.56 cm
+q
+.741176 .843137 .941176 RG
+.6 w
+.933333 .964706 1 rg
+n 1 -6 508.72 23.6 re B*
+Q
+q
+.121569 .160784 .215686 rg
+BT 1 0 0 1 7 2.9 Tm /F1 8.7 Tf 11.6 TL (All code pointers are repo-relative paths with line numbers from the current implementation.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 513.16 cm
+Q
+q
+1 0 0 1 50.64 394.96 cm
+q
+.909804 .933333 .968627 rg
+n 0 118.2 489.6 -15.8 re f*
+1 1 1 rg
+n 0 102.4 489.6 -25.6 re f*
+.984314 .988235 .996078 rg
+n 0 76.8 489.6 -25.6 re f*
+1 1 1 rg
+n 0 51.2 489.6 -25.6 re f*
+.984314 .988235 .996078 rg
+n 0 25.6 489.6 -25.6 re f*
+.066667 .094118 .152941 rg
+BT /F1 10 Tf 12 TL ET
+q
+1 0 0 1 4 105.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Layer) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 105.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Primary code pointer) Tj T* ET
+Q
+Q
+q
+1 0 0 1 259.6 105.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (What lives there) Tj T* ET
+Q
+Q
+0 0 0 rg
+q
+1 0 0 1 4 89.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Analysis driver) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 79.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (src/main/java/com/targettracker/analysis/TrackSti) Tj T* (tchingAnalyzer.java:53) Tj T* ET
+Q
+Q
+q
+1 0 0 1 259.6 79.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Measurement-time event scan, segment grouping, pair diagnostics,) Tj T* (metric assignments.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 64 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Pair and bank loop) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 64 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:171) Tj T* ET
+Q
+Q
+q
+1 0 0 1 259.6 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Builds the time bank and evaluates every old/new pair at each bank) Tj T* (time.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 38.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Bank sample math) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 38.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:706) Tj T* ET
+Q
+Q
+q
+1 0 0 1 259.6 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Predict old state, retrodict new state, compute NLL, NLLR, and) Tj T* (Physics-Aware values.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 12.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (UI/output tabs) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (src/main/java/com/targettracker/ui/TrackStitching) Tj T* (AnalysisPanel.java:475) Tj T* ET
+Q
+Q
+q
+1 0 0 1 259.6 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Config controls, output tabs, table population, overlays,) Tj T* (pop-out/export buttons.) Tj T* ET
+Q
+Q
+q
+1 J
+1 j
+.796078 .835294 .882353 RG
+.35 w
+n 0 118.2 m 489.6 118.2 l S
+n 0 0 m 489.6 0 l S
+n 0 0 m 0 118.2 l S
+n 489.6 0 m 489.6 118.2 l S
+n 0 102.4 m 489.6 102.4 l S
+n 0 76.8 m 489.6 76.8 l S
+n 0 51.2 m 489.6 51.2 l S
+n 0 25.6 m 489.6 25.6 l S
+n 86.4 0 m 86.4 118.2 l S
+n 255.6 0 m 255.6 118.2 l S
+Q
+Q
+Q
+ 
+
+Q
+
+q
+0.0 0.0 612 792 re
+W
+n
+1 0 0 1 0 0 cm
+BT
+/F1-0 12 Tf
+14.4 TL
+ET
+1 1 1 rg
+n
+493.2 17.28 82.8 15.84 re
+f*
+BT
+/F1-0 7 Tf
+8.4 TL
+ET
+0.419608 0.447059 0.501961 rg
+BT
+1 0 0 1 545.177 26.64 Tm
+(Page 1) Tj
+T*
+ET
+Q
+
+
+endstream
+endobj
+6 0 obj
+<<
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+/Name /F1
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+7 0 obj
+<<
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+/Name /F1
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+8 0 obj
+<<
+/BaseFont /Helvetica-Bold
+/Encoding /WinAnsiEncoding
+/Name /F2
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+9 0 obj
+<<
+/BaseFont /Courier
+/Encoding /WinAnsiEncoding
+/Name /F3
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+10 0 obj
+<<
+/Contents 11 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font <<
+/F1 6 0 R
+/F1-0 7 0 R
+/F2 8 0 R
+/F3 9 0 R
+>>
+/ProcSet [ /ImageB /ImageC /ImageI /PDF /Text ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Annots [ ]
+/Parent 2 0 R
+>>
+endobj
+11 0 obj
+<<
+/Length 9101
+>>
+stream
+q
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+q
+.819608 .835294 .858824 RG
+.4 w
+n 44.64 39.6 m 567.36 39.6 l S
+BT /F1 7 Tf 8.4 TL ET
+.419608 .447059 .501961 rg
+BT 1 0 0 1 44.64 26.64 Tm (Track Stitching Algorithms) Tj T* ET
+BT 1 0 0 1 545.177 26.64 Tm (Page 2) Tj T* ET
+Q
+q
+1 0 0 1 50.64 723.36 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (Reading Map) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 679.16 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (The stitcher has two layers that are easy to conflate. First, it computes pairwise diagnostics for every eligible) Tj T* (old-track/new-track combination. Second, for each metric, it runs a one-to-one assignment across all eligible pairs. A row in) Tj T* (the table is pairwise evidence; an assignment is the global matching decision for one selected metric.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 523.36 cm
+q
+.909804 .933333 .968627 rg
+n 0 149.8 489.6 -15.8 re f*
+1 1 1 rg
+n 0 134 489.6 -15.8 re f*
+.984314 .988235 .996078 rg
+n 0 118.2 489.6 -25.6 re f*
+1 1 1 rg
+n 0 92.6 489.6 -25.6 re f*
+.984314 .988235 .996078 rg
+n 0 67 489.6 -25.6 re f*
+1 1 1 rg
+n 0 41.4 489.6 -15.8 re f*
+.984314 .988235 .996078 rg
+n 0 25.6 489.6 -25.6 re f*
+.066667 .094118 .152941 rg
+BT /F1 10 Tf 12 TL ET
+q
+1 0 0 1 4 137 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Concept) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 137 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Meaning) Tj T* ET
+Q
+Q
+q
+1 0 0 1 346 137 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Code) Tj T* ET
+Q
+Q
+0 0 0 rg
+q
+1 0 0 1 4 121.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Event time) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 121.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (A sensor measurement time that can contain stitching candidates.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 346 121.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:62-69) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 105.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Old segment) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 95.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL -0.075036 Tw (A distinct track whose most recent measurement update is behind the event) Tj T* 0 Tw (time and inside the allowed coasted window.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 346 105.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:79-82) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 79.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (New segment) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 70 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (A live track whose first measurement update, called formation, is inside the) Tj T* (allowed new-track window.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 346 70 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:84-86 and) Tj T* (615-652) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Bank time) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 44.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (An absolute candidate stitch time strictly inside the gap between old last) Tj T* (update and new formation.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 346 44.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:181-184 and) Tj T* (677-699) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Pair diagnostic) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (All join variants and all bank evaluations for one old/new pair.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 346 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:171-352) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 12.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Metric assignment) Tj T* ET
+Q
+Q
+q
+1 0 0 1 90.4 12.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (A Hungarian assignment over the pair costs for one scoring metric.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 346 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:354-413 and) Tj T* (541-610) Tj T* ET
+Q
+Q
+q
+1 J
+1 j
+.796078 .835294 .882353 RG
+.35 w
+n 0 149.8 m 489.6 149.8 l S
+n 0 0 m 489.6 0 l S
+n 0 0 m 0 149.8 l S
+n 489.6 0 m 489.6 149.8 l S
+n 0 134 m 489.6 134 l S
+n 0 118.2 m 489.6 118.2 l S
+n 0 92.6 m 489.6 92.6 l S
+n 0 67 m 489.6 67 l S
+n 0 41.4 m 489.6 41.4 l S
+n 0 25.6 m 489.6 25.6 l S
+n 86.4 0 m 86.4 149.8 l S
+n 342 0 m 342 149.8 l S
+Q
+Q
+Q
+q
+1 0 0 1 50.64 492.56 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (The implementation intentionally keeps track identity separate from target truth. Truth is used only for diagnostics such as the) Tj T* (truth-reference RMS time; normal scoring uses track states, covariances, and user configuration.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 460.56 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (1. Candidate Events and Track Segments) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 428.76 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (The analysis starts in analyzeDetailed. It groups all records by track, groups truth records, associates measurements, and) Tj T* (then iterates over unique measurement times. That event scan is the only source of top-level analysis tabs.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 413.36 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (src/main/java/com/targettracker/analysis/TrackStitchingAnalyzer.java:53-69) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 357.76 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 40.4 Tm /F1 9.2 Tf 12.4 TL -0.060021 Tw (For each event time, segmentAt walks records up to that time. The first updated record becomes formation, the latest updated) Tj T* 0 Tw (record becomes lastUpdate, and the most recent record of any kind becomes lastObserved. This is why the) Tj T* (coasted/new-track windows are relative to measurement-updated track records, not to truth-target existence or display-only) Tj T* (coast predictions.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 342.36 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:615-652) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 299.16 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (An old segment is included when the event is later than its last updated measurement time, it falls inside the coasted-track) Tj T* (age window, and it is live or dead tracks are allowed. A new segment is included when it is live and its formation age falls) Tj T* (inside the new-track window.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 283.76 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:79-86) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 252.96 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (Pair eligibility is strict: the two segment ids must differ, and there must be enough time between the old last update and new) Tj T* (formation to place at least one bank sample inside the gap.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 237.56 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:159-168) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 205.56 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (2. Time Bank and Propagation) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 161.36 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (Every bank sample is an absolute scenario time tau. The bank starts one resolution step after the old anchor and ends one) Tj T* (resolution step before the new anchor. If the requested resolution would create too many samples, the bank is thinned to a) Tj T* (bounded set while preserving endpoints.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 145.96 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:181-184, 677-699; MAXIMUM_BANK_TIMES at line 47) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 94.56 cm
+q
+.741176 .843137 .941176 RG
+.6 w
+.933333 .964706 1 rg
+n 1 -6 508.72 58.4 re B*
+Q
+q
+.121569 .160784 .215686 rg
+BT 1 0 0 1 7 37.7 Tm /F1 8.7 Tf 11.6 TL (At a bank time tau, the old state is propagated from the old last updated measurement to tau. The new state is not marched) Tj T* (backward by an independent dt. Instead, it is retrodicted to the same absolute tau from the new track formation estimate. If the) Tj T* (gap is G = t_new_form - t_old_last_update and oldDuration = tau - t_old_last_update, then newDuration = t_new_form - tau = G -) Tj T* (oldDuration.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 77.16 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:714-717 and 1199-1211) Tj T* ET
+Q
+Q
+ 
+
+Q
+
+q
+0.0 0.0 612 792 re
+W
+n
+1 0 0 1 0 0 cm
+BT
+/F1-0 12 Tf
+14.4 TL
+ET
+1 1 1 rg
+n
+493.2 17.28 82.8 15.84 re
+f*
+BT
+/F1-0 7 Tf
+8.4 TL
+ET
+0.419608 0.447059 0.501961 rg
+BT
+1 0 0 1 545.177 26.64 Tm
+(Page 2) Tj
+T*
+ET
+Q
+
+
+endstream
+endobj
+12 0 obj
+<<
+/Contents 13 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font <<
+/F1 6 0 R
+/F1-0 7 0 R
+/F2 8 0 R
+/F3 9 0 R
+>>
+/ProcSet [ /ImageB /ImageC /ImageI /PDF /Text ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Annots [ ]
+/Parent 2 0 R
+>>
+endobj
+13 0 obj
+<<
+/Length 8274
+>>
+stream
+q
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+q
+.819608 .835294 .858824 RG
+.4 w
+n 44.64 39.6 m 567.36 39.6 l S
+BT /F1 7 Tf 8.4 TL ET
+.419608 .447059 .501961 rg
+BT 1 0 0 1 44.64 26.64 Tm (Track Stitching Algorithms) Tj T* ET
+BT 1 0 0 1 545.177 26.64 Tm (Page 3) Tj T* ET
+Q
+q
+1 0 0 1 50.64 704.16 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (The propagation model is a constant-velocity transition over the 9D [position, velocity, acceleration] state. Position receives) Tj T* -0.064376 Tw (velocity * dt, acceleration is zeroed in the transition, and process covariance adds the DCWNA-like position/velocity block plus) Tj T* 0 Tw (a tiny acceleration covariance floor. Signed dt supports both prediction and retrodiction.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 688.76 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:1214-1231 and 1233-1265) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 656.56 cm
+%PreformattedPara
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 20.6 Tm /F3 7.6 Tf 9.4 TL (old\(tau\) = propagate\(old_last_update, t_old, tau\)) Tj T* (new\(tau\) = propagate\(formation_estimate, t_new, tau\)) Tj T* (newDuration = t_new - tau = \(t_new - t_old\) - \(tau - t_old\)) Tj T* ET
+Q
+q
+1 0 0 1 50.64 624.56 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (3. Shared Position Innovation and NLL) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 592.76 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (The core statistical comparison is the 3D ECEF position innovation. Even though each track state and covariance is 9D,) Tj T* (innovationScore uses only the first three position entries of the state and the upper-left 3x3 position covariance block.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 577.36 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:1069-1086) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 534.16 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (The innovation is oldMean[0:3] - newMean[0:3]. Its covariance is P_old_position + P_new_position.) Tj T* (LinearAlgebra.gaussianLikelihood returns the squared Mahalanobis distance and log determinant. The canonical same-target) Tj T* (negative log likelihood is the 3D Gaussian NLL:) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 509.36 cm
+%PreformattedPara
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 11.2 Tm /F3 7.6 Tf 9.4 TL (NLL = 0.5 * \(3 * log\(2*pi\) + logdet\(S\) + r^T S^-1 r\)) Tj T* (where r = x_old_xyz - x_new_xyz and S = P_old_xyz + P_new_xyz) Tj T* ET
+Q
+q
+1 0 0 1 50.64 491.96 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:1062-1067) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 461.16 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (This base NLL is used by the feasibility rows, the minimum log-likelihood bank method, and the alternative-hypothesis) Tj T* (metrics. Physics-Aware starts from the same 3D residual but can use a modified covariance for its NLL term.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 429.16 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (4. Gaussian Overlap Methods) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 384.96 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (The Gaussian overlap tabs are descriptive comparison methods for selected join-time variants. They do not minimize the) Tj T* (Section 7 Physics-Aware cost. For each selected time, joinEvaluation propagates the old and new states, computes the) Tj T* (shared 3D NLL, then computes Bhattacharyya distance, Bhattacharyya coefficient, and Hellinger distance.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 369.56 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:798-842) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 268.96 cm
+q
+.909804 .933333 .968627 rg
+n 0 98.6 489.6 -15.8 re f*
+1 1 1 rg
+n 0 82.8 489.6 -15.8 re f*
+.984314 .988235 .996078 rg
+n 0 67 489.6 -25.6 re f*
+1 1 1 rg
+n 0 41.4 489.6 -25.6 re f*
+.984314 .988235 .996078 rg
+n 0 15.8 489.6 -15.8 re f*
+.066667 .094118 .152941 rg
+BT /F1 10 Tf 12 TL ET
+q
+1 0 0 1 4 85.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Variant) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 85.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Join time) Tj T* ET
+Q
+Q
+q
+1 0 0 1 353.2 85.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Code pointer) Tj T* ET
+Q
+Q
+0 0 0 rg
+q
+1 0 0 1 4 70 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Simple midpoint) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 70 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (\(old last update + new formation\) / 2) Tj T* ET
+Q
+Q
+q
+1 0 0 1 353.2 70 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:186) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Kinematic midpoint) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 44.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Distance divided by average endpoint speed, clamped inside bank) Tj T* (bounds.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 353.2 44.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:187 and) Tj T* (654-675) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Mahalanobis bank) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 18.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Midpoint of the best two bank samples by position Mahalanobis) Tj T* (distance.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 353.2 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:188-222) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Truth RMS) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Diagnostic only: minimizes RMS to truth records when truth exists.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 353.2 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzer.java:202-225) Tj T* ET
+Q
+Q
+q
+1 J
+1 j
+.796078 .835294 .882353 RG
+.35 w
+n 0 98.6 m 489.6 98.6 l S
+n 0 0 m 489.6 0 l S
+n 0 0 m 0 98.6 l S
+n 489.6 0 m 489.6 98.6 l S
+n 0 82.8 m 489.6 82.8 l S
+n 0 67 m 489.6 67 l S
+n 0 41.4 m 489.6 41.4 l S
+n 0 15.8 m 489.6 15.8 l S
+n 104.4 0 m 104.4 98.6 l S
+n 349.2 0 m 349.2 98.6 l S
+Q
+Q
+Q
+q
+1 0 0 1 50.64 238.16 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (The overlap dimension is selectable. The 3D tab uses the position block; the 6D tab uses the leading position+velocity block.) Tj T* (distributionScore explicitly rejects any other dimension.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 222.76 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:1128-1166 and 1168-1180) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 171.76 cm
+%PreformattedPara
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 39.4 Tm /F3 7.6 Tf 9.4 TL (Bhattacharyya distance = 1/8 * d^T Sigma_avg^-1 d) Tj T* (                         + 1/2 * \(logdet\(Sigma_avg\)) Tj T* (                         - 1/2 * \(logdet\(Sigma_old\) + logdet\(Sigma_new\)\)\)) Tj T* (Coefficient = exp\(-distance\)) Tj T* (Hellinger = sqrt\(1 - coefficient\)) Tj T* ET
+Q
+q
+1 0 0 1 50.64 139.76 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (5. Feasibility Methods) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 95.56 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (The Feasibility tab reuses the same simple, kinematic, Mahalanobis-bank, and truth-reference join variants. Instead of) Tj T* (displaying overlap distances, it displays the canonical position-only NLL and Mahalanobis distance for those selected join) Tj T* (times.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 70.76 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 11.6 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:798-842 for per-time evaluation; TrackStitchingAnalysisPanel.java:1315-1316 and 1486-1520) Tj T* (for table values) Tj T* ET
+Q
+Q
+ 
+
+Q
+
+q
+0.0 0.0 612 792 re
+W
+n
+1 0 0 1 0 0 cm
+BT
+/F1-0 12 Tf
+14.4 TL
+ET
+1 1 1 rg
+n
+493.2 17.28 82.8 15.84 re
+f*
+BT
+/F1-0 7 Tf
+8.4 TL
+ET
+0.419608 0.447059 0.501961 rg
+BT
+1 0 0 1 545.177 26.64 Tm
+(Page 3) Tj
+T*
+ET
+Q
+
+
+endstream
+endobj
+14 0 obj
+<<
+/Contents 15 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font <<
+/F1 6 0 R
+/F1-0 7 0 R
+/F2 8 0 R
+/F3 9 0 R
+>>
+/ProcSet [ /ImageB /ImageC /ImageI /PDF /Text ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Annots [ ]
+/Parent 2 0 R
+>>
+endobj
+15 0 obj
+<<
+/Length 8191
+>>
+stream
+q
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+q
+.819608 .835294 .858824 RG
+.4 w
+n 44.64 39.6 m 567.36 39.6 l S
+BT /F1 7 Tf 8.4 TL ET
+.419608 .447059 .501961 rg
+BT 1 0 0 1 44.64 26.64 Tm (Track Stitching Algorithms) Tj T* ET
+BT 1 0 0 1 545.177 26.64 Tm (Page 4) Tj T* ET
+Q
+q
+1 0 0 1 50.64 716.56 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL -0.100025 Tw (In global assignment mode, the NLL metric minimizes NLL and the Mahalanobis metric minimizes Mahalanobis distance. Both) Tj T* 0 Tw (metrics choose the best of the simple, kinematic, and Mahalanobis-bank variants for each pair before Hungarian assignment.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 701.16 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:415-464 and 511-512) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 669.16 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (6. Minimum Log-Likelihood Bank) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 637.36 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (The minimum log-likelihood method is the direct bank minimization of the canonical same-target NLL. For each old/new pair,) Tj T* (analyzePair evaluates every bank time and chooses the BankEvaluation with the smallest base negativeLogLikelihood.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 621.96 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:190-213 and 1335-1348) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 582.16 cm
+q
+.741176 .843137 .941176 RG
+.6 w
+.933333 .964706 1 rg
+n 1 -6 508.72 46.8 re B*
+Q
+q
+.121569 .160784 .215686 rg
+BT 1 0 0 1 7 26.1 Tm /F1 8.7 Tf 11.6 TL (The Min log-likelihood table row exposes the selected time and the selected base NLL. It also shows Bridge NLLR and) Tj T* (User-volume NLLR evaluated at that same minimum-NLL bank time. Those two NLLR columns are not what selected the row;) Tj T* (they are contextual alternative-hypothesis scores at the chosen minimum-NLL sample.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 564.76 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:311-320; TrackStitchingAnalysisPanel.java:1309-1311 and 1337-1346) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 533.96 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (The global Minimum NLL assignment uses the pairwise minimum NLL as its cost. The assignment code maps the) Tj T* (MINIMUM_NLL metric to pair.minimumNegativeLogLikelihood.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 518.56 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:415-421 and 513) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 486.56 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (7. Physics-Aware Kinematic Alternative-Opportunity Cost) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 442.36 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL -0.033711 Tw (Physics-Aware is the Section 7 kinematic alternative-opportunity design. It evaluates a full cost at every bank time and selects) Tj T* 0 Tw (the bank time with the minimum total C_ijl. The total cost is the Physics-Aware NLL term plus an alpha-scaled) Tj T* (bridge-geometry opportunity term.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 426.96 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:211-213, 720-736, 955-990) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 383.76 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (The first term still uses the 3D position innovation. Before computing the Physics-Aware NLL, the base 3x3 innovation) Tj T* (covariance can be modified by the UI controls: add P_floor = sigma_floor^2 * I3, then multiply the full 3x3 matrix by the) Tj T* (covariance scale. The default sigma_floor is 100 m and the default scale is 1.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 368.36 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:1097-1126; TrackStitchingAnalysisPanel.java:104-106, 422-450, 655-686) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 345.56 cm
+%PreformattedPara
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 11.2 Tm /F3 7.6 Tf 9.4 TL (S_pa = covarianceScale * \(S_base + sigma_floor^2 * I3\)) Tj T* (NLL_pa = 0.5 * \(3 * log\(2*pi\) + logdet\(S_pa\) + r^T S_pa^-1 r\)) Tj T* ET
+Q
+q
+1 0 0 1 50.64 312.76 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (The second term comes from the bridge geometry. H is effectively the projection onto the three position entries, so the) Tj T* (comparison dimension n is 3 and the identity is I3. In this implementation the resulting position bridge geometry is diagonal:) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 297.36 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:970-982 and 992-1002) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 255.76 cm
+%PreformattedPara
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 30 Tm /F3 7.6 Tf 9.4 TL (G\(tau\) = \(\(oldDuration^3 + newDuration^3\) / 3\) * I3) Tj T* (logVolume = \(3/2\) * log\(gapSeconds\) + \(1/2\) * logdet\(G\)) Tj T* (opportunityCost = alpha * logVolume) Tj T* (C_ijl\(tau\) = NLL_pa\(tau\) + opportunityCost\(tau\)) Tj T* ET
+Q
+q
+1 0 0 1 50.64 224.56 cm
+q
+.741176 .843137 .941176 RG
+.6 w
+.933333 .964706 1 rg
+n 1 -6 508.72 35.2 re B*
+Q
+q
+.121569 .160784 .215686 rg
+BT 1 0 0 1 7 14.5 Tm /F1 8.7 Tf 11.6 TL (The selected Physics-Aware row reports the minimizing time, V_ijl, Physics-Aware NLL, alpha-scaled physics term, and total) Tj T* (C_ijl. The global Physics-Aware assignment uses total C_ijl, not NLL_pa alone.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 207.16 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:321-333 and 514; TrackStitchingAnalysisPanel.java:1306-1308, 1325-1335, 1412-1424) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 175.16 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (8. Alternative-Hypothesis and NLLR Methods) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 143.36 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (The NLLR family compares the same-target Gaussian NLL against different-target opportunity models. The implemented) Tj T* (scores share the same base 3D residual and covariance unless otherwise noted.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 70.36 cm
+q
+.909804 .933333 .968627 rg
+n 0 67 489.6 -15.8 re f*
+1 1 1 rg
+n 0 51.2 489.6 -25.6 re f*
+.984314 .988235 .996078 rg
+n 0 25.6 489.6 -25.6 re f*
+.066667 .094118 .152941 rg
+BT /F1 10 Tf 12 TL ET
+q
+1 0 0 1 4 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Score) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Definition in this code) Tj T* ET
+Q
+Q
+q
+1 0 0 1 364 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Selection behavior) Tj T* ET
+Q
+Q
+0 0 0 rg
+q
+1 0 0 1 4 38.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Bridge-volume NLLR) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (base NLL - log\(admissible bridge volume\), only finite when the bridge gate) Tj T* (is admissible.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 364 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (The NLLR tab minimizes this over) Tj T* (bank times.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 12.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (User-volume NLLR) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 12.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (base NLL - log\(user volume\), where user volume is configured in km^3.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 364 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (The NLLR tab can also minimize this) Tj T* (over bank times.) Tj T* ET
+Q
+Q
+q
+1 J
+1 j
+.796078 .835294 .882353 RG
+.35 w
+n 0 67 m 489.6 67 l S
+n 0 0 m 0 67 l S
+n 489.6 0 m 489.6 67 l S
+n 0 0 m 489.6 0 l S
+n 0 51.2 m 489.6 51.2 l S
+n 0 25.6 m 489.6 25.6 l S
+n 104.4 0 m 104.4 67 l S
+n 360 0 m 360 67 l S
+Q
+Q
+Q
+ 
+
+Q
+
+q
+0.0 0.0 612 792 re
+W
+n
+1 0 0 1 0 0 cm
+BT
+/F1-0 12 Tf
+14.4 TL
+ET
+1 1 1 rg
+n
+493.2 17.28 82.8 15.84 re
+f*
+BT
+/F1-0 7 Tf
+8.4 TL
+ET
+0.419608 0.447059 0.501961 rg
+BT
+1 0 0 1 545.177 26.64 Tm
+(Page 4) Tj
+T*
+ET
+Q
+
+
+endstream
+endobj
+16 0 obj
+<<
+/Contents 17 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font <<
+/F1 18 0 R
+/F1-0 7 0 R
+/F2 19 0 R
+/F3 20 0 R
+>>
+/ProcSet [ /ImageB /ImageC /ImageI /PDF /Text ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Annots [ ]
+/Parent 2 0 R
+>>
+endobj
+17 0 obj
+<<
+/Length 6261
+>>
+stream
+q
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+q
+.819608 .835294 .858824 RG
+.4 w
+n 44.64 39.6 m 567.36 39.6 l S
+BT /F1 7 Tf 8.4 TL ET
+.419608 .447059 .501961 rg
+BT 1 0 0 1 44.64 26.64 Tm (Track Stitching Algorithms) Tj T* ET
+BT 1 0 0 1 545.177 26.64 Tm (Page 5) Tj T* ET
+Q
+q
+1 0 0 1 50.64 722.36 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 16 Tf 19 TL (Bridge NLLR in the Min Log-Likelihood Tab) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 689.56 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (This page is deliberately focused on the Bridge NLLR column in the Min log-likelihood tab, because it can be easy to misread) Tj T* (it as the optimizer for that tab.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 659.96 cm
+q
+.992157 .729412 .454902 RG
+.6 w
+1 .968627 .929412 rg
+n 1 -6 508.72 35.6 re B*
+Q
+q
+.121569 .160784 .215686 rg
+BT 1 0 0 1 7 14.8 Tm /F1 8.8 Tf 11.8 TL (In the Min log-likelihood tab, the selected bank time is tau_NLL = argmin_tau base NLL\(tau\). The Bridge NLLR column is then) Tj T* (computed at tau_NLL. It is not independently minimized in that tab.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 642.56 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (Selection: TrackStitchingAnalyzer.java:208-210) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 627.16 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (Pair fields copied from selected min-NLL evaluation: TrackStitchingAnalyzer.java:311-320) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 611.76 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (Table columns and row values: TrackStitchingAnalysisPanel.java:1309-1311 and 1337-1346) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 589.76 cm
+q
+.121569 .160784 .215686 rg
+BT 1 0 0 1 0 3 Tm /F2 11 Tf 14 TL (Formula used at the selected minimum-NLL bank time) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 522.76 cm
+%PreformattedPara
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 55.7 Tm /F3 7.3 Tf 9 TL (tau_NLL = argmin_tau NLL_base\(tau\)) Tj T* (BridgeNLLR_in_MinLogTab = NLL_base\(tau_NLL\)) Tj T* (                            - log\(V_bridge\(tau_NLL\)\)) Tj T*  T* (V_bridge is finite only when both bridge gates are admissible.) Tj T* (If tau_NLL is not bridge-admissible, this column is NaN,) Tj T* (even when a different bank time has a finite Bridge NLLR.) Tj T* ET
+Q
+q
+1 0 0 1 50.64 505.36 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (Bridge volume/opportunity model: TrackStitchingAnalyzer.java:900-954) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 489.96 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (Bridge NLLR computation: TrackStitchingAnalyzer.java:737-739) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 467.96 cm
+q
+.121569 .160784 .215686 rg
+BT 1 0 0 1 0 3 Tm /F2 11 Tf 14 TL (Why this matters) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 317.96 cm
+q
+.909804 .933333 .968627 rg
+n 0 146 489.6 -16 re f*
+1 1 1 rg
+n 0 130 489.6 -26 re f*
+.984314 .988235 .996078 rg
+n 0 104 489.6 -26 re f*
+1 1 1 rg
+n 0 78 489.6 -16 re f*
+.984314 .988235 .996078 rg
+n 0 62 489.6 -26 re f*
+1 1 1 rg
+n 0 36 489.6 -36 re f*
+0 0 0 rg
+BT /F1 10 Tf 12 TL ET
+q
+1 0 0 1 4 133 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.5 Tm /F2 7.5 Tf 10 TL (Question) Tj T* ET
+Q
+Q
+q
+1 0 0 1 151.6 133 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.5 Tm /F2 7.5 Tf 10 TL (Answer) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 107 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.5 Tm /F1 7.5 Tf 10 TL (What does the Bridge NLLR number in) Tj T* (the Min log-likelihood tab mean?) Tj T* ET
+Q
+Q
+q
+1 0 0 1 151.6 107 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.5 Tm /F1 7.5 Tf 10 TL (It is the bridge-volume negative log-likelihood ratio evaluated at the bank time that minimized base) Tj T* (same-target NLL.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 81 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.5 Tm /F1 7.5 Tf 10 TL (Does it choose the Min log-likelihood row) Tj T* (time?) Tj T* ET
+Q
+Q
+q
+1 0 0 1 151.6 81 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.5 Tm /F1 7.5 Tf 10 TL (No. The row time is chosen only by base NLL. Bridge NLLR is a diagnostic/context column in that) Tj T* (tab.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 65 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.5 Tm /F1 7.5 Tf 10 TL (Where is Bridge NLLR minimized?) Tj T* ET
+Q
+Q
+q
+1 0 0 1 151.6 65 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.5 Tm /F1 7.5 Tf 10 TL (The dedicated NLLR/Alternative tab selects the bank time that minimizes bridge-volume NLLR itself.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 39 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.5 Tm /F1 7.5 Tf 10 TL (Why can the two tabs show different) Tj T* (times or values?) Tj T* ET
+Q
+Q
+q
+1 0 0 1 151.6 39 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.5 Tm /F1 7.5 Tf 10 TL (Because Min log-likelihood minimizes NLL_base\(tau\), while the NLLR tab minimizes NLL_base\(tau\)) Tj T* (- log\(V_bridge\(tau\)\) subject to bridge admissibility.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 23 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.5 Tm /F1 7.5 Tf 10 TL (Which sign favors stitching?) Tj T* ET
+Q
+Q
+q
+1 0 0 1 151.6 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 22.5 Tm /F1 7.5 Tf 10 TL (Lower NLLR is better for a same-target stitch under the assignment convention. Negative values) Tj T* -0.088077 Tw (mean the same-target NLL is smaller than the bridge-volume different-target opportunity score at that) Tj T* 0 Tw (bank time.) Tj T* ET
+Q
+Q
+q
+1 J
+1 j
+.796078 .835294 .882353 RG
+.35 w
+n 0 146 m 489.6 146 l S
+n 0 0 m 489.6 0 l S
+n 0 0 m 0 146 l S
+n 489.6 0 m 489.6 146 l S
+n 0 130 m 489.6 130 l S
+n 0 104 m 489.6 104 l S
+n 0 78 m 489.6 78 l S
+n 0 62 m 489.6 62 l S
+n 0 36 m 489.6 36 l S
+n 147.6 0 m 147.6 146 l S
+Q
+Q
+Q
+q
+1 0 0 1 50.64 309.96 cm
+Q
+q
+1 0 0 1 50.64 266.76 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (Practical read: if the Min log-likelihood tab shows a strong NLL but a poor or NaN Bridge NLLR, the base Gaussian residual) Tj T* (likes the stitch at tau_NLL, but the bridge-volume alternative model does not validate that same tau. Check the NLLR tab or) Tj T* (pair_bank_values.csv to see whether another bank time offers a better bridge-volume ratio.) Tj T* ET
+Q
+Q
+ 
+
+Q
+
+q
+0.0 0.0 612 792 re
+W
+n
+1 0 0 1 0 0 cm
+BT
+/F1-0 12 Tf
+14.4 TL
+ET
+1 1 1 rg
+n
+493.2 17.28 82.8 15.84 re
+f*
+BT
+/F1-0 7 Tf
+8.4 TL
+ET
+0.419608 0.447059 0.501961 rg
+BT
+1 0 0 1 545.177 26.64 Tm
+(Page 5) Tj
+T*
+ET
+Q
+
+
+endstream
+endobj
+18 0 obj
+<<
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+/Name /F1
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+19 0 obj
+<<
+/BaseFont /Helvetica-Bold
+/Encoding /WinAnsiEncoding
+/Name /F2
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+20 0 obj
+<<
+/BaseFont /Courier
+/Encoding /WinAnsiEncoding
+/Name /F3
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+21 0 obj
+<<
+/Contents 22 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font <<
+/F1 6 0 R
+/F1-0 7 0 R
+/F2 8 0 R
+/F3 9 0 R
+>>
+/ProcSet [ /ImageB /ImageC /ImageI /PDF /Text ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Annots [ ]
+/Parent 2 0 R
+>>
+endobj
+22 0 obj
+<<
+/Length 7868
+>>
+stream
+q
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+q
+.819608 .835294 .858824 RG
+.4 w
+n 44.64 39.6 m 567.36 39.6 l S
+BT /F1 7 Tf 8.4 TL ET
+.419608 .447059 .501961 rg
+BT 1 0 0 1 44.64 26.64 Tm (Track Stitching Algorithms) Tj T* ET
+BT 1 0 0 1 545.177 26.64 Tm (Page 5) Tj T* ET
+Q
+q
+1 0 0 1 50.64 674.36 cm
+q
+.909804 .933333 .968627 rg
+n 0 67 489.6 -15.8 re f*
+1 1 1 rg
+n 0 51.2 489.6 -25.6 re f*
+.984314 .988235 .996078 rg
+n 0 25.6 489.6 -25.6 re f*
+.066667 .094118 .152941 rg
+BT /F1 10 Tf 12 TL ET
+q
+1 0 0 1 4 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Score) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Definition in this code) Tj T* ET
+Q
+Q
+q
+1 0 0 1 364 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Selection behavior) Tj T* ET
+Q
+Q
+0 0 0 rg
+q
+1 0 0 1 4 38.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Static NLLR) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (base NLL + log\(lambda_ex\) from configured false alarm + birth density and) Tj T* (the innovation volume.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 364 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Available in assignments and) Tj T* (exports.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 12.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Learned NLLR) Tj T* ET
+Q
+Q
+q
+1 0 0 1 108.4 12.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL -0.02038 Tw (base NLL + log\(expected learned births\) from the learned birth-density field.) Tj T* 0 Tw ET
+Q
+Q
+q
+1 0 0 1 364 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Available in assignments and) Tj T* (exports.) Tj T* ET
+Q
+Q
+q
+1 J
+1 j
+.796078 .835294 .882353 RG
+.35 w
+n 0 67 m 489.6 67 l S
+n 0 51.2 m 0 67 l S
+n 0 0 m 0 51.2 l S
+n 489.6 51.2 m 489.6 67 l S
+n 489.6 0 m 489.6 51.2 l S
+n 0 0 m 489.6 0 l S
+n 0 51.2 m 489.6 51.2 l S
+n 104.4 51.2 m 104.4 67 l S
+n 360 51.2 m 360 67 l S
+n 0 25.6 m 489.6 25.6 l S
+n 104.4 0 m 104.4 51.2 l S
+n 360 0 m 360 51.2 l S
+Q
+Q
+Q
+q
+1 0 0 1 50.64 658.96 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (Bridge: TrackStitchingAnalyzer.java:900-954 and 737-739) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 643.56 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (User volume: TrackStitchingAnalyzer.java:740-744) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 628.16 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (Static/learned: TrackStitchingAnalyzer.java:745-795 and 813-822) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 584.96 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (The Alternative/NLLR UI tab shows the bridge-volume and user-volume bank minima. The Min log-likelihood tab shows the) Tj T* (same NLLR formulas evaluated at the minimum-NLL bank time, which is why those columns can differ from the dedicated) Tj T* (NLLR tab minima.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 569.56 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalysisPanel.java:1317-1319 and 1349-1359) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 537.56 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (9. Assignment Layer) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 493.36 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (After pairwise diagnostics are computed for an event, analyzeDetailed asks for a separate optimal assignment for each) Tj T* (metric. Missing pair costs are set to a large finite penalty, dummy rows or columns have zero cost, and valid pair metrics use) Tj T* (the finite score selected by bestVariant.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 477.96 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:124-153 and 354-413) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 438.16 cm
+q
+.741176 .843137 .941176 RG
+.6 w
+.933333 .964706 1 rg
+n 1 -6 508.72 46.8 re B*
+Q
+q
+.121569 .160784 .215686 rg
+BT 1 0 0 1 7 26.1 Tm /F1 8.7 Tf 11.6 TL (The assignment solver is the Hungarian algorithm. It includes explicit finite-path guards: if the augmenting-path search exceeds a) Tj T* (bounded step count or cannot find a finite delta, it throws instead of looping indefinitely. This protection applies to every stitching) Tj T* (method because all metric assignments pass through the same solver.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 420.76 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:541-610, especially 555-584) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 389.96 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (For coefficient metrics, cost is inverted as 1 - coefficient so the assignment still minimizes. For all other displayed metrics, the) Tj T* (cost is the score itself.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 374.56 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalyzer.java:530-534) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 342.56 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (10. UI, Pop-Out Values, and Exports) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 298.36 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (The Track Stitching Analysis panel creates output tabs for Physics-Aware, Min log-likelihood, Gaussian overlap 3D/6D,) Tj T* (Feasibility, and NLLR. The selected output tab maps to a ScoreMode, and changing either the output tab or the candidate) Tj T* (event tab repopulates the metrics table.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 282.96 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalysisPanel.java:475-518, 1070-1107, 1157-1165, 1301-1455) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 239.76 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (Physics-Aware configuration lives in the Configuration section. Alpha weights the opportunity term; Cov scale multiplies the) Tj T* (Physics-Aware innovation covariance; P_floor std m is squared and added to the position covariance diagonal before the) Tj T* (scale is applied.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 224.36 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalysisPanel.java:422-450 and 622-686) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 193.56 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 15.6 Tm /F1 9.2 Tf 12.4 TL (The pop-out values window shows the underlying 9x1 state, 9x9 covariance, 3x1 innovation, 3x3 innovation covariance,) Tj T* (squared Mahalanobis distance, NLL, Physics-Aware NLL, opportunity cost, and full C_ijl at every bank time.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 178.16 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingAnalysisDetailsWindow.java:31-65 and 242-282) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 134.96 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (The Export values button writes those pop-out values to CSV. pair_bank_values.csv is the most complete audit table for) Tj T* (algorithm verification, and the MATLAB helper loads the export into workspace variables and plots NLL, bridge log) Tj T* (determinant, and total Physics-Aware cost.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 119.56 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (TrackStitchingDetailsExporter.java:23-52, 238-305, 346-359) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 104.16 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.2 Tm /F3 7.2 Tf 9.4 TL (scripts/plot_track_stitching_detail_export.m:1-40 and 184-217) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 72.16 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (11. Regression Tests and Sanity Checks) Tj T* ET
+Q
+Q
+ 
+
+Q
+
+q
+0.0 0.0 612 792 re
+W
+n
+1 0 0 1 0 0 cm
+BT
+/F1-0 12 Tf
+14.4 TL
+ET
+1 1 1 rg
+n
+493.2 17.28 82.8 15.84 re
+f*
+BT
+/F1-0 7 Tf
+8.4 TL
+ET
+0.419608 0.447059 0.501961 rg
+BT
+1 0 0 1 545.177 26.64 Tm
+(Page 6) Tj
+T*
+ET
+Q
+
+
+endstream
+endobj
+23 0 obj
+<<
+/Contents 24 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font <<
+/F1 6 0 R
+/F1-0 7 0 R
+/F2 8 0 R
+/F3 9 0 R
+>>
+/ProcSet [ /ImageB /ImageC /ImageI /PDF /Text ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Annots [ ]
+/Parent 2 0 R
+>>
+endobj
+24 0 obj
+<<
+/Length 5712
+>>
+stream
+q
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+q
+.819608 .835294 .858824 RG
+.4 w
+n 44.64 39.6 m 567.36 39.6 l S
+BT /F1 7 Tf 8.4 TL ET
+.419608 .447059 .501961 rg
+BT 1 0 0 1 44.64 26.64 Tm (Track Stitching Algorithms) Tj T* ET
+BT 1 0 0 1 545.177 26.64 Tm (Page 6) Tj T* ET
+Q
+q
+1 0 0 1 50.64 591.56 cm
+q
+.909804 .933333 .968627 rg
+n 0 149.8 489.6 -15.8 re f*
+1 1 1 rg
+n 0 134 489.6 -25.6 re f*
+.984314 .988235 .996078 rg
+n 0 108.4 489.6 -15.8 re f*
+1 1 1 rg
+n 0 92.6 489.6 -15.8 re f*
+.984314 .988235 .996078 rg
+n 0 76.8 489.6 -25.6 re f*
+1 1 1 rg
+n 0 51.2 489.6 -25.6 re f*
+.984314 .988235 .996078 rg
+n 0 25.6 489.6 -25.6 re f*
+.066667 .094118 .152941 rg
+BT /F1 10 Tf 12 TL ET
+q
+1 0 0 1 4 137 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Behavior protected) Tj T* ET
+Q
+Q
+q
+1 0 0 1 299.2 137 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F2 7.4 Tf 9.8 TL (Test pointer) Tj T* ET
+Q
+Q
+0 0 0 rg
+q
+1 0 0 1 4 121.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Physics-Aware bridge geometry, log volume, opportunity cost, and total cost.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 299.2 111.4 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (src/test/java/com/targettracker/analysis/TrackStitchingAn) Tj T* (alyzerSmokeTest.java:720-743) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 95.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (Covariance scale affects only Physics-Aware NLL and not the base NLL.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 299.2 95.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzerSmokeTest.java:747-812) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 79.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (P_floor standard deviation is squared and added as covariance.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 299.2 79.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzerSmokeTest.java:814-875) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 54.2 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Bank-time propagation complements the full gap: old advances by tau - old, new) Tj T* (retrodicts by new - tau.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 299.2 64 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (TrackStitchingAnalyzerSmokeTest.java:878-965) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (Saved 2DifferentWithBlackout scenario has candidates with 2-minute coast/new) Tj T* (windows.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 299.2 28.6 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (src/test/java/com/targettracker/ui/SavedScenarioTrackSti) Tj T* (tchingSmokeTest.java:55-64) Tj T* ET
+Q
+Q
+q
+1 0 0 1 4 12.8 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 2.4 Tm /F1 7.4 Tf 9.8 TL (World-view candidate tab changes refresh Min NLL and Physics-Aware tables.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 299.2 3 cm
+q
+.066667 .094118 .152941 rg
+BT 1 0 0 1 0 12.2 Tm /F1 7.4 Tf 9.8 TL (src/test/java/com/targettracker/ui/TrackStitchingAnalysis) Tj T* (PanelSmokeTest.java:157-179) Tj T* ET
+Q
+Q
+q
+1 J
+1 j
+.796078 .835294 .882353 RG
+.35 w
+n 0 149.8 m 489.6 149.8 l S
+n 0 0 m 489.6 0 l S
+n 0 0 m 0 149.8 l S
+n 489.6 0 m 489.6 149.8 l S
+n 0 134 m 489.6 134 l S
+n 0 108.4 m 489.6 108.4 l S
+n 0 92.6 m 489.6 92.6 l S
+n 0 76.8 m 489.6 76.8 l S
+n 0 51.2 m 489.6 51.2 l S
+n 0 25.6 m 489.6 25.6 l S
+n 295.2 0 m 295.2 149.8 l S
+Q
+Q
+Q
+q
+1 0 0 1 50.64 548.36 cm
+q
+.145098 .164706 .192157 rg
+BT 1 0 0 1 0 28 Tm /F1 9.2 Tf 12.4 TL (Recommended smoke-run coverage after algorithm changes: TrackStitchingAnalyzerSmokeTest,) Tj T* (TrackStitchingAnalysisExporterSmokeTest, TrackStitchingAnalysisPanelSmokeTest, and) Tj T* (SavedScenarioTrackStitchingSmokeTest.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 516.36 cm
+q
+.070588 .207843 .356863 rg
+BT 1 0 0 1 0 3 Tm /F2 15 Tf 18 TL (Practical Debugging Checklist) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 484.56 cm
+q
+BT 1 0 0 1 14 15.6 Tm -10 0 Td 12.4 TL /F1 9.2 Tf .145098 .164706 .192157 rg (\177 If no candidates appear, first check event-time segmentation and eligibleStrictPair. There must be a distinct old/new pair) Tj T* 10 0 Td (and at least one strict interior bank sample.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 453.76 cm
+q
+BT 1 0 0 1 14 15.6 Tm -10 0 Td 12.4 TL /F1 9.2 Tf .145098 .164706 .192157 rg (\177 If Min log-likelihood or Physics-Aware values look stale, confirm updateSelectedEvent is repopulating the table for the) Tj T* 10 0 Td (active ScoreMode.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 422.96 cm
+q
+BT 1 0 0 1 14 15.6 Tm -10 0 Td 12.4 TL /F1 9.2 Tf .145098 .164706 .192157 rg (\177 If Physics-Aware NLL disagrees with hand calculations, verify the residual is position-only and that S_pa applies P_floor) Tj T* 10 0 Td (before covariance scale.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 392.16 cm
+q
+BT 1 0 0 1 14 15.6 Tm -10 0 Td 12.4 TL /F1 9.2 Tf .145098 .164706 .192157 rg (\177 If the Physics-Aware selected time looks wrong, inspect pair_bank_values.csv and compare physics_aware_cost across all) Tj T* 10 0 Td (bank_time_seconds for the pair.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 361.36 cm
+q
+BT 1 0 0 1 14 15.6 Tm -10 0 Td 12.4 TL /F1 9.2 Tf .145098 .164706 .192157 rg (\177 If assignment behavior is surprising, distinguish pairwise score from global assignment. The table can show a low pair cost) Tj T* 10 0 Td (that is not selected globally because another one-to-one pairing wins.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 50.64 344.86 cm
+q
+.215686 .254902 .317647 rg
+BT 1 0 0 1 0 2.5 Tm /F1 8 Tf 10.5 TL (End of guide.) Tj T* ET
+Q
+Q
+ 
+
+Q
+
+q
+0.0 0.0 612 792 re
+W
+n
+1 0 0 1 0 0 cm
+BT
+/F1-0 12 Tf
+14.4 TL
+ET
+1 1 1 rg
+n
+493.2 17.28 82.8 15.84 re
+f*
+BT
+/F1-0 7 Tf
+8.4 TL
+ET
+0.419608 0.447059 0.501961 rg
+BT
+1 0 0 1 545.177 26.64 Tm
+(Page 7) Tj
+T*
+ET
+Q
+
+
+endstream
+endobj
+xref
+0 25
+0000000000 65535 f 
+0000000015 00000 n 
+0000000054 00000 n 
+0000000155 00000 n 
+0000000204 00000 n 
+0000000447 00000 n 
+0000005017 00000 n 
+0000005124 00000 n 
+0000005231 00000 n 
+0000005343 00000 n 
+0000005448 00000 n 
+0000005693 00000 n 
+0000014847 00000 n 
+0000015092 00000 n 
+0000023419 00000 n 
+0000023664 00000 n 
+0000031908 00000 n 
+0000032156 00000 n 
+0000038470 00000 n 
+0000038578 00000 n 
+0000038691 00000 n 
+0000038797 00000 n 
+0000039042 00000 n 
+0000046963 00000 n 
+0000047208 00000 n 
+trailer
+<<
+/Size 25
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+52973
+%%EOF

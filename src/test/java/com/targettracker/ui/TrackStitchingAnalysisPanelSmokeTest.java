@@ -1,16 +1,21 @@
 package com.targettracker.ui;
 
+import com.targettracker.analysis.TrackStitchingAnalyzer;
 import com.targettracker.recording.GroundTruthRecord;
 import com.targettracker.recording.RecordedMeasurement;
 import com.targettracker.recording.RecordedScenario;
 import com.targettracker.tracking.TrackRecord;
 
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JTabbedPane;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JTable;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.border.Border;
+import javax.swing.border.CompoundBorder;
 import javax.swing.border.TitledBorder;
 import java.awt.Component;
 import java.awt.Container;
@@ -79,8 +84,22 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
         });
 
         waitForAnalysis(tabsReference.get());
+        TrackStitchingAnalyzer.AnalysisResult detailsResult =
+                new TrackStitchingAnalyzer().analyzeDetailed(
+                        scenario(),
+                        new TrackStitchingAnalyzer.Configuration(
+                                0.0, 6.0, 0.0, 6.0, false, 0.5));
+        AtomicReference<JComponent> detailsContentReference = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> detailsContentReference.set(
+                TrackStitchingAnalysisDetailsWindow.createContent(detailsResult.events())));
         SwingUtilities.invokeAndWait(() -> {
             JTabbedPane tabs = tabsReference.get();
+            JComponent detailsContent = detailsContentReference.get();
+            if (findTabbedPaneWithTitle(detailsContent, "00:05") == null
+                    || findTabbedPaneWithTitle(detailsContent, "TRK-001 -> TRK-002") == null) {
+                throw new AssertionError(
+                        "Detailed values window should expose event and pair tabs");
+            }
             if (tabs.getTabCount() != 2
                     || !"00:05".equals(tabs.getTitleAt(0))
                     || !"00:06".equals(tabs.getTitleAt(1))) {
@@ -119,6 +138,14 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
             if (zeroMinimumSliders < 2) {
                 throw new AssertionError(
                         "Coasted and new-track minimum sliders should default to zero");
+            }
+            JComponent physicsAwarePanel =
+                    findTitledComponent(panelReference.get(), "Physics-Aware");
+            if (physicsAwarePanel == null
+                    || physicsAwarePanel.getPreferredSize().height < 100
+                    || findTextFieldWithText(physicsAwarePanel, "100.0") == null) {
+                throw new AssertionError(
+                        "Physics-Aware config inputs should expose the P_floor std field");
             }
             if (!"State".equals(table.getColumnName(5))
                     || !"Poly".equals(table.getColumnName(6))
@@ -170,6 +197,14 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
             if (table.getRowCount() > 0) {
                 table.setValueAt(Boolean.TRUE, 0, 8);
             }
+            JButton detailsButton = findButton(panelReference.get(), "Pop out values");
+            if (detailsButton == null || !detailsButton.isEnabled()) {
+                throw new AssertionError("Detailed values pop-out button should be visible");
+            }
+            JButton detailsExportButton = findButton(panelReference.get(), "Export values");
+            if (detailsExportButton == null || !detailsExportButton.isEnabled()) {
+                throw new AssertionError("Detailed values export button should be visible");
+            }
             JButton rocButton = findButton(panelReference.get(), "ROC Curve");
             if (rocButton == null) {
                 throw new AssertionError("Top-level ROC Curve button should be visible");
@@ -215,6 +250,53 @@ public final class TrackStitchingAnalysisPanelSmokeTest {
                     return table;
                 }
             }
+        }
+        return null;
+    }
+
+    private static JComponent findTitledComponent(Container container, String title) {
+        for (Component component : container.getComponents()) {
+            if (component instanceof JComponent candidate) {
+                String candidateTitle = titledBorderTitle(candidate.getBorder());
+                if (title.equals(candidateTitle)) {
+                    return candidate;
+                }
+            }
+            if (component instanceof Container child) {
+                JComponent candidate = findTitledComponent(child, title);
+                if (candidate != null) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static JTextField findTextFieldWithText(Container container, String text) {
+        for (Component component : container.getComponents()) {
+            if (component instanceof JTextField field && text.equals(field.getText())) {
+                return field;
+            }
+            if (component instanceof Container child) {
+                JTextField field = findTextFieldWithText(child, text);
+                if (field != null) {
+                    return field;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String titledBorderTitle(Border border) {
+        if (border instanceof TitledBorder titledBorder) {
+            return titledBorder.getTitle();
+        }
+        if (border instanceof CompoundBorder compoundBorder) {
+            String outsideTitle = titledBorderTitle(compoundBorder.getOutsideBorder());
+            if (outsideTitle != null) {
+                return outsideTitle;
+            }
+            return titledBorderTitle(compoundBorder.getInsideBorder());
         }
         return null;
     }

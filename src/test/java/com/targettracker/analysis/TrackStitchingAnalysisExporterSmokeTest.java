@@ -81,6 +81,37 @@ public final class TrackStitchingAnalysisExporterSmokeTest {
                 || !assignmentsCsv.contains("User-volume NLLR")) {
             throw new AssertionError("Assignment export should include Gaussian-overlap optima");
         }
+        Path detailsRoot = new TrackStitchingDetailsExporter().export(
+                scenario, result.events(), configuration, parent);
+        requireFile(detailsRoot.resolve("README.md"));
+        requireFile(detailsRoot.resolve("configuration.csv"));
+        requireFile(detailsRoot.resolve("event_times.csv"));
+        requireFile(detailsRoot.resolve("segments.csv"));
+        Path trackValues = detailsRoot.resolve("track_bank_values.csv");
+        Path pairValues = detailsRoot.resolve("pair_bank_values.csv");
+        requireFile(trackValues);
+        requireFile(pairValues);
+        String trackValuesCsv = Files.readString(trackValues);
+        if (!trackValuesCsv.contains("role")
+                || !trackValuesCsv.contains("state_8")
+                || !trackValuesCsv.contains("covariance_8_8")) {
+            throw new AssertionError("Detail track export should include bank states/covariances");
+        }
+        String pairValuesCsv = Files.readString(pairValues);
+        if (!pairValuesCsv.contains("squared_mahalanobis_distance")
+                || !pairValuesCsv.contains("negative_log_likelihood")
+                || !pairValuesCsv.contains("physics_aware_bridge_geometry_log_det")
+                || !pairValuesCsv.contains("physics_aware_opportunity_cost")
+                || !pairValuesCsv.contains("physics_aware_cost")) {
+            throw new AssertionError("Detail pair export should include bank cost diagnostics");
+        }
+        String matlabScript = Files.readString(Path.of(
+                "scripts", "plot_track_stitching_detail_export.m"));
+        if (!matlabScript.contains("pairBank")
+                || !matlabScript.contains("physics_aware_cost")
+                || !matlabScript.contains("readtable")) {
+            throw new AssertionError("MATLAB detail plot script should load and plot pair costs");
+        }
         System.out.println("TrackStitchingAnalysisExporterSmokeTest passed");
     }
 

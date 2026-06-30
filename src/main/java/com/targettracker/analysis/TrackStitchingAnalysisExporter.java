@@ -105,6 +105,8 @@ public final class TrackStitchingAnalysisExporter {
                     configuration.physicsAwareAlpha());
             writeNameValue(writer, "physics_aware_covariance_scale",
                     configuration.physicsAwareInnovationCovarianceScale());
+            writeNameValue(writer, "physics_aware_p_floor_std_meters",
+                    configuration.physicsAwarePositionFloorStdMeters());
         }
     }
 
@@ -406,6 +408,10 @@ public final class TrackStitchingAnalysisExporter {
             addMatrixHeader(header, "new_covariance", STATE_SIZE);
             addVectorHeader(header, "position_innovation", POSITION_SIZE);
             addMatrixHeader(header, "position_innovation_covariance", POSITION_SIZE);
+            addMatrixHeader(
+                    header,
+                    "physics_aware_innovation_covariance",
+                    POSITION_SIZE);
             header.addAll(List.of(
                     "mahalanobis_distance",
                     "innovation_quadratic",
@@ -458,6 +464,7 @@ public final class TrackStitchingAnalysisExporter {
                         addMatrix(row, evaluation.newCovariance());
                         addVector(row, evaluation.innovation());
                         addMatrix(row, evaluation.innovationCovariance());
+                        addMatrix(row, evaluation.physicsAwareInnovationCovariance());
                         row.add(evaluation.mahalanobisDistance());
                         row.add(evaluation.innovationQuadratic());
                         row.add(evaluation.logDeterminant());
@@ -579,8 +586,9 @@ public final class TrackStitchingAnalysisExporter {
             writer.write("- `bank_evaluations/bank_evaluations.csv`: one row per candidate pair per "
                     + "time-bank sample. It includes old predicted state/covariance, new retrodicted "
                     + "state/covariance, 3D position innovation, 3x3 position innovation "
-                    + "covariance, Mahalanobis distance, NLL, Physics-Aware bridge "
-                    + "geometry fields, double-integrator bridge admissibility/volume fields, "
+                    + "covariance, Physics-Aware innovation covariance after P_floor/scale, "
+                    + "Mahalanobis distance, NLL, Physics-Aware bridge geometry fields, "
+                    + "double-integrator bridge admissibility/volume fields, "
                     + "NLLR values, and learned-density "
                     + "query values.\n");
             writer.write("  Bank states are independently propagated from fixed updated anchors: "

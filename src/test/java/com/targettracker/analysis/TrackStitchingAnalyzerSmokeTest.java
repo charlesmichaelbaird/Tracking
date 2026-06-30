@@ -6,6 +6,7 @@ import com.targettracker.recording.RecordedScenario;
 import com.targettracker.model.EcefPoint;
 import com.targettracker.model.EcefVector;
 import com.targettracker.model.TargetMeasurement;
+import com.targettracker.math.LinearAlgebra;
 import com.targettracker.tracking.ImmSettings;
 import com.targettracker.tracking.ImmTracker;
 import com.targettracker.tracking.TrackRecord;
@@ -23,7 +24,9 @@ public final class TrackStitchingAnalyzerSmokeTest {
     public static void main(String[] args) {
         verifyCanonicalInnovationMetrics();
         verifyBackwardPropagationAndAnchors();
+        verifyBankTimePropagationComplementsFullGap();
         verifyPhysicsAwareCovarianceScaleAffectsOnlyPhysicsAwareNll();
+        verifyPhysicsAwarePositionFloorStdAppliesAsCovariance();
         verifyMidpointCovarianceMatchesTrackerScale();
 
         List<TrackRecord> tracks = new ArrayList<>();
@@ -676,7 +679,10 @@ public final class TrackStitchingAnalyzerSmokeTest {
         TrackStitchingAnalyzer.AnalysisResult result = analyzer.analyzeDetailed(
                 scenario,
                 new TrackStitchingAnalyzer.Configuration(
-                        1.0, 10.0, 0.0, 10.0, false, 1.0));
+                        1.0, 10.0, 0.0, 10.0, false, 1.0,
+                        1.0e-6, 1.0e-6,
+                        50.0, 1.0, 1.0,
+                        1.0, 1.0, 0.0));
         if (result.events().size() != 1) {
             throw new AssertionError("Expected one stitching event for precise bank test");
         }
@@ -767,7 +773,7 @@ public final class TrackStitchingAnalyzerSmokeTest {
                         1.0, 10.0, 0.0, 10.0, false, 1.0,
                         1.0e-6, 1.0e-6,
                         50.0, 1.0, 1.0,
-                        1.0, covarianceScale));
+                        1.0, covarianceScale, 0.0));
         if (result.events().size() != 1) {
             throw new AssertionError("Expected one event for covariance scale test");
         }
@@ -803,6 +809,159 @@ public final class TrackStitchingAnalyzerSmokeTest {
         requireClose(selected.physicsAwareNegativeLogLikelihood(),
                 pair.physicsAwareNegativeLogLikelihood(),
                 "Pair row should expose scaled Physics-Aware NLL");
+    }
+
+    private static void verifyPhysicsAwarePositionFloorStdAppliesAsCovariance() {
+        double floorStdMeters = 100.0;
+        double floorVariance = floorStdMeters * floorStdMeters;
+        TrackStitchingAnalyzer analyzer = new TrackStitchingAnalyzer();
+        TrackRecord oldAnchor = track("TRK-OLD", 0.0, 0.0, 10.0, true);
+        TrackRecord oldCoast = track("TRK-OLD", 6.0, 60.0, 10.0, false);
+        TrackRecord newFormation = track("TRK-NEW", 4.0, 40.0, 10.0, true);
+        TrackRecord newLatestUpdate = track("TRK-NEW", 6.0, 60.0, 10.0, true);
+        double[][] measurementCovariance = diagonal(6, 0.01);
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("physics_aware_position_floor"),
+                "Physics-aware position floor",
+                6.0,
+                List.of(oldAnchor, oldCoast, newFormation, newLatestUpdate),
+                List.of(),
+                List.of(
+                        new RecordedMeasurement(
+                                "GOD-SENSOR-001", "TGT-001", "TRK-NEW", 4.0,
+                                new double[]{40.0, 0, 0, 10, 0, 0},
+                                measurementCovariance, 0.1, 0.1),
+                        new RecordedMeasurement(
+                                "GOD-SENSOR-001", "TGT-001", "TRK-NEW", 6.0,
+                                new double[]{60.0, 0, 0, 10, 0, 0},
+                                measurementCovariance, 0.1, 0.1)));
+        TrackStitchingAnalyzer.AnalysisResult result = analyzer.analyzeDetailed(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(
+                        1.0, 10.0, 0.0, 10.0, false, 1.0,
+                        1.0e-6, 1.0e-6,
+                        50.0, 1.0, 1.0,
+                        1.0, 1.0, floorStdMeters));
+        if (result.events().size() != 1) {
+            throw new AssertionError("Expected one event for position floor test");
+        }
+        TrackStitchingAnalyzer.PairDiagnostics diagnostics =
+                diagnostics(result.events().get(0), "TRK-OLD", "TRK-NEW");
+        for (TrackStitchingAnalyzer.BankEvaluation evaluation
+                : diagnostics.bankEvaluations()) {
+            double[][] baseCovariance = evaluation.innovationCovariance();
+            double[][] flooredCovariance = evaluation.physicsAwareInnovationCovariance();
+            double[][] expectedCovariance = new double[3][3];
+            for (int row = 0; row < 3; row++) {
+                for (int column = 0; column < 3; column++) {
+                    expectedCovariance[row][column] = baseCovariance[row][column]
+                            + (row == column ? floorVariance : 0.0);
+                }
+            }
+            requireMatrixClose(expectedCovariance, flooredCovariance,
+                    "Physics-Aware P_floor covariance");
+            LinearAlgebra.GaussianLikelihood expectedLikelihood =
+                    LinearAlgebra.gaussianLikelihood(
+                            evaluation.innovation(),
+                            expectedCovariance);
+            requireClose(expectedLikelihood.negativeLogLikelihood(),
+                    evaluation.physicsAwareNegativeLogLikelihood(),
+                    "Physics-Aware P_floor NLL");
+            double expectedUnscaledNll = 0.5 * (3.0 * Math.log(2.0 * Math.PI)
+                    + evaluation.logDeterminant()
+                    + evaluation.innovationQuadratic());
+            requireClose(expectedUnscaledNll, evaluation.negativeLogLikelihood(),
+                    "base bank NLL should not include P_floor");
+        }
+    }
+
+    private static void verifyBankTimePropagationComplementsFullGap() {
+        double alpha = 1.75;
+        TrackStitchingAnalyzer analyzer = new TrackStitchingAnalyzer();
+        TrackRecord oldAnchor = track("TRK-OLD", 0.0, 0.0, 10.0, true);
+        TrackRecord oldCoast = track("TRK-OLD", 10.0, 100.0, 10.0, false);
+        TrackRecord newFormation = track("TRK-NEW", 10.0, 100.0, 10.0, true);
+        RecordedScenario scenario = new RecordedScenario(
+                Path.of("bank_time_complement_gap"),
+                "Bank time complement gap",
+                10.0,
+                List.of(oldAnchor, oldCoast, newFormation),
+                List.of(),
+                List.of(measurement("TRK-NEW", 10.0, 100.0)));
+        TrackStitchingAnalyzer.AnalysisResult result = analyzer.analyzeDetailed(
+                scenario,
+                new TrackStitchingAnalyzer.Configuration(
+                        0.0, 10.0, 0.0, 0.0, false, 1.0,
+                        1.0e-6, 1.0e-6,
+                        50.0, 1.0, 1.0,
+                        alpha));
+        if (result.events().size() != 1) {
+            throw new AssertionError("Expected one event for complementary bank-time test");
+        }
+        TrackStitchingAnalyzer.PairDiagnostics diagnostics =
+                diagnostics(result.events().get(0), "TRK-OLD", "TRK-NEW");
+        if (diagnostics.bankEvaluations().size() != 9) {
+            throw new AssertionError("Expected one-second bank times from 1s through 9s");
+        }
+        double fullGap = newFormation.timeSeconds() - oldAnchor.timeSeconds();
+        double bestPhysicsAwareCost = Double.POSITIVE_INFINITY;
+        double bestPhysicsAwareTime = Double.NaN;
+        for (int index = 0; index < diagnostics.bankEvaluations().size(); index++) {
+            TrackStitchingAnalyzer.BankEvaluation evaluation =
+                    diagnostics.bankEvaluations().get(index);
+            double expectedTime = index + 1.0;
+            requireClose(expectedTime, evaluation.timeSeconds(),
+                    "bank time should advance old track in dt steps");
+            double oldDuration = evaluation.timeSeconds() - oldAnchor.timeSeconds();
+            double newDuration = newFormation.timeSeconds() - evaluation.timeSeconds();
+            requireClose(fullGap - oldDuration, newDuration,
+                    "new retrodiction duration should complement old propagation duration");
+
+            TrackStitchingAnalyzer.PropagatedState expectedOld =
+                    TrackStitchingAnalyzer.propagate(
+                            new TrackStitchingAnalyzer.PropagatedState(
+                                    oldAnchor.state(), oldAnchor.covariance()),
+                            oldAnchor.timeSeconds(),
+                            evaluation.timeSeconds());
+            TrackStitchingAnalyzer.PropagatedState expectedNew =
+                    TrackStitchingAnalyzer.propagate(
+                            new TrackStitchingAnalyzer.PropagatedState(
+                                    newFormation.state(), newFormation.covariance()),
+                            newFormation.timeSeconds(),
+                            evaluation.timeSeconds());
+            requireVectorClose(expectedOld.state(), evaluation.oldState(),
+                    "old state at bank time");
+            requireVectorClose(expectedNew.state(), evaluation.newState(),
+                    "new state at complementary bank time");
+            requireMatrixClose(expectedOld.covariance(), evaluation.oldCovariance(),
+                    "old covariance at bank time");
+            requireMatrixClose(expectedNew.covariance(), evaluation.newCovariance(),
+                    "new covariance at complementary bank time");
+
+            double positionShape = (Math.pow(oldDuration, 3.0)
+                    + Math.pow(newDuration, 3.0)) / 3.0;
+            double expectedLogDeterminant = 3.0 * Math.log(positionShape);
+            double expectedOpportunity = alpha * (
+                    1.5 * Math.log(fullGap) + 0.5 * expectedLogDeterminant);
+            requireClose(expectedLogDeterminant,
+                    evaluation.physicsAwareBridgeGeometryLogDeterminant(),
+                    "Section 7 bridge-geometry log determinant");
+            requireClose(expectedOpportunity, evaluation.physicsAwareOpportunityCost(),
+                    "Section 7 alpha-scaled opportunity cost");
+            requireClose(evaluation.physicsAwareNegativeLogLikelihood()
+                            + expectedOpportunity,
+                    evaluation.physicsAwareCost(),
+                    "Section 7 total pairwise bank cost");
+            if (evaluation.physicsAwareCost() < bestPhysicsAwareCost) {
+                bestPhysicsAwareCost = evaluation.physicsAwareCost();
+                bestPhysicsAwareTime = evaluation.timeSeconds();
+            }
+        }
+        TrackStitchingAnalyzer.PairResult pair = diagnostics.result();
+        requireClose(bestPhysicsAwareTime, pair.physicsAwareTimeSeconds(),
+                "Physics-Aware pair time should minimize Section 7 bank cost");
+        requireClose(bestPhysicsAwareCost, pair.physicsAwareCost(),
+                "Physics-Aware pair cost should be the minimum over the bank");
     }
 
     private static void verifyMidpointCovarianceMatchesTrackerScale() {

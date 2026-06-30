@@ -34,6 +34,7 @@ public final class TrackStitchingAnalyzer {
     private static final double DEFAULT_USER_NLLR_VOLUME_CUBIC_KILOMETERS = 1.0;
     private static final double DEFAULT_PHYSICS_AWARE_ALPHA = 1.0;
     private static final double DEFAULT_PHYSICS_AWARE_COVARIANCE_SCALE = 1.0;
+    private static final double DEFAULT_PHYSICS_AWARE_POSITION_FLOOR_STD_METERS = 100.0;
     private static final double UNIT_BALL_VOLUME_3D = 4.0 / 3.0 * Math.PI;
     private static final double MINIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e-12;
     private static final double MAXIMUM_LEARNED_BIRTH_DENSITY_PER_CUBIC_KILOMETER = 1.0e3;
@@ -716,9 +717,9 @@ public final class TrackStitchingAnalyzer {
                 timeSeconds);
         InnovationScore score = innovationScore(oldState, newState);
         double nll = canonicalNegativeLogLikelihood(score);
-        InnovationScore physicsAwareScoreBasis = scaledInnovationCovariance(
+        InnovationScore physicsAwareScoreBasis = physicsAwareInnovationScore(
                 score,
-                configuration.physicsAwareInnovationCovarianceScale());
+                configuration);
         double physicsAwareNll =
                 canonicalNegativeLogLikelihood(physicsAwareScoreBasis);
         BridgeScore bridgeScore = bridgeScore(
@@ -760,6 +761,7 @@ public final class TrackStitchingAnalyzer {
                 newState.covariance(),
                 score.innovation(),
                 score.innovationCovariance(),
+                physicsAwareScoreBasis.innovationCovariance(),
                 score.mahalanobisDistance(),
                 score.innovationQuadratic(),
                 score.logDeterminant(),
@@ -1092,17 +1094,25 @@ public final class TrackStitchingAnalyzer {
                 likelihood.logDeterminant());
     }
 
-    private static InnovationScore scaledInnovationCovariance(
+    private static InnovationScore physicsAwareInnovationScore(
             InnovationScore score,
-            double covarianceScale) {
-        if (Math.abs(covarianceScale - 1.0) <= EPSILON) {
+            Configuration configuration) {
+        double covarianceScale = configuration.physicsAwareInnovationCovarianceScale();
+        double floorStdMeters = configuration.physicsAwarePositionFloorStdMeters();
+        double floorVariance = floorStdMeters * floorStdMeters;
+        if (Math.abs(covarianceScale - 1.0) <= EPSILON
+                && floorVariance <= EPSILON) {
             return score;
         }
         double[][] covariance = new double[POSITION_SIZE][POSITION_SIZE];
         double[][] source = score.innovationCovariance();
         for (int row = 0; row < POSITION_SIZE; row++) {
             for (int column = 0; column < POSITION_SIZE; column++) {
-                covariance[row][column] = source[row][column] * covarianceScale;
+                double value = source[row][column];
+                if (row == column) {
+                    value += floorVariance;
+                }
+                covariance[row][column] = value * covarianceScale;
             }
         }
         LinearAlgebra.GaussianLikelihood likelihood =
@@ -1616,7 +1626,8 @@ public final class TrackStitchingAnalyzer {
             double bridgeVolumeGate,
             double userNllrVolumeCubicKilometers,
             double physicsAwareAlpha,
-            double physicsAwareInnovationCovarianceScale) {
+            double physicsAwareInnovationCovarianceScale,
+            double physicsAwarePositionFloorStdMeters) {
         public Configuration(
                 double coastedMinimumSeconds,
                 double coastedMaximumSeconds,
@@ -1661,6 +1672,32 @@ public final class TrackStitchingAnalyzer {
                     userNllrVolumeCubicKilometers,
                     physicsAwareAlpha,
                     DEFAULT_PHYSICS_AWARE_COVARIANCE_SCALE);
+        }
+
+        public Configuration(
+                double coastedMinimumSeconds,
+                double coastedMaximumSeconds,
+                double newMinimumSeconds,
+                double newMaximumSeconds,
+                boolean allowDeadTracks,
+                double resolutionSeconds,
+                double falseAlarmRatePerCubicKilometer,
+                double birthRatePerCubicKilometer,
+                double bridgeAccelerationGateMetersPerSecondSquared,
+                double bridgeVolumeGate,
+                double userNllrVolumeCubicKilometers,
+                double physicsAwareAlpha,
+                double physicsAwareInnovationCovarianceScale) {
+            this(coastedMinimumSeconds, coastedMaximumSeconds,
+                    newMinimumSeconds, newMaximumSeconds, allowDeadTracks,
+                    resolutionSeconds, falseAlarmRatePerCubicKilometer,
+                    birthRatePerCubicKilometer,
+                    bridgeAccelerationGateMetersPerSecondSquared,
+                    bridgeVolumeGate,
+                    userNllrVolumeCubicKilometers,
+                    physicsAwareAlpha,
+                    physicsAwareInnovationCovarianceScale,
+                    DEFAULT_PHYSICS_AWARE_POSITION_FLOOR_STD_METERS);
         }
 
         public Configuration(
@@ -1722,7 +1759,9 @@ public final class TrackStitchingAnalyzer {
                     || !Double.isFinite(physicsAwareAlpha)
                     || physicsAwareAlpha < 0.0
                     || !Double.isFinite(physicsAwareInnovationCovarianceScale)
-                    || physicsAwareInnovationCovarianceScale <= 0.0) {
+                    || physicsAwareInnovationCovarianceScale <= 0.0
+                    || !Double.isFinite(physicsAwarePositionFloorStdMeters)
+                    || physicsAwarePositionFloorStdMeters < 0.0) {
                 throw new IllegalArgumentException("Invalid stitching time-window configuration");
             }
         }
@@ -1996,6 +2035,7 @@ public final class TrackStitchingAnalyzer {
         public double[][] innovationCovariance() {
             return copySquare(innovationCovariance, POSITION_SIZE);
         }
+
     }
 
     public record BankEvaluation(
@@ -2008,6 +2048,7 @@ public final class TrackStitchingAnalyzer {
             double[][] newCovariance,
             double[] innovation,
             double[][] innovationCovariance,
+            double[][] physicsAwareInnovationCovariance,
             double mahalanobisDistance,
             double innovationQuadratic,
             double logDeterminant,
@@ -2046,6 +2087,8 @@ public final class TrackStitchingAnalyzer {
             newCovariance = copySquare(newCovariance, STATE_SIZE);
             innovation = copyVector(innovation, POSITION_SIZE);
             innovationCovariance = copySquare(innovationCovariance, POSITION_SIZE);
+            physicsAwareInnovationCovariance =
+                    copySquare(physicsAwareInnovationCovariance, POSITION_SIZE);
         }
 
         @Override
@@ -2076,6 +2119,11 @@ public final class TrackStitchingAnalyzer {
         @Override
         public double[][] innovationCovariance() {
             return copySquare(innovationCovariance, POSITION_SIZE);
+        }
+
+        @Override
+        public double[][] physicsAwareInnovationCovariance() {
+            return copySquare(physicsAwareInnovationCovariance, POSITION_SIZE);
         }
     }
 

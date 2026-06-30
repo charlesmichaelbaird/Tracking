@@ -2,6 +2,7 @@ package com.targettracker.ui;
 
 import com.targettracker.analysis.TrackStitchingAnalysisExporter;
 import com.targettracker.analysis.TrackStitchingAnalyzer;
+import com.targettracker.analysis.TrackStitchingDetailsExporter;
 import com.targettracker.model.EcefPoint;
 import com.targettracker.recording.RecordedMeasurement;
 import com.targettracker.recording.RecordedScenario;
@@ -64,6 +65,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final Consumer<String> statusConsumer;
     private final TrackStitchingAnalyzer analyzer = new TrackStitchingAnalyzer();
     private final TrackStitchingAnalysisExporter exporter = new TrackStitchingAnalysisExporter();
+    private final TrackStitchingDetailsExporter detailsExporter =
+            new TrackStitchingDetailsExporter();
     private final JTabbedPane eventTabs = new JTabbedPane(JTabbedPane.TOP);
     private final JTabbedPane outputTabs = new JTabbedPane(JTabbedPane.TOP);
     private final JTabbedPane rocTabs = new JTabbedPane(JTabbedPane.TOP);
@@ -100,10 +103,13 @@ final class TrackStitchingAnalysisPanel extends JPanel {
     private final JTextField userNllrVolumeField = new JTextField("1.0", 8);
     private final JTextField physicsAwareAlphaField = new JTextField("1.0", 8);
     private final JTextField physicsAwareCovarianceScaleField = new JTextField("1.0", 8);
+    private final JTextField physicsAwarePositionFloorStdField = new JTextField("100.0", 8);
     private final JTextField outputDirectoryField = new JTextField("", 18);
     private final JButton analyzeButton = new JButton("Run stitching analysis");
     private final JButton rocButton = new JButton("ROC Curve");
     private final JButton exportButton = new JButton("Output data to folder");
+    private final JButton detailsButton = new JButton("Pop out values");
+    private final JButton detailsExportButton = new JButton("Export values");
     private final JToggleButton configurationSectionButton = new JToggleButton("Configuration");
     private final JToggleButton analysisOutputSectionButton =
             new JToggleButton("Analysis output", true);
@@ -189,12 +195,15 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         userNllrVolumeField.addActionListener(event -> runAnalysis());
         physicsAwareAlphaField.addActionListener(event -> runAnalysis());
         physicsAwareCovarianceScaleField.addActionListener(event -> runAnalysis());
+        physicsAwarePositionFloorStdField.addActionListener(event -> runAnalysis());
         allowDeadTracks.addActionListener(event -> runAnalysis());
         outputTabs.addChangeListener(event -> updateSelectedEvent());
         showAllButton.addActionListener(event -> updateSelectedEvent());
         showGreyedButton.addActionListener(event -> updateSelectedEvent());
         showOnlyButton.addActionListener(event -> updateSelectedEvent());
         exportButton.addActionListener(event -> exportAnalysis());
+        detailsButton.addActionListener(event -> openDetailsWindow());
+        detailsExportButton.addActionListener(event -> exportDetailsValues());
         runAnalysis();
     }
 
@@ -338,7 +347,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         JPanel panel = new JPanel(new BorderLayout(12, 0));
         panel.setOpaque(false);
         panel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 206));
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 270));
 
         JPanel timingPanel = new JPanel();
         timingPanel.setLayout(new BoxLayout(timingPanel, BoxLayout.Y_AXIS));
@@ -414,25 +423,30 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         JPanel panel = new JPanel(new GridLayout(0, 2, 5, 2));
         panel.setOpaque(false);
         panel.setAlignmentX(LEFT_ALIGNMENT);
-        panel.setPreferredSize(new Dimension(244, 44));
-        panel.setMinimumSize(new Dimension(244, 44));
-        panel.setMaximumSize(new Dimension(252, 48));
+        panel.setPreferredSize(new Dimension(244, 106));
+        panel.setMinimumSize(new Dimension(244, 106));
+        panel.setMaximumSize(new Dimension(252, 112));
         javax.swing.border.TitledBorder titleBorder =
                 BorderFactory.createTitledBorder("Physics-Aware");
         titleBorder.setTitleFont(titleBorder.getTitleFont().deriveFont(Font.PLAIN, 11f));
         panel.setBorder(BorderFactory.createCompoundBorder(
                 titleBorder,
-                BorderFactory.createEmptyBorder(0, 4, 3, 4)));
+                BorderFactory.createEmptyBorder(4, 4, 6, 4)));
         physicsAwareAlphaField.setToolTipText(
                 "Alpha weight for the kinematic opportunity term");
         physicsAwareCovarianceScaleField.setToolTipText(
                 "Multiplier applied to the Physics-Aware innovation covariance before NLL");
+        physicsAwarePositionFloorStdField.setToolTipText(
+                "Position covariance floor standard deviation in meters; squared before use");
         physicsAwareAlphaField.setColumns(7);
         physicsAwareCovarianceScaleField.setColumns(7);
+        physicsAwarePositionFloorStdField.setColumns(7);
         panel.add(compactLabel("Alpha"));
         panel.add(physicsAwareAlphaField);
         panel.add(compactLabel("Cov scale"));
         panel.add(physicsAwareCovarianceScaleField);
+        panel.add(compactLabel("P_floor std m"));
+        panel.add(physicsAwarePositionFloorStdField);
         return panel;
     }
 
@@ -476,7 +490,21 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         summaryPanel.add(summaryScroll);
         summaryPanel.add(assignmentScroll);
         summaryPanel.setPreferredSize(new Dimension(0, 158));
-        panel.add(summaryPanel, BorderLayout.NORTH);
+        JPanel topPanel = new JPanel(new BorderLayout(0, 5));
+        topPanel.setOpaque(false);
+        JPanel detailsRow = new JPanel(new BorderLayout());
+        detailsRow.setOpaque(false);
+        JPanel detailsButtons = new JPanel(new GridLayout(1, 2, 6, 0));
+        detailsButtons.setOpaque(false);
+        detailsButton.setToolTipText("Open detailed bank-time state, covariance, and innovation values");
+        detailsExportButton.setToolTipText(
+                "Export the detailed pop-out bank-time values as CSV files");
+        detailsButtons.add(detailsButton);
+        detailsButtons.add(detailsExportButton);
+        detailsRow.add(detailsButtons, BorderLayout.EAST);
+        topPanel.add(detailsRow, BorderLayout.NORTH);
+        topPanel.add(summaryPanel, BorderLayout.CENTER);
+        panel.add(topPanel, BorderLayout.NORTH);
 
         JPanel metricsPanel = new JPanel(new BorderLayout(0, 4));
         metricsPanel.setOpaque(false);
@@ -609,6 +637,7 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         final double userNllrVolume;
         final double physicsAwareAlpha;
         final double physicsAwareCovarianceScale;
+        final double physicsAwarePositionFloorStd;
         try {
             falseAlarmRate = parseNonNegative(falseAlarmRateField);
             birthRate = parseNonNegative(birthRateField);
@@ -634,6 +663,12 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             statusLabel.setText("Enter a positive physics-aware covariance scale");
             throw exception;
         }
+        try {
+            physicsAwarePositionFloorStd = parseNonNegative(physicsAwarePositionFloorStdField);
+        } catch (NumberFormatException exception) {
+            statusLabel.setText("Enter a non-negative physics-aware P_floor standard deviation");
+            throw exception;
+        }
         return new TrackStitchingAnalyzer.Configuration(
                 coastedWindow.minimumSeconds(),
                 coastedWindow.maximumSeconds(),
@@ -647,7 +682,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 1.0,
                 userNllrVolume,
                 physicsAwareAlpha,
-                physicsAwareCovarianceScale);
+                physicsAwareCovarianceScale,
+                physicsAwarePositionFloorStd);
     }
 
     private void runAnalysis() {
@@ -661,6 +697,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         analyzeButton.setEnabled(false);
         rocButton.setEnabled(false);
         exportButton.setEnabled(false);
+        detailsButton.setEnabled(false);
+        detailsExportButton.setEnabled(false);
         statusLabel.setText("Analyzing measurement times...");
         eventTabs.removeAll();
         eventTabs.addTab("Analyzing...", emptyTabBody());
@@ -688,6 +726,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                             populateEventTabs();
                             statusLabel.setText(events.size() + " candidate timestamp(s)");
                             exportButton.setEnabled(true);
+                            detailsButton.setEnabled(!events.isEmpty());
+                            detailsExportButton.setEnabled(!events.isEmpty());
                         } catch (InterruptedException exception) {
                             Thread.currentThread().interrupt();
                             statusLabel.setText("Analysis interrupted");
@@ -698,6 +738,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                             analysisResult = new TrackStitchingAnalyzer.AnalysisResult(
                                     List.of(), List.of());
                             populateEventTabs();
+                            detailsButton.setEnabled(false);
+                            detailsExportButton.setEnabled(false);
                         }
                     }
         };
@@ -888,6 +930,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
         }
 
         exportButton.setEnabled(false);
+        detailsButton.setEnabled(false);
+        detailsExportButton.setEnabled(false);
         analyzeButton.setEnabled(false);
         rocButton.setEnabled(false);
         statusLabel.setText("Exporting stitching analysis data...");
@@ -909,6 +953,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                 analyzeButton.setEnabled(true);
                 rocButton.setEnabled(true);
                 exportButton.setEnabled(true);
+                detailsButton.setEnabled(!events.isEmpty());
+                detailsExportButton.setEnabled(!events.isEmpty());
                 try {
                     Path output = get();
                     statusLabel.setText("Exported to " + output);
@@ -918,6 +964,74 @@ final class TrackStitchingAnalysisPanel extends JPanel {
                     statusLabel.setText("Export interrupted");
                 } catch (ExecutionException exception) {
                     statusLabel.setText("Export failed: "
+                            + exception.getCause().getMessage());
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    private void openDetailsWindow() {
+        if (events.isEmpty()) {
+            statusLabel.setText("Run stitching analysis before opening detailed values");
+            return;
+        }
+        TrackStitchingAnalysisDetailsWindow.show(this, events);
+    }
+
+    private void exportDetailsValues() {
+        if (latestConfiguration == null || events.isEmpty()) {
+            statusLabel.setText("Run stitching analysis before exporting detailed values");
+            return;
+        }
+        final Path parentDirectory;
+        try {
+            parentDirectory = Paths.get(outputDirectoryField.getText().trim())
+                    .toAbsolutePath()
+                    .normalize();
+            outputDirectoryField.setBackground(Color.WHITE);
+        } catch (RuntimeException exception) {
+            outputDirectoryField.setBackground(new Color(255, 224, 224));
+            statusLabel.setText("Enter a valid output folder");
+            return;
+        }
+
+        exportButton.setEnabled(false);
+        detailsButton.setEnabled(false);
+        detailsExportButton.setEnabled(false);
+        analyzeButton.setEnabled(false);
+        rocButton.setEnabled(false);
+        statusLabel.setText("Exporting detailed stitching values...");
+        SwingWorker<Path, Void> worker = new SwingWorker<>() {
+            @Override
+            protected Path doInBackground() throws IOException {
+                return detailsExporter.export(
+                        scenario,
+                        events,
+                        latestConfiguration,
+                        parentDirectory);
+            }
+
+            @Override
+            protected void done() {
+                if (!active) {
+                    return;
+                }
+                analyzeButton.setEnabled(true);
+                rocButton.setEnabled(true);
+                exportButton.setEnabled(true);
+                detailsButton.setEnabled(!events.isEmpty());
+                detailsExportButton.setEnabled(!events.isEmpty());
+                try {
+                    Path output = get();
+                    statusLabel.setText("Exported detailed values to " + output);
+                    statusConsumer.accept("Track stitching detailed values exported to "
+                            + output);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    statusLabel.setText("Detailed export interrupted");
+                } catch (ExecutionException exception) {
+                    statusLabel.setText("Detailed export failed: "
                             + exception.getCause().getMessage());
                 }
             }
@@ -963,6 +1077,8 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             metricRows = List.of();
             timelinePanel.clearCandidateMarkers();
             mapCanvas.clearStitchingFocus();
+            detailsButton.setEnabled(false);
+            detailsExportButton.setEnabled(false);
             return;
         }
         for (TrackStitchingAnalyzer.EventResult event : events) {
