@@ -7,6 +7,7 @@ public final class ScenarioModelSmokeTest {
 
     public static void main(String[] args) {
         verifyTargetIdsAreReused();
+        verifyTargetCopiesAreIndependent();
         verifyBlackoutIdsAreReused();
         System.out.println("ScenarioModelSmokeTest passed");
     }
@@ -50,6 +51,44 @@ public final class ScenarioModelSmokeTest {
         model.clearBlackoutRegions();
         if (!"BLK-001".equals(userBlackout(model, 4.0).name())) {
             throw new AssertionError("Blackout IDs should reset after all regions are removed");
+        }
+    }
+
+    private static void verifyTargetCopiesAreIndependent() {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory source = model.addTarget();
+        source.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.00, -74.00, 0.0)));
+        source.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.01, -73.99, 0.0)));
+        source.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.00, -73.98, 0.0)));
+        source.velocityProfile().setSample(0, 321.0);
+        source.altitudeProfile().setSample(100, 4_567.0);
+
+        TargetTrajectory copy = model.copyTarget(source);
+        if (!"TGT-002".equals(copy.id()) || copy.color().equals(source.color())) {
+            throw new AssertionError("Copied targets should receive a new ID and color");
+        }
+        if (!copy.path().equals(source.path())
+                || copy.velocityProfile().sample(0) != 321.0
+                || copy.altitudeProfile().sample(100) != 4_567.0) {
+            throw new AssertionError("Copied targets should preserve path and profile state");
+        }
+
+        source.velocityProfile().setSample(0, 123.0);
+        source.movePathPoint(1,
+                Wgs84.toEcef(new GeodeticPoint(40.02, -73.99, 0.0)));
+        if (copy.velocityProfile().sample(0) != 321.0 || copy.path().equals(source.path())) {
+            throw new AssertionError("Copied target state should be independent of its source");
+        }
+
+        ScenarioModel wrappedPaletteModel = new ScenarioModel();
+        TargetTrajectory firstColor = wrappedPaletteModel.addTarget();
+        for (int index = 0; index < 5; index++) {
+            wrappedPaletteModel.addTarget();
+        }
+        TargetTrajectory wrappedCopy = wrappedPaletteModel.copyTarget(firstColor);
+        if (!"TGT-007".equals(wrappedCopy.id())
+                || wrappedCopy.color().equals(firstColor.color())) {
+            throw new AssertionError("Copied targets should not reuse the source palette color");
         }
     }
 

@@ -16,17 +16,20 @@ import com.targettracker.recording.TrackCsvReader;
 import com.targettracker.tracking.ImmSettings;
 import com.targettracker.tracking.ImmTracker;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.Icon;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSeparator;
 import javax.swing.JToggleButton;
+import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
@@ -40,6 +43,9 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.RenderingHints;
+import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.nio.file.Path;
 
@@ -74,14 +80,19 @@ public final class TrackerFrame extends JFrame {
     private final JButton precomputeButton = new JButton("Pre-compute scenario");
     private final JButton replayButton = new JButton("Replay scenario");
     private final JToggleButton moveToolButton = new JToggleButton("Move: Off");
+    private final JToggleButton modifyToolButton = new JToggleButton("Modify: Off");
     private final JToggleButton trajectoryArrowButton = new JToggleButton("Arrow: On", true);
     private final Icon moveToolIcon = new MoveToolIcon();
+    private final Icon modifyToolIcon = new ModifyToolIcon();
     private final Icon trajectoryArrowIcon = new TrajectoryArrowIcon();
     private final JToggleButton generationModeButton =
             new JToggleButton("Scenario Generation", true);
     private final JToggleButton analysisModeButton = new JToggleButton("Analysis Mode");
     private TargetTrajectory selectedTarget;
+    private TargetTrajectory copiedTarget;
     private BlackoutRegion selectedBlackoutRegion;
+    private EarthMapCanvas.DrawingMode drawingMode = EarthMapCanvas.DrawingMode.FREE_HAND;
+    private boolean targetPanelActive = true;
     private boolean presetScenarioActive;
     private boolean analysisMode;
     private String currentScenarioName = "User generated";
@@ -160,7 +171,8 @@ public final class TrackerFrame extends JFrame {
                 this::onProfileChanged,
                 this::selectTarget,
                 this::addTarget,
-                earthMapCanvas::setDrawingMode,
+                this::copySelectedTarget,
+                this::setDrawingMode,
                 earthMapCanvas::finishPath,
                 this::clearSelectedPath,
                 this::smoothSelectedPath,
@@ -195,6 +207,7 @@ public final class TrackerFrame extends JFrame {
         motionTelemetryPanel.setSelectedTarget(selectedTarget);
         updateStructuralEditingControls();
         refreshTelemetry();
+        installTargetCopyPasteShortcuts();
         setLocationRelativeTo(null);
     }
 
@@ -224,6 +237,14 @@ public final class TrackerFrame extends JFrame {
         moveToolButton.setFocusPainted(false);
         moveToolButton.addActionListener(event ->
                 setMoveToolActive(moveToolButton.isSelected()));
+        modifyToolButton.setToolTipText(
+                "Pick and place vertices on segmented target trajectories");
+        modifyToolButton.setIcon(modifyToolIcon);
+        modifyToolButton.setOpaque(true);
+        modifyToolButton.setContentAreaFilled(true);
+        modifyToolButton.setFocusPainted(false);
+        modifyToolButton.addActionListener(event ->
+                setModifyToolActive(modifyToolButton.isSelected()));
         trajectoryArrowButton.setToolTipText(
                 "Show or hide direction arrows on target trajectories");
         trajectoryArrowButton.setIcon(trajectoryArrowIcon);
@@ -233,9 +254,11 @@ public final class TrackerFrame extends JFrame {
         trajectoryArrowButton.addActionListener(event ->
                 setTrajectoryArrowsVisible(trajectoryArrowButton.isSelected()));
         refreshMoveToolButton();
+        refreshModifyToolButton();
         refreshTrajectoryArrowButton();
         topRightControls.add(frameLabel);
         topRightControls.add(moveToolButton);
+        topRightControls.add(modifyToolButton);
         topRightControls.add(trajectoryArrowButton);
         titleRow.add(topRightControls, BorderLayout.EAST);
         container.add(titleRow);
@@ -327,6 +350,9 @@ public final class TrackerFrame extends JFrame {
         if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
         }
+        if (modifyToolButton.isSelected()) {
+            setModifyToolActive(false);
+        }
         playback.reset();
         TargetTrajectory target = model.addTarget();
         motionTelemetryPanel.targetAdded(target);
@@ -334,25 +360,111 @@ public final class TrackerFrame extends JFrame {
         statusLabel.setText("Created %s — draw its trajectory".formatted(target.id()));
     }
 
+    private void copySelectedTarget() {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
+            return;
+        }
+        if (copySelectedTargetToClipboard()) {
+            pasteCopiedTarget();
+        }
+    }
+
+    private boolean copySelectedTargetToClipboard() {
+        earthMapCanvas.cancelNodeModification();
+        TargetTrajectory target = motionTelemetryPanel.selectedTarget();
+        if (target == null || target.path().size() < 2) {
+            statusLabel.setText("Finish a target trajectory before copying it");
+            return false;
+        }
+        copiedTarget = new TargetTrajectory("COPIED", target.color());
+        copiedTarget.copyStateFrom(target);
+        statusLabel.setText("Copied %s - press Ctrl+V to paste".formatted(target.id()));
+        return true;
+    }
+
+    private void pasteCopiedTarget() {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
+            statusLabel.setText("Targets can be pasted in an idle user-generated scenario");
+            return;
+        }
+        if (copiedTarget == null) {
+            statusLabel.setText("Copy a finished target trajectory before pasting");
+            return;
+        }
+        earthMapCanvas.cancelNodeModification();
+        playback.reset();
+        TargetTrajectory target = model.copyTarget(copiedTarget);
+        motionTelemetryPanel.targetAdded(target);
+        selectTarget(target);
+        earthMapCanvas.finishPath();
+        updateStructuralEditingControls();
+        refreshTelemetry();
+        timelinePanel.refresh();
+        earthMapCanvas.repaint();
+        statusLabel.setText("Created %s from the copied trajectory".formatted(target.id()));
+    }
+
+    private void installTargetCopyPasteShortcuts() {
+        var inputMap = getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        var actionMap = getRootPane().getActionMap();
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK),
+                "copy-selected-target");
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK),
+                "paste-copied-target");
+        actionMap.put("copy-selected-target", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                copySelectedTargetToClipboard();
+            }
+        });
+        actionMap.put("paste-copied-target", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                pasteCopiedTarget();
+            }
+        });
+    }
+
     private void selectTarget(TargetTrajectory target) {
         if (target == null) {
             return;
         }
+        earthMapCanvas.cancelNodeModification();
         selectedTarget = target;
         motionTelemetryPanel.setSelectedTarget(target);
         refreshTelemetry();
         earthMapCanvas.repaint();
     }
 
+    private void setDrawingMode(EarthMapCanvas.DrawingMode drawingMode) {
+        this.drawingMode = drawingMode;
+        earthMapCanvas.setDrawingMode(drawingMode);
+        if (drawingMode != EarthMapCanvas.DrawingMode.SEGMENTED
+                && modifyToolButton.isSelected()) {
+            setModifyToolActive(false);
+        }
+        updateModifyToolAvailability();
+    }
+
     private void onSidebarCardChanged(String cardName) {
         boolean targetCard = ControlSidebar.TARGETS.equals(cardName);
         boolean sensorCard = ControlSidebar.SENSOR.equals(cardName);
+        targetPanelActive = targetCard;
         earthMapCanvas.setTargetDrawingEnabled(targetCard);
         earthMapCanvas.setBlackoutEditingEnabled(sensorCard);
+        if (!targetCard && modifyToolButton.isSelected()) {
+            setModifyToolActive(false);
+        }
+        updateModifyToolAvailability();
     }
 
     private void setMoveToolActive(boolean active) {
         boolean enabled = active && !isScenarioEditingLocked();
+        if (enabled && modifyToolButton.isSelected()) {
+            modifyToolButton.setSelected(false);
+            earthMapCanvas.setModifyToolEnabled(false);
+            refreshModifyToolButton();
+        }
         if (moveToolButton.isSelected() != enabled) {
             moveToolButton.setSelected(enabled);
         }
@@ -376,6 +488,53 @@ public final class TrackerFrame extends JFrame {
                         : new Color(168, 176, 184)),
                 BorderFactory.createEmptyBorder(3, 8, 3, 8)));
         moveToolButton.repaint();
+    }
+
+    private void setModifyToolActive(boolean active) {
+        boolean enabled = active
+                && !isScenarioEditingLocked()
+                && targetPanelActive
+                && drawingMode == EarthMapCanvas.DrawingMode.SEGMENTED;
+        if (enabled && moveToolButton.isSelected()) {
+            moveToolButton.setSelected(false);
+            earthMapCanvas.setMoveToolEnabled(false);
+            refreshMoveToolButton();
+        }
+        if (modifyToolButton.isSelected() != enabled) {
+            modifyToolButton.setSelected(enabled);
+        }
+        earthMapCanvas.setModifyToolEnabled(enabled);
+        refreshModifyToolButton();
+        statusLabel.setText(enabled
+                ? "Modify tool enabled - click a trajectory node, then click to place it"
+                : "Modify tool disabled");
+    }
+
+    private void updateModifyToolAvailability() {
+        boolean enabled = !isScenarioEditingLocked()
+                && targetPanelActive
+                && drawingMode == EarthMapCanvas.DrawingMode.SEGMENTED;
+        modifyToolButton.setEnabled(enabled);
+        if (!enabled && modifyToolButton.isSelected()) {
+            modifyToolButton.setSelected(false);
+            earthMapCanvas.setModifyToolEnabled(false);
+        }
+        refreshModifyToolButton();
+    }
+
+    private void refreshModifyToolButton() {
+        boolean selected = modifyToolButton.isSelected();
+        modifyToolButton.setText(selected ? "Modify: On" : "Modify: Off");
+        modifyToolButton.setBackground(selected
+                ? new Color(203, 236, 210)
+                : new Color(235, 238, 242));
+        modifyToolButton.setForeground(new Color(28, 36, 44));
+        modifyToolButton.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(selected
+                        ? new Color(52, 130, 72)
+                        : new Color(168, 176, 184)),
+                BorderFactory.createEmptyBorder(3, 8, 3, 8)));
+        modifyToolButton.repaint();
     }
 
     private void setTrajectoryArrowsVisible(boolean visible) {
@@ -408,6 +567,7 @@ public final class TrackerFrame extends JFrame {
         if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
         }
+        earthMapCanvas.cancelNodeModification();
         TargetTrajectory target = motionTelemetryPanel.selectedTarget();
         if (target == null) {
             return;
@@ -426,6 +586,7 @@ public final class TrackerFrame extends JFrame {
         if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
         }
+        earthMapCanvas.cancelNodeModification();
         TargetTrajectory target = motionTelemetryPanel.selectedTarget();
         if (target == null) {
             return;
@@ -446,6 +607,7 @@ public final class TrackerFrame extends JFrame {
         if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
         }
+        earthMapCanvas.cancelNodeModification();
         TargetTrajectory target = motionTelemetryPanel.selectedTarget();
         if (target == null) {
             return;
@@ -466,6 +628,7 @@ public final class TrackerFrame extends JFrame {
         if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
         }
+        earthMapCanvas.cancelNodeModification();
         TargetTrajectory target = motionTelemetryPanel.selectedTarget();
         if (target == null) {
             return;
@@ -493,6 +656,7 @@ public final class TrackerFrame extends JFrame {
         if (presetScenarioActive || isScenarioEditingLocked()) {
             return;
         }
+        earthMapCanvas.cancelNodeModification();
         TargetTrajectory target = motionTelemetryPanel.selectedTarget();
         if (target == null) {
             return;
@@ -752,12 +916,14 @@ public final class TrackerFrame extends JFrame {
             earthMapCanvas.setMoveToolEnabled(false);
         }
         refreshMoveToolButton();
+        updateModifyToolAvailability();
     }
 
     private void precomputeScenario() {
         if (analysisMode) {
             return;
         }
+        earthMapCanvas.cancelNodeModification();
         if (!validateSensorParameters()
                 || !validateImmParameters()
                 || !recordingPanel.commitParentFolder()) {
@@ -1154,6 +1320,44 @@ public final class TrackerFrame extends JFrame {
                         ? new Color(18, 83, 40, 160)
                         : new Color(96, 103, 111, 140));
                 g2.drawOval(x + 2, y + 2, SIZE - 4, SIZE - 4);
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return SIZE;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return SIZE;
+        }
+    }
+
+    private final class ModifyToolIcon implements Icon {
+        private static final int SIZE = 14;
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            try {
+                g2.setRenderingHint(
+                        RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                boolean selected = modifyToolButton.isSelected();
+                Color color = selected
+                        ? new Color(35, 118, 58)
+                        : new Color(145, 153, 161);
+                g2.setColor(color);
+                g2.setStroke(new BasicStroke(1.7f, BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND));
+                g2.drawLine(x + 2, y + 10, x + 7, y + 4);
+                g2.drawLine(x + 7, y + 4, x + 12, y + 9);
+                g2.fillOval(x, y + 8, 4, 4);
+                g2.fillOval(x + 5, y + 2, 5, 5);
+                g2.fillOval(x + 10, y + 7, 4, 4);
             } finally {
                 g2.dispose();
             }

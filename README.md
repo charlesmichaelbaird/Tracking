@@ -17,8 +17,13 @@ The project also includes a small no-dependency model smoke test in `src/test/ja
 ## Controls
 
 - **New target** creates and selects another target.
+- **Copy target** duplicates the selected finished trajectory with a new ID and
+  color, including its velocity and altitude profiles. `Ctrl+C` and `Ctrl+V`
+  provide the same copy/paste flow.
 - **Free-hand**: press and drag on the Earth map.
 - **Segmented**: click to add vertices; double-click or press **Finish path** to complete.
+- **Modify** is available for segmented lines. Click a highlighted node once to
+  pick it up, move it with the cursor, then click again to place it.
 - **Clear path** erases the trajectory belonging to the target currently selected
   in **Target telemetry**. If a scenario is running or paused, playback is reset
   first so the edit applies immediately.
@@ -120,7 +125,8 @@ Each run contains three data subdirectories:
 
 - `ground_truth_data`: one `TGT-*.csv` per target, sampled every 0.1 seconds,
   containing target ID, time, and the ECEF 9D truth state
-  `[x y z vx vy vz ax ay az]`.
+  `[x y z vx vy vz ax ay az]`, followed by `IsInBlackoutRegion` (`1` inside
+  any blackout region, otherwise `0`).
 - `track_data`: one `TRK-*.csv` per track with track ID, time, `updated`, the
   fused ECEF 9D state, and the complete 9x9 covariance in row-major columns
   `p_00` through `p_88`. Integer-second samples are always retained, with

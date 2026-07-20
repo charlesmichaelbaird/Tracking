@@ -146,6 +146,7 @@ final class EarthMapCanvas extends JPanel {
     private boolean targetDrawingEnabled = true;
     private boolean blackoutEditingEnabled;
     private boolean moveToolEnabled;
+    private boolean modifyToolEnabled;
     private boolean trajectoryArrowsVisible = true;
     private boolean panning;
     private TargetTrajectory finishedSegmentedTarget;
@@ -156,6 +157,9 @@ final class EarthMapCanvas extends JPanel {
     private BlackoutRegion draggedBlackoutRegion;
     private GeodeticPoint trajectoryDragAnchor;
     private TargetTrajectory draggedTarget;
+    private TargetTrajectory modifiedTarget;
+    private TargetTrajectory modificationOriginalState;
+    private int modifiedPointIndex = -1;
     private GeodeticPoint shapeAnchor;
     private DirectionPlacementPhase directionPlacementPhase = DirectionPlacementPhase.NONE;
     private TargetTrajectory directionPlacementTarget;
@@ -221,6 +225,10 @@ final class EarthMapCanvas extends JPanel {
                 if (!SwingUtilities.isLeftMouseButton(event)
                         || editingLocked.getAsBoolean()
                         || !mapBounds().contains(event.getPoint())) {
+                    return;
+                }
+                if (modifyToolEnabled) {
+                    handleModifyClick(event.getPoint());
                     return;
                 }
                 if (blackoutDrawing) {
@@ -338,7 +346,7 @@ final class EarthMapCanvas extends JPanel {
                 if (panning) {
                     panning = false;
                     panAnchor = null;
-                    setCursor(Cursor.getPredefinedCursor(moveToolEnabled
+                    setCursor(Cursor.getPredefinedCursor(moveToolEnabled || modifyToolEnabled
                             ? Cursor.HAND_CURSOR
                             : Cursor.CROSSHAIR_CURSOR));
                 }
@@ -347,7 +355,7 @@ final class EarthMapCanvas extends JPanel {
                     draggedBlackoutRegion = null;
                     blackoutDragAnchor = null;
                     blackoutDragStartCenter = null;
-                    setCursor(Cursor.getPredefinedCursor(moveToolEnabled
+                    setCursor(Cursor.getPredefinedCursor(moveToolEnabled || modifyToolEnabled
                             ? Cursor.HAND_CURSOR
                             : Cursor.CROSSHAIR_CURSOR));
                 }
@@ -355,7 +363,7 @@ final class EarthMapCanvas extends JPanel {
                     targetDragging = false;
                     draggedTarget = null;
                     trajectoryDragAnchor = null;
-                    setCursor(Cursor.getPredefinedCursor(moveToolEnabled
+                    setCursor(Cursor.getPredefinedCursor(moveToolEnabled || modifyToolEnabled
                             ? Cursor.HAND_CURSOR
                             : Cursor.CROSSHAIR_CURSOR));
                     onPathChanged.run();
@@ -389,6 +397,10 @@ final class EarthMapCanvas extends JPanel {
 
     void setDrawingMode(DrawingMode drawingMode) {
         this.drawingMode = drawingMode;
+        if (drawingMode != DrawingMode.SEGMENTED) {
+            modifyToolEnabled = false;
+            cancelNodeModification();
+        }
         freeHandDrawing = false;
         blackoutDrawing = false;
         blackoutFirstCorner = null;
@@ -401,6 +413,8 @@ final class EarthMapCanvas extends JPanel {
     void setTargetDrawingEnabled(boolean enabled) {
         targetDrawingEnabled = enabled;
         if (!enabled) {
+            modifyToolEnabled = false;
+            cancelNodeModification();
             freeHandDrawing = false;
             finishedSegmentedTarget = null;
             targetDragging = false;
@@ -424,6 +438,10 @@ final class EarthMapCanvas extends JPanel {
     }
 
     void setMoveToolEnabled(boolean enabled) {
+        if (enabled) {
+            modifyToolEnabled = false;
+            cancelNodeModification();
+        }
         moveToolEnabled = enabled;
         freeHandDrawing = false;
         blackoutDrawing = false;
@@ -448,7 +466,47 @@ final class EarthMapCanvas extends JPanel {
         repaint();
     }
 
+    void setModifyToolEnabled(boolean enabled) {
+        boolean active = enabled
+                && targetDrawingEnabled
+                && drawingMode == DrawingMode.SEGMENTED;
+        if (active) {
+            moveToolEnabled = false;
+            targetDragging = false;
+            blackoutDragging = false;
+            draggedTarget = null;
+            draggedBlackoutRegion = null;
+            trajectoryDragAnchor = null;
+            freeHandDrawing = false;
+            blackoutDrawing = false;
+            blackoutFirstCorner = null;
+            shapeAnchor = null;
+            clearDirectionPlacement();
+        } else {
+            cancelNodeModification();
+        }
+        modifyToolEnabled = active;
+        setCursor(Cursor.getPredefinedCursor(active
+                ? Cursor.HAND_CURSOR
+                : Cursor.CROSSHAIR_CURSOR));
+        repaint();
+    }
+
+    void cancelNodeModification() {
+        if (modifiedTarget != null && modificationOriginalState != null) {
+            modifiedTarget.copyStateFrom(modificationOriginalState);
+        }
+        modifiedTarget = null;
+        modificationOriginalState = null;
+        modifiedPointIndex = -1;
+        if (modifyToolEnabled) {
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        }
+        repaint();
+    }
+
     void finishPath() {
+        cancelNodeModification();
         clearDirectionPlacement();
         freeHandDrawing = false;
         blackoutDrawing = false;
@@ -611,6 +669,7 @@ final class EarthMapCanvas extends JPanel {
             drawDeadStitchingSegments(g);
             drawStitchingOverlays(g);
             drawCurrentTargets(g);
+            drawModifyNodes(g);
             drawSegmentPreview(g);
             drawShapePreview(g);
             drawDirectionPlacement(g);
@@ -1258,9 +1317,44 @@ final class EarthMapCanvas extends JPanel {
         return LinearAlgebra.bilinearForm(left, covariance, right);
     }
 
+    private void drawModifyNodes(Graphics2D g) {
+        if (!modifyToolEnabled
+                || drawingMode != DrawingMode.SEGMENTED
+                || editingLocked.getAsBoolean()) {
+            return;
+        }
+        TargetTrajectory target = selectedTarget.get();
+        if (target == null || target.path().isEmpty()) {
+            return;
+        }
+        int hoveredIndex = modifiedPointIndex >= 0 || mousePoint == null
+                ? -1
+                : findModifyPointIndex(mousePoint);
+        Stroke originalStroke = g.getStroke();
+        try {
+            g.setStroke(new BasicStroke(1.6f));
+            for (int index = 0; index < target.path().size(); index++) {
+                Point point = toScreen(Wgs84.toGeodetic(target.path().get(index)));
+                if (point == null) {
+                    continue;
+                }
+                int radius = index == modifiedPointIndex ? 8 : index == hoveredIndex ? 7 : 6;
+                g.setColor(new Color(255, 255, 255, 235));
+                g.fillOval(point.x - radius - 2, point.y - radius - 2,
+                        (radius + 2) * 2, (radius + 2) * 2);
+                g.setColor(withAlpha(target.color(), 245));
+                g.fillOval(point.x - radius, point.y - radius, radius * 2, radius * 2);
+                g.setColor(new Color(31, 39, 47, 225));
+                g.drawOval(point.x - radius, point.y - radius, radius * 2, radius * 2);
+            }
+        } finally {
+            g.setStroke(originalStroke);
+        }
+    }
+
     private void drawSegmentPreview(Graphics2D g) {
         if (!targetDrawingEnabled || drawingMode != DrawingMode.SEGMENTED
-                || mousePoint == null || editingLocked.getAsBoolean()) {
+                || modifyToolEnabled || mousePoint == null || editingLocked.getAsBoolean()) {
             return;
         }
         TargetTrajectory target = selectedTarget.get();
@@ -1973,6 +2067,67 @@ final class EarthMapCanvas extends JPanel {
         }
     }
 
+    private void handleModifyClick(Point point) {
+        TargetTrajectory target = selectedTarget.get();
+        if (target == null || target.path().isEmpty()) {
+            return;
+        }
+        if (modifiedTarget != null && modifiedPointIndex >= 0) {
+            updateModifiedPoint(point);
+            TargetTrajectory completedTarget = modifiedTarget;
+            modifiedTarget = null;
+            modificationOriginalState = null;
+            modifiedPointIndex = -1;
+            finishedSegmentedTarget = completedTarget;
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            onPathChanged.run();
+            repaint();
+            return;
+        }
+        int pointIndex = findModifyPointIndex(point);
+        if (pointIndex < 0) {
+            return;
+        }
+        modifiedTarget = target;
+        modifiedPointIndex = pointIndex;
+        modificationOriginalState = new TargetTrajectory("ORIGINAL", target.color());
+        modificationOriginalState.copyStateFrom(target);
+        setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+        repaint();
+    }
+
+    private void updateModifiedPoint(Point point) {
+        if (modifiedTarget == null
+                || modifiedPointIndex < 0
+                || !mapBounds().contains(point)) {
+            return;
+        }
+        modifiedTarget.movePathPoint(
+                modifiedPointIndex,
+                Wgs84.toEcef(toGeodetic(point).withAltitude(0.0)));
+    }
+
+    private int findModifyPointIndex(Point point) {
+        TargetTrajectory target = selectedTarget.get();
+        if (target == null || point == null) {
+            return -1;
+        }
+        int nearestIndex = -1;
+        double nearestDistance = 14.0;
+        for (int index = 0; index < target.path().size(); index++) {
+            Point node = toScreen(Wgs84.toGeodetic(target.path().get(index)));
+            if (node == null) {
+                continue;
+            }
+            double distance = node.distance(point);
+            if (distance <= nearestDistance) {
+                nearestDistance = distance;
+                nearestIndex = index;
+            }
+        }
+        return nearestIndex;
+    }
+
     private boolean isNearTargetPath(TargetTrajectory target, Point point) {
         if (target == null) {
             return false;
@@ -2047,6 +2202,16 @@ final class EarthMapCanvas extends JPanel {
         mousePoint = event.getPoint();
         if (mapBounds().contains(mousePoint)) {
             onCursorChanged.accept(toGeodetic(mousePoint));
+        }
+        if (modifyToolEnabled) {
+            if (modifiedPointIndex >= 0) {
+                updateModifiedPoint(mousePoint);
+                setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+            } else {
+                setCursor(Cursor.getPredefinedCursor(findModifyPointIndex(mousePoint) >= 0
+                        ? Cursor.HAND_CURSOR
+                        : Cursor.CROSSHAIR_CURSOR));
+            }
         }
         repaint();
     }

@@ -35,6 +35,7 @@ public final class TrackCsvRecorder implements AutoCloseable {
             "vx_mps", "vy_mps", "vz_mps",
             "ax_mps2", "ay_mps2", "az_mps2"
     };
+    private static final String BLACKOUT_COLUMN = "IsInBlackoutRegion";
 
     private final Clock clock;
     private final Map<String, BufferedWriter> trackWriters = new LinkedHashMap<>();
@@ -222,7 +223,8 @@ public final class TrackCsvRecorder implements AutoCloseable {
         if (writer == null) {
             Path file = groundTruthDirectory.resolve(safeFileName(record.targetId()) + ".csv");
             writer = newWriter(file);
-            writer.write("target_id,time_s," + String.join(",", STATE_COLUMNS));
+            writer.write("target_id,time_s," + String.join(",", STATE_COLUMNS)
+                    + "," + BLACKOUT_COLUMN);
             writer.newLine();
             groundTruthWriters.put(record.targetId(), writer);
         }
@@ -230,6 +232,8 @@ public final class TrackCsvRecorder implements AutoCloseable {
         writer.write(',');
         writer.write(Double.toString(record.timeSeconds()));
         writeVector(writer, record.state());
+        writer.write(',');
+        writer.write(record.inBlackoutRegion() ? '1' : '0');
         writer.newLine();
     }
 
@@ -308,7 +312,7 @@ public final class TrackCsvRecorder implements AutoCloseable {
             String scenarioName,
             double durationSeconds,
             List<BlackoutRegion> blackoutRegions) throws IOException {
-        StringBuilder text = new StringBuilder("format_version=5\n"
+        StringBuilder text = new StringBuilder("format_version=6\n"
                 + "scenario_name=" + scenarioName.replace("\n", " ").replace("\r", " ") + "\n"
                 + "duration_seconds=" + durationSeconds + "\n"
                 + "blackout.count=" + (blackoutRegions == null ? 0 : blackoutRegions.size()) + "\n");
@@ -343,7 +347,8 @@ public final class TrackCsvRecorder implements AutoCloseable {
                 Duration: %s seconds
 
                 ground_truth_data/TGT-*.csv
-                  Dense 9D ECEF target truth: [x y z vx vy vz ax ay az].
+                  Dense 9D ECEF target truth: [x y z vx vy vz ax ay az], plus
+                  IsInBlackoutRegion as 1 when the target is inside a blackout region.
 
                 track_data/TRK-*.csv
                   Integer-second live-track rows plus fractional-time update rows.

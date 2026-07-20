@@ -4,6 +4,7 @@ import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 public final class TargetTrajectory {
     private final String id;
@@ -64,6 +65,46 @@ public final class TargetTrajectory {
 
     public void replacePath(List<EcefPoint> points) {
         replacePath(points, true);
+    }
+
+    /** Copies all editable trajectory state while preserving this target's ID and color. */
+    public void copyStateFrom(TargetTrajectory source) {
+        Objects.requireNonNull(source, "source");
+        if (source == this) {
+            return;
+        }
+        path.clear();
+        path.addAll(source.path);
+        rebuildSegmentLengths();
+        smoothingUndoPath.clear();
+        smoothingUndoPath.addAll(source.smoothingUndoPath);
+        extrapolationBasePath.clear();
+        extrapolationBasePath.addAll(source.extrapolationBasePath);
+        extrapolatedToScenarioLength = source.extrapolatedToScenarioLength;
+        copyProfile(source.velocityProfile, velocityProfile);
+        copyProfile(source.altitudeProfile, altitudeProfile);
+    }
+
+    /** Moves one control point without allowing either adjacent segment to collapse. */
+    public boolean movePathPoint(int index, EcefPoint point) {
+        if (index < 0 || index >= path.size() || point == null) {
+            return false;
+        }
+        EcefPoint normalizedPoint = Wgs84.toEcef(
+                Wgs84.toGeodetic(point).withAltitude(0.0));
+        if (surfaceDistance(path.get(index), normalizedPoint) <= 1.0e-6) {
+            return false;
+        }
+        if ((index > 0 && surfaceDistance(path.get(index - 1), normalizedPoint) <= 1.0)
+                || (index + 1 < path.size()
+                && surfaceDistance(normalizedPoint, path.get(index + 1)) <= 1.0)) {
+            return false;
+        }
+        path.set(index, normalizedPoint);
+        smoothingUndoPath.clear();
+        clearExtrapolationState();
+        rebuildSegmentLengths();
+        return true;
     }
 
     public boolean translatePath(GeodeticPoint dragStart, GeodeticPoint dragEnd) {
@@ -255,14 +296,24 @@ public final class TargetTrajectory {
     /** Numerically differentiates the full ECEF trajectory, including altitude changes. */
     public EcefVector ecefVelocityAt(double elapsedSeconds) {
         double duration = durationSeconds();
-        if (duration <= 0.0 || elapsedSeconds >= duration) {
+        if (duration <= 0.0 || elapsedSeconds - duration > 1.0e-9) {
             return EcefVector.ZERO;
         }
 
-        double time = Math.max(0.0, elapsedSeconds);
+        double time = Math.max(0.0, Math.min(duration, elapsedSeconds));
         double differenceStep = Math.max(0.001, Math.min(0.05, duration / 10_000.0));
-        double firstTime = Math.max(0.0, time - differenceStep);
-        double secondTime = Math.min(duration, time + differenceStep);
+        double firstTime;
+        double secondTime;
+        if (time <= differenceStep) {
+            firstTime = 0.0;
+            secondTime = Math.min(duration, differenceStep);
+        } else if (time >= duration - differenceStep) {
+            firstTime = Math.max(0.0, duration - differenceStep);
+            secondTime = duration;
+        } else {
+            firstTime = time - differenceStep;
+            secondTime = time + differenceStep;
+        }
         if (secondTime <= firstTime) {
             return EcefVector.ZERO;
         }
@@ -280,6 +331,22 @@ public final class TargetTrajectory {
         return Wgs84Geodesic.inverse(
                 Wgs84.toGeodetic(start),
                 Wgs84.toGeodetic(end)).distanceMeters();
+    }
+
+    private static void copyProfile(ScalarProfile source, ScalarProfile destination) {
+        for (int index = 0; index < source.sampleCount(); index++) {
+            destination.setSample(index, source.sample(index));
+        }
+    }
+
+    private void rebuildSegmentLengths() {
+        segmentLengthsMeters.clear();
+        surfaceLengthMeters = 0.0;
+        for (int index = 1; index < path.size(); index++) {
+            double segmentLength = surfaceDistance(path.get(index - 1), path.get(index));
+            segmentLengthsMeters.add(segmentLength);
+            surfaceLengthMeters += segmentLength;
+        }
     }
 
     private void replacePath(List<EcefPoint> points, boolean clearSmoothingUndo) {

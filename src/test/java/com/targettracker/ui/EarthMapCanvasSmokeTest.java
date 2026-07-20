@@ -100,6 +100,39 @@ public final class EarthMapCanvasSmokeTest {
             throw new AssertionError(
                     "Finish Path should stop segmented clicks from extending the target");
         }
+        GeodeticPoint firstBeforeModify = Wgs84.toGeodetic(target.path().get(0));
+        canvas.setModifyToolEnabled(true);
+        click(canvas, 420, 280);
+        move(canvas, 390, 250);
+        GeodeticPoint firstDuringModify = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(firstDuringModify.longitudeDegrees()
+                - firstBeforeModify.longitudeDegrees()) < 0.001) {
+            throw new AssertionError("Picked trajectory nodes should follow the cursor");
+        }
+        click(canvas, 390, 250);
+        if (target.path().size() != 2) {
+            throw new AssertionError("Placing a modified node should preserve the path points");
+        }
+
+        GeodeticPoint secondBeforeCancelledModify = Wgs84.toGeodetic(target.path().get(1));
+        click(canvas, 480, 335);
+        move(canvas, 520, 360);
+        canvas.setModifyToolEnabled(false);
+        GeodeticPoint secondAfterCancelledModify = Wgs84.toGeodetic(target.path().get(1));
+        if (Math.abs(secondAfterCancelledModify.longitudeDegrees()
+                - secondBeforeCancelledModify.longitudeDegrees()) > 1.0e-9
+                || Math.abs(secondAfterCancelledModify.latitudeDegrees()
+                - secondBeforeCancelledModify.latitudeDegrees()) > 1.0e-9) {
+            throw new AssertionError("Disabling Modify should cancel an unplaced node edit");
+        }
+
+        BufferedImage withoutModifyNodes = render(canvas);
+        canvas.setModifyToolEnabled(true);
+        BufferedImage withModifyNodes = render(canvas);
+        canvas.setModifyToolEnabled(false);
+        if (differentPixelCount(withoutModifyNodes, withModifyNodes) < 100) {
+            throw new AssertionError("Modify mode should render enlarged trajectory nodes");
+        }
         GeodeticPoint firstBeforeMove = Wgs84.toGeodetic(target.path().get(0));
         canvas.setTargetDrawingEnabled(false);
         canvas.setMoveToolEnabled(true);
@@ -297,6 +330,19 @@ public final class EarthMapCanvasSmokeTest {
                 0,
                 false,
                 MouseEvent.BUTTON1));
+    }
+
+    private static void move(EarthMapCanvas canvas, int x, int y) {
+        canvas.dispatchEvent(new MouseEvent(
+                canvas,
+                MouseEvent.MOUSE_MOVED,
+                System.currentTimeMillis(),
+                0,
+                x,
+                y,
+                0,
+                false,
+                MouseEvent.NOBUTTON));
     }
 
     private static void release(EarthMapCanvas canvas, int x, int y) {

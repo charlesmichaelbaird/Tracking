@@ -32,6 +32,11 @@ public final class TrackCsvRecorderSmokeTest {
                     record("TRK-001", 5.0, true),
                     record("TRK-001", 20.0, true),
                     record("TRK-002", 20.0, false)));
+            recorder.recordGroundTruth(List.of(new GroundTruthRecord(
+                    "TGT-001",
+                    5.0,
+                    new double[]{100, 101, 102, 10, 11, 12, 1, 2, 3},
+                    true)));
             recorder.finishRun();
 
             if (!firstRun.getFileName().toString().equals("scenario_2026-06-22_15-04-05_123")) {
@@ -71,6 +76,15 @@ public final class TrackCsvRecorderSmokeTest {
             }
             if (!Files.isDirectory(firstRun.resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY))) {
                 throw new AssertionError("Ground-truth output directory is missing");
+            }
+            List<String> truthLines = Files.readAllLines(
+                    firstRun.resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY)
+                            .resolve("TGT-001.csv"));
+            if (!truthLines.get(0).equals("target_id,time_s,x_m,y_m,z_m,"
+                    + "vx_mps,vy_mps,vz_mps,ax_mps2,ay_mps2,az_mps2,IsInBlackoutRegion")
+                    || truthLines.get(1).split(",", -1).length != 12
+                    || !truthLines.get(1).endsWith(",1")) {
+                throw new AssertionError("Ground truth CSV should include blackout membership flag");
             }
 
             if (!recorder.beginRun()) {

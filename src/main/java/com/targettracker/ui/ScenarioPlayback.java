@@ -415,6 +415,10 @@ final class ScenarioPlayback {
             if (!target.isRunnable()) {
                 continue;
             }
+            double truthEndTime = groundTruthEndTime(target.durationSeconds());
+            if (timeSeconds > truthEndTime + TIME_EPSILON_SECONDS) {
+                continue;
+            }
             EcefPoint position = target.positionAt(timeSeconds);
             EcefVector velocity = target.ecefVelocityAt(timeSeconds);
             double beforeTime = Math.max(0.0, timeSeconds - PRECOMPUTE_STEP_SECONDS / 2.0);
@@ -430,9 +434,22 @@ final class ScenarioPlayback {
                     (afterVelocity.y() - beforeVelocity.y()) / interval,
                     (afterVelocity.z() - beforeVelocity.z()) / interval
             };
-            records.add(new GroundTruthRecord(target.id(), timeSeconds, state));
+            records.add(new GroundTruthRecord(
+                    target.id(),
+                    timeSeconds,
+                    state,
+                    model.isInBlackout(position)));
         }
         recorder.recordGroundTruth(records);
+    }
+
+    private static double groundTruthEndTime(double targetDurationSeconds) {
+        if (!Double.isFinite(targetDurationSeconds) || targetDurationSeconds <= 0.0) {
+            return 0.0;
+        }
+        long stepIndex = (long) Math.floor(
+                targetDurationSeconds / PRECOMPUTE_STEP_SECONDS + TIME_EPSILON_SECONDS);
+        return Math.max(0.0, stepIndex * PRECOMPUTE_STEP_SECONDS);
     }
 
     private void captureReplayFrame(double timeSeconds) {

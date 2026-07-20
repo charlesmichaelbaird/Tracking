@@ -1,5 +1,6 @@
 package com.targettracker.ui;
 
+import com.targettracker.model.EcefVector;
 import com.targettracker.model.GeodeticPoint;
 import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.SensorParameters;
@@ -28,7 +29,7 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
             TargetTrajectory target = model.addTarget();
             target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(20.0, 10.0, 0.0)));
             target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(20.005, 10.0, 0.0)));
-            double wantedDuration = 5.5;
+            double wantedDuration = 5.55;
             double speed = target.surfaceLengthMeters() / wantedDuration;
             for (int index = 0; index < target.velocityProfile().sampleCount(); index++) {
                 target.velocityProfile().setSample(index, speed);
@@ -88,7 +89,31 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
             List<String> truthLines = Files.readAllLines(recorder.runDirectory()
                     .resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY).resolve("TGT-001.csv"));
             if (truthLines.size() != 57) {
-                throw new AssertionError("Ground truth should be saved at every 0.1-second step");
+                throw new AssertionError(
+                        "Ground truth should stop on the rounded-down 0.1-second step");
+            }
+            String[] truthHeader = truthLines.get(0).split(",", -1);
+            String[] lastTruth = truthLines.get(truthLines.size() - 1).split(",", -1);
+            if (truthHeader.length != 12
+                    || !"IsInBlackoutRegion".equals(truthHeader[11])
+                    || lastTruth.length != 12) {
+                throw new AssertionError("Ground truth should include blackout membership column");
+            }
+            requireClose(5.5, Double.parseDouble(lastTruth[1]), 1.0e-9,
+                    "rounded-down truth endpoint");
+            EcefVector expectedVelocity = target.ecefVelocityAt(5.5);
+            requireClose(expectedVelocity.x(), Double.parseDouble(lastTruth[5]), 1.0e-9,
+                    "last truth vx");
+            requireClose(expectedVelocity.y(), Double.parseDouble(lastTruth[6]), 1.0e-9,
+                    "last truth vy");
+            requireClose(expectedVelocity.z(), Double.parseDouble(lastTruth[7]), 1.0e-9,
+                    "last truth vz");
+            double accelerationMagnitude = Math.sqrt(
+                    Math.pow(Double.parseDouble(lastTruth[8]), 2.0)
+                            + Math.pow(Double.parseDouble(lastTruth[9]), 2.0)
+                            + Math.pow(Double.parseDouble(lastTruth[10]), 2.0));
+            if (accelerationMagnitude > 1.0) {
+                throw new AssertionError("Terminal truth acceleration should stay physically small");
             }
             System.out.println("ScenarioPrecomputeRecordingSmokeTest passed");
         } finally {
@@ -101,6 +126,17 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
                     }
                 });
             }
+        }
+    }
+
+    private static void requireClose(
+            double expected,
+            double actual,
+            double tolerance,
+            String label) {
+        if (Math.abs(expected - actual) > tolerance) {
+            throw new AssertionError("%s: expected %f but got %f".formatted(
+                    label, expected, actual));
         }
     }
 }

@@ -95,12 +95,29 @@ public final class ScenarioModel {
     }
 
     public TargetTrajectory addTarget() {
+        return addTarget(null);
+    }
+
+    private TargetTrajectory addTarget(Color excludedColor) {
         int number = nextAvailableNumber(targets, TargetTrajectory::id, "TGT-");
+        int colorIndex = (number - 1) % TARGET_COLORS.length;
+        if (excludedColor != null && excludedColor.equals(TARGET_COLORS[colorIndex])) {
+            colorIndex = (colorIndex + 1) % TARGET_COLORS.length;
+        }
         TargetTrajectory target = new TargetTrajectory(
                 "TGT-%03d".formatted(number),
-                TARGET_COLORS[(number - 1) % TARGET_COLORS.length]);
+                TARGET_COLORS[colorIndex]);
         targets.add(target);
         return target;
+    }
+
+    public TargetTrajectory copyTarget(TargetTrajectory source) {
+        if (source == null) {
+            throw new IllegalArgumentException("Source target is required");
+        }
+        TargetTrajectory copy = addTarget(source.color());
+        copy.copyStateFrom(source);
+        return copy;
     }
 
     public boolean removeTarget(TargetTrajectory target) {

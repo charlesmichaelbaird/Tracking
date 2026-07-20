@@ -108,10 +108,12 @@ public final class TrackCsvReader {
                 for (int index = 0; index < STATE_SIZE; index++) {
                     state[index] = parseDouble(values, columns.get(stateColumns[index]));
                 }
+                Integer blackoutColumn = columns.get("IsInBlackoutRegion");
                 records.add(new GroundTruthRecord(
                         value(values, columns.get("target_id")),
                         parseDouble(values, columns.get("time_s")),
-                        state));
+                        state,
+                        blackoutColumn != null && parseBooleanFlag(values, blackoutColumn)));
             }
         }
         records.sort(Comparator.comparingDouble(GroundTruthRecord::timeSeconds)
@@ -419,6 +421,17 @@ public final class TrackCsvReader {
             throw new IllegalArgumentException("Non-finite numeric value");
         }
         return parsed;
+    }
+
+    private static boolean parseBooleanFlag(List<String> values, int column) {
+        String text = value(values, column);
+        if ("1".equals(text) || "true".equalsIgnoreCase(text)) {
+            return true;
+        }
+        if ("0".equals(text) || "false".equalsIgnoreCase(text) || text.isBlank()) {
+            return false;
+        }
+        throw new IllegalArgumentException("Invalid boolean flag");
     }
 
     private static String value(List<String> values, int column) {

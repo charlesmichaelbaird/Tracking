@@ -35,7 +35,8 @@ public final class TrackCsvReaderSmokeTest {
                     record(6.0, false)));
             recorder.recordGroundTruth(List.of(new GroundTruthRecord(
                     "TGT-007", 5.0,
-                    new double[]{100, 101, 102, 10, 11, 12, 1, 2, 3})));
+                    new double[]{100, 101, 102, 10, 11, 12, 1, 2, 3},
+                    true)));
             recorder.finishRun();
 
             if (!recorder.runDirectory().getFileName().toString()
@@ -49,7 +50,8 @@ public final class TrackCsvReaderSmokeTest {
                     || loaded.groundTruth().size() != 1
                     || loaded.measurements().size() != 1
                     || loaded.blackoutRegions().size() != 1
-                    || loaded.blackoutRegions().get(0).widthMeters() != 1_000.0) {
+                    || loaded.blackoutRegions().get(0).widthMeters() != 1_000.0
+                    || !loaded.groundTruth().get(0).inBlackoutRegion()) {
                 throw new AssertionError("Recorded scenario metadata did not round-trip");
             }
             TrackRecord update = loaded.records().get(0);

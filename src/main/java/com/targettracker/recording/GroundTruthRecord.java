@@ -4,8 +4,13 @@ package com.targettracker.recording;
 public record GroundTruthRecord(
         String targetId,
         double timeSeconds,
-        double[] state) {
+        double[] state,
+        boolean inBlackoutRegion) {
     private static final int STATE_SIZE = 9;
+
+    public GroundTruthRecord(String targetId, double timeSeconds, double[] state) {
+        this(targetId, timeSeconds, state, false);
+    }
 
     public GroundTruthRecord {
         if (targetId == null || targetId.isBlank()) {

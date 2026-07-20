@@ -26,6 +26,12 @@ public final class TargetTrajectorySmokeTest {
         requireClose(0.0, midpoint.latitudeDegrees(), 1.0e-9, "midpoint latitude");
         requireClose(0.5, midpoint.longitudeDegrees(), 1.0e-9, "midpoint longitude");
         requireClose(1_000.0, midpoint.altitudeMeters(), 1.0e-6, "default altitude");
+        EcefVector endpointVelocity = target.ecefVelocityAt(target.durationSeconds());
+        if (endpointVelocity.magnitude() < 100.0) {
+            throw new AssertionError("Endpoint velocity should preserve terminal motion");
+        }
+        requireClose(0.0, target.ecefVelocityAt(target.durationSeconds() + 0.01).magnitude(),
+                "velocity after path end");
 
         for (int i = 0; i < target.altitudeProfile().sampleCount(); i++) {
             target.altitudeProfile().setSample(i, 2_500.0);
@@ -131,6 +137,16 @@ public final class TargetTrajectorySmokeTest {
         GeodeticPoint firstAfter = Wgs84.toGeodetic(target.path().get(0));
         if (Math.abs(firstAfter.longitudeDegrees() - firstBefore.longitudeDegrees()) < 0.005) {
             throw new AssertionError("Path translation should move the target path geodetically");
+        }
+        double translatedLength = target.surfaceLengthMeters();
+        if (!target.movePathPoint(1,
+                Wgs84.toEcef(new GeodeticPoint(40.02, -73.97, 0.0)))) {
+            throw new AssertionError("Moving an interior trajectory node should succeed");
+        }
+        if (target.path().size() != originalCount
+                || Math.abs(target.surfaceLengthMeters() - translatedLength) < 1.0) {
+            throw new AssertionError(
+                    "Moving a node should preserve path cardinality and recalculate length");
         }
     }
 

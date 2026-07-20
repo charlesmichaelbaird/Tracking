@@ -26,6 +26,7 @@ final class MotionTelemetryPanel extends JPanel {
     private final ScenarioModel model;
     private final TargetInspectorPanel inspector;
     private final JButton newTargetButton = fullWidthButton("New target");
+    private final JButton copyTargetButton = fullWidthButton("Copy target");
     private final JButton removeTargetButton = fullWidthButton("Remove target");
     private final JComboBox<String> drawingMode =
             new JComboBox<>(new String[]{"Free-hand", "Segmented line", "Circle", "Racetrack"});
@@ -48,6 +49,7 @@ final class MotionTelemetryPanel extends JPanel {
             Runnable onProfileChanged,
             Consumer<TargetTrajectory> onSelectionChanged,
             Runnable onNewTarget,
+            Runnable onCopyTarget,
             Consumer<EarthMapCanvas.DrawingMode> onDrawingModeChanged,
             Runnable onFinishPath,
             Runnable onClearPath,
@@ -67,6 +69,7 @@ final class MotionTelemetryPanel extends JPanel {
         add(Box.createVerticalStrut(8));
         add(createTargetControls(
                 onNewTarget,
+                onCopyTarget,
                 onDrawingModeChanged,
                 onFinishPath,
                 onClearPath,
@@ -107,6 +110,7 @@ final class MotionTelemetryPanel extends JPanel {
 
     private JPanel createTargetControls(
             Runnable onNewTarget,
+            Runnable onCopyTarget,
             Consumer<EarthMapCanvas.DrawingMode> onDrawingModeChanged,
             Runnable onFinishPath,
             Runnable onClearPath,
@@ -129,12 +133,16 @@ final class MotionTelemetryPanel extends JPanel {
         inner.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
         panel.add(inner);
 
-        JPanel buttonGrid = new JPanel(new GridLayout(1, 2, 8, 0));
+        JPanel buttonGrid = new JPanel(new GridLayout(1, 3, 8, 0));
         buttonGrid.setOpaque(false);
         buttonGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
         newTargetButton.addActionListener(event -> onNewTarget.run());
+        copyTargetButton.setToolTipText(
+                "Duplicate the selected target (or use Ctrl+C, then Ctrl+V)");
+        copyTargetButton.addActionListener(event -> onCopyTarget.run());
         removeTargetButton.addActionListener(event -> onRemoveTarget.run());
         buttonGrid.add(newTargetButton);
+        buttonGrid.add(copyTargetButton);
         buttonGrid.add(removeTargetButton);
         inner.add(buttonGrid);
         inner.add(Box.createVerticalStrut(10));
@@ -212,6 +220,7 @@ final class MotionTelemetryPanel extends JPanel {
     void setEditingState(boolean editingLocked, boolean presetScenarioActive) {
         boolean enabled = !editingLocked;
         newTargetButton.setEnabled(enabled && !presetScenarioActive);
+        copyTargetButton.setEnabled(enabled && !presetScenarioActive && canCopySelectedTarget());
         removeTargetButton.setEnabled(enabled && !presetScenarioActive);
         drawingMode.setEnabled(enabled);
         finishPathButton.setEnabled(enabled);
@@ -245,7 +254,14 @@ final class MotionTelemetryPanel extends JPanel {
         undoSmoothButton.setEnabled(!editingLocked.getAsBoolean()
                 && target != null
                 && target.canUndoSmoothing());
+        copyTargetButton.setEnabled(!editingLocked.getAsBoolean()
+                && canCopySelectedTarget());
         refreshExtrapolateButton(!editingLocked.getAsBoolean());
+    }
+
+    private boolean canCopySelectedTarget() {
+        TargetTrajectory target = selectedTarget();
+        return target != null && target.path().size() >= 2;
     }
 
     private void refreshExtrapolateButton(boolean editingEnabled) {
