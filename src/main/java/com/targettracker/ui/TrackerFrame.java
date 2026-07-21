@@ -170,6 +170,7 @@ public final class TrackerFrame extends JFrame {
                 this::isScenarioEditingLocked,
                 this::onProfileChanged,
                 this::selectTarget,
+                this::extrapolateAllTargets,
                 this::addTarget,
                 this::copySelectedTarget,
                 this::setDrawingMode,
@@ -397,6 +398,7 @@ public final class TrackerFrame extends JFrame {
         motionTelemetryPanel.targetAdded(target);
         selectTarget(target);
         earthMapCanvas.finishPath();
+        reconcileActiveExtrapolations();
         updateStructuralEditingControls();
         refreshTelemetry();
         timelinePanel.refresh();
@@ -575,6 +577,7 @@ public final class TrackerFrame extends JFrame {
         selectedTarget = target;
         clearPathForTarget(playback, target);
         earthMapCanvas.finishPath();
+        reconcileActiveExtrapolations();
         motionTelemetryPanel.setSelectedTarget(target);
         statusLabel.setText("Path cleared for %s".formatted(target.id()));
         refreshTelemetry();
@@ -594,6 +597,7 @@ public final class TrackerFrame extends JFrame {
         selectedTarget = target;
         resetCompletedPlayback();
         if (target.smoothPath()) {
+            reconcileActiveExtrapolations();
             refreshTelemetry();
             timelinePanel.refresh();
             earthMapCanvas.repaint();
@@ -615,6 +619,7 @@ public final class TrackerFrame extends JFrame {
         selectedTarget = target;
         resetCompletedPlayback();
         if (target.undoSmoothing()) {
+            reconcileActiveExtrapolations();
             refreshTelemetry();
             timelinePanel.refresh();
             earthMapCanvas.repaint();
@@ -639,13 +644,38 @@ public final class TrackerFrame extends JFrame {
             if (target.removeExtrapolation()) {
                 statusLabel.setText("Removed extrapolation for %s".formatted(target.id()));
             }
-        } else if (!model.hasScenarioLength()) {
-            statusLabel.setText("Set a scenario length before extrapolating a path");
-        } else if (target.extrapolateToDuration(model.explicitScenarioLengthSeconds())) {
+        } else if (model.durationSeconds() <= 0.0) {
+            statusLabel.setText("Draw a runnable target trajectory before extrapolating");
+        } else if (target.extrapolateToDuration(model.durationSeconds())) {
             statusLabel.setText("%s extrapolated to %s".formatted(
-                    target.id(), formatClockTime(model.explicitScenarioLengthSeconds())));
+                    target.id(), formatClockTime(model.durationSeconds())));
         } else {
             statusLabel.setText("%s already reaches the scenario length".formatted(target.id()));
+        }
+        refreshTelemetry();
+        timelinePanel.refresh();
+        earthMapCanvas.repaint();
+    }
+
+    private void extrapolateAllTargets() {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
+            return;
+        }
+        earthMapCanvas.cancelNodeModification();
+        double durationSeconds = model.durationSeconds();
+        if (durationSeconds <= 0.0) {
+            statusLabel.setText("Draw a runnable target trajectory before extrapolating");
+            return;
+        }
+        resetCompletedPlayback();
+        int extrapolated = model.extrapolateTargetsToScenarioDuration();
+        if (extrapolated > 0) {
+            String noun = extrapolated == 1 ? "target" : "targets";
+            statusLabel.setText("Extrapolated %d %s to %s".formatted(
+                    extrapolated, noun, formatClockTime(durationSeconds)));
+        } else {
+            statusLabel.setText("All runnable targets already reach %s".formatted(
+                    formatClockTime(durationSeconds)));
         }
         refreshTelemetry();
         timelinePanel.refresh();
@@ -663,6 +693,7 @@ public final class TrackerFrame extends JFrame {
         }
         playback.reset();
         model.removeTarget(target);
+        reconcileActiveExtrapolations();
         selectedTarget = model.targets().isEmpty() ? null : model.targets().get(0);
         motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
         updateStructuralEditingControls();
@@ -819,12 +850,13 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void reconcileActiveExtrapolations() {
+        double durationSeconds = model.durationSeconds();
         for (TargetTrajectory target : model.targets()) {
             if (!target.extrapolatedToScenarioLength()) {
                 continue;
             }
-            if (model.hasScenarioLength()) {
-                target.extrapolateToDuration(model.explicitScenarioLengthSeconds());
+            if (durationSeconds > 0.0) {
+                target.extrapolateToDuration(durationSeconds);
             } else {
                 target.removeExtrapolation();
             }
@@ -1019,6 +1051,7 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         resetCompletedPlayback();
+        reconcileActiveExtrapolations();
         refreshTelemetry();
         timelinePanel.refresh();
         statusLabel.setText(selectedTarget.path().size() < 2
@@ -1034,6 +1067,7 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         resetCompletedPlayback();
+        reconcileActiveExtrapolations();
         refreshTelemetry();
         timelinePanel.refresh();
         earthMapCanvas.repaint();

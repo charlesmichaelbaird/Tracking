@@ -48,6 +48,7 @@ final class MotionTelemetryPanel extends JPanel {
             BooleanSupplier editingLocked,
             Runnable onProfileChanged,
             Consumer<TargetTrajectory> onSelectionChanged,
+            Runnable onExtrapolateAllTargets,
             Runnable onNewTarget,
             Runnable onCopyTarget,
             Consumer<EarthMapCanvas.DrawingMode> onDrawingModeChanged,
@@ -63,7 +64,8 @@ final class MotionTelemetryPanel extends JPanel {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(new Color(246, 248, 251));
 
-        inspector = new TargetInspectorPanel(model, onSelectionChanged);
+        inspector = new TargetInspectorPanel(
+                model, onSelectionChanged, onExtrapolateAllTargets);
         inspector.setMaximumSize(new Dimension(Integer.MAX_VALUE, 116));
         add(inspector);
         add(Box.createVerticalStrut(8));
@@ -229,7 +231,7 @@ final class MotionTelemetryPanel extends JPanel {
         undoSmoothButton.setEnabled(enabled && !presetScenarioActive
                 && selectedTarget() != null
                 && selectedTarget().canUndoSmoothing());
-        refreshExtrapolateButton(enabled && !presetScenarioActive);
+        refreshExtrapolateControls(enabled && !presetScenarioActive);
         if (presetScenarioActive) {
             lockLabel.setText("Target structure locked by preset scenario");
             lockLabel.setForeground(new Color(132, 74, 17));
@@ -256,7 +258,7 @@ final class MotionTelemetryPanel extends JPanel {
                 && target.canUndoSmoothing());
         copyTargetButton.setEnabled(!editingLocked.getAsBoolean()
                 && canCopySelectedTarget());
-        refreshExtrapolateButton(!editingLocked.getAsBoolean());
+        refreshExtrapolateControls(!editingLocked.getAsBoolean());
     }
 
     private boolean canCopySelectedTarget() {
@@ -264,16 +266,17 @@ final class MotionTelemetryPanel extends JPanel {
         return target != null && target.path().size() >= 2;
     }
 
-    private void refreshExtrapolateButton(boolean editingEnabled) {
+    private void refreshExtrapolateControls(boolean editingEnabled) {
         TargetTrajectory target = selectedTarget();
         boolean extrapolated = target != null && target.extrapolatedToScenarioLength();
         boolean canExtrapolate = target != null
-                && model.hasScenarioLength()
-                && target.canExtrapolateTo(model.explicitScenarioLengthSeconds());
+                && target.canExtrapolateTo(model.durationSeconds());
         extrapolatePathButton.setSelected(extrapolated);
         extrapolatePathButton.setText(extrapolated ? "Remove extrapolation" : "Extrapolate");
         extrapolatePathButton.setEnabled(editingEnabled && target != null
                 && (extrapolated || canExtrapolate));
+        inspector.setExtrapolateAllEnabled(editingEnabled
+                && model.canExtrapolateTargetsToScenarioDuration());
     }
 
     private static JPanel wrapChart(ProfileEditor editor) {

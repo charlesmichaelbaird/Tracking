@@ -8,6 +8,7 @@ public final class ScenarioModelSmokeTest {
     public static void main(String[] args) {
         verifyTargetIdsAreReused();
         verifyTargetCopiesAreIndependent();
+        verifyLongestTargetDefinesScenarioExtrapolation();
         verifyBlackoutIdsAreReused();
         System.out.println("ScenarioModelSmokeTest passed");
     }
@@ -89,6 +90,43 @@ public final class ScenarioModelSmokeTest {
         if (!"TGT-007".equals(wrappedCopy.id())
                 || wrappedCopy.color().equals(firstColor.color())) {
             throw new AssertionError("Copied targets should not reuse the source palette color");
+        }
+    }
+
+    private static void verifyLongestTargetDefinesScenarioExtrapolation() {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory longTarget = model.addTarget();
+        longTarget.addPathPoint(Wgs84.toEcef(new GeodeticPoint(0.0, 0.0, 0.0)));
+        longTarget.addPathPoint(Wgs84.toEcef(new GeodeticPoint(0.0, 0.04, 0.0)));
+
+        TargetTrajectory shortTarget = model.addTarget();
+        shortTarget.addPathPoint(Wgs84.toEcef(new GeodeticPoint(1.0, 0.0, 0.0)));
+        shortTarget.addPathPoint(Wgs84.toEcef(new GeodeticPoint(1.0, 0.01, 0.0)));
+
+        double shortBaseDuration = shortTarget.durationSeconds();
+        double longDuration = longTarget.durationSeconds();
+        if (Math.abs(model.durationSeconds() - longDuration) > 1.0e-6) {
+            throw new AssertionError("The longest runnable target should define scenario duration");
+        }
+        if (!model.canExtrapolateTargetsToScenarioDuration()) {
+            throw new AssertionError("A shorter target should be eligible for extrapolation");
+        }
+        if (model.extrapolateTargetsToScenarioDuration() != 1) {
+            throw new AssertionError("Only the shorter target should be extrapolated");
+        }
+        if (Math.abs(shortTarget.durationSeconds() - longDuration) > 1.0e-3
+                || shortTarget.ecefVelocityAt(longDuration).magnitude() <= 1.0) {
+            throw new AssertionError("The shorter target should have ECEF state through scenario end");
+        }
+
+        model.setScenarioLengthSeconds(longDuration / 2.0);
+        if (Math.abs(model.durationSeconds() - longDuration) > 1.0e-6) {
+            throw new AssertionError("Manual length should not cut off a longer target trajectory");
+        }
+        model.setScenarioLengthSeconds(null);
+        model.removeTarget(longTarget);
+        if (Math.abs(model.durationSeconds() - shortBaseDuration) > 1.0e-6) {
+            throw new AssertionError("Extrapolated path length should not define the base scenario");
         }
     }
 

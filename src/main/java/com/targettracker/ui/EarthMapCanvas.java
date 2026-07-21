@@ -893,9 +893,10 @@ final class EarthMapCanvas extends JPanel {
             Graphics2D g,
             TargetTrajectory target,
             Color pathColor) {
-        if (model.hasScenarioLength()
-                && target.durationSeconds() > model.explicitScenarioLengthSeconds() + 1.0e-6) {
-            double normalizedTime = target.normalizedTimeAt(model.explicitScenarioLengthSeconds());
+        double scenarioDurationSeconds = model.durationSeconds();
+        if (scenarioDurationSeconds > 0.0
+                && target.durationSeconds() > scenarioDurationSeconds + 1.0e-6) {
+            double normalizedTime = target.normalizedTimeAt(scenarioDurationSeconds);
             List<EcefPoint> prefix = trajectoryPrefix(target, normalizedTime);
             List<EcefPoint> overrun = trajectorySuffix(target, normalizedTime);
             if (prefix.size() >= 2) {

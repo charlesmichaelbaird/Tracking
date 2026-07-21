@@ -139,12 +139,39 @@ public final class ScenarioModel {
     }
 
     public double durationSeconds() {
+        double targetDurationSeconds = targetDefinedDurationSeconds();
         if (scenarioLengthSeconds != null) {
-            return scenarioLengthSeconds;
+            return Math.max(scenarioLengthSeconds, targetDurationSeconds);
         }
+        return targetDurationSeconds;
+    }
+
+    public boolean canExtrapolateTargetsToScenarioDuration() {
+        double durationSeconds = durationSeconds();
+        return durationSeconds > 0.0
+                && targets.stream()
+                .anyMatch(target -> target.canExtrapolateTo(durationSeconds));
+    }
+
+    public int extrapolateTargetsToScenarioDuration() {
+        double durationSeconds = durationSeconds();
+        if (durationSeconds <= 0.0) {
+            return 0;
+        }
+        int extrapolated = 0;
+        for (TargetTrajectory target : targets) {
+            if (target.canExtrapolateTo(durationSeconds)
+                    && target.extrapolateToDuration(durationSeconds)) {
+                extrapolated++;
+            }
+        }
+        return extrapolated;
+    }
+
+    private double targetDefinedDurationSeconds() {
         return targets.stream()
                 .filter(TargetTrajectory::isRunnable)
-                .mapToDouble(TargetTrajectory::durationSeconds)
+                .mapToDouble(TargetTrajectory::unextrapolatedDurationSeconds)
                 .max()
                 .orElse(0.0);
     }

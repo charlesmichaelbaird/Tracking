@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Objects;
 
 public final class TargetTrajectory {
+    private static final double TIME_EPSILON_SECONDS = 1.0e-6;
+
     private final String id;
     private final Color color;
     private final List<EcefPoint> path = new ArrayList<>();
@@ -241,8 +243,11 @@ public final class TargetTrajectory {
     }
 
     public double durationSeconds() {
-        double averageSpeed = velocityProfile.average();
-        return averageSpeed <= 1.0e-9 ? 0.0 : surfaceLengthMeters() / averageSpeed;
+        return durationSecondsForLength(surfaceLengthMeters());
+    }
+
+    double unextrapolatedDurationSeconds() {
+        return durationSecondsForLength(unextrapolatedSurfaceLengthMeters());
     }
 
     public double normalizedTimeAt(double elapsedSeconds) {
@@ -296,7 +301,7 @@ public final class TargetTrajectory {
     /** Numerically differentiates the full ECEF trajectory, including altitude changes. */
     public EcefVector ecefVelocityAt(double elapsedSeconds) {
         double duration = durationSeconds();
-        if (duration <= 0.0 || elapsedSeconds - duration > 1.0e-9) {
+        if (duration <= 0.0 || elapsedSeconds - duration > TIME_EPSILON_SECONDS) {
             return EcefVector.ZERO;
         }
 
@@ -333,6 +338,14 @@ public final class TargetTrajectory {
                 Wgs84.toGeodetic(end)).distanceMeters();
     }
 
+    private static double pathLengthMeters(List<EcefPoint> points) {
+        double length = 0.0;
+        for (int index = 1; index < points.size(); index++) {
+            length += surfaceDistance(points.get(index - 1), points.get(index));
+        }
+        return length;
+    }
+
     private static void copyProfile(ScalarProfile source, ScalarProfile destination) {
         for (int index = 0; index < source.sampleCount(); index++) {
             destination.setSample(index, source.sample(index));
@@ -341,12 +354,22 @@ public final class TargetTrajectory {
 
     private void rebuildSegmentLengths() {
         segmentLengthsMeters.clear();
-        surfaceLengthMeters = 0.0;
+        surfaceLengthMeters = pathLengthMeters(path);
         for (int index = 1; index < path.size(); index++) {
             double segmentLength = surfaceDistance(path.get(index - 1), path.get(index));
             segmentLengthsMeters.add(segmentLength);
-            surfaceLengthMeters += segmentLength;
         }
+    }
+
+    private double unextrapolatedSurfaceLengthMeters() {
+        return extrapolatedToScenarioLength && !extrapolationBasePath.isEmpty()
+                ? pathLengthMeters(extrapolationBasePath)
+                : surfaceLengthMeters();
+    }
+
+    private double durationSecondsForLength(double lengthMeters) {
+        double averageSpeed = velocityProfile.average();
+        return averageSpeed <= 1.0e-9 ? 0.0 : lengthMeters / averageSpeed;
     }
 
     private void replacePath(List<EcefPoint> points, boolean clearSmoothingUndo) {
