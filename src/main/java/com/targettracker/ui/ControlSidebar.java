@@ -9,7 +9,6 @@ import javax.swing.JToggleButton;
 import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.GridLayout;
 import java.util.LinkedHashMap;
@@ -47,11 +46,11 @@ final class ControlSidebar extends JPanel {
         this.onCardChanged = onCardChanged;
         setPreferredSize(new Dimension(430, 0));
         setMinimumSize(new Dimension(360, 0));
-        setBackground(new Color(246, 248, 251));
-        setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, new Color(214, 220, 227)));
+        AppTheme.setRole(this, AppTheme.ROLE_APP);
+        setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, AppTheme.current().border()));
 
         JPanel navigation = new JPanel(new GridLayout(0, 1, 6, 6));
-        navigation.setBackground(Color.WHITE);
+        AppTheme.setRole(navigation, AppTheme.ROLE_CARD);
         navigation.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         ButtonGroup group = new ButtonGroup();
         addNavigationButton(navigation, group, IMM);

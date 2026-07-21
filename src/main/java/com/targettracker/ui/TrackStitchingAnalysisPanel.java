@@ -626,9 +626,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             if (!Double.isFinite(resolution) || resolution <= 0.0) {
                 throw new NumberFormatException();
             }
-            resolutionField.setBackground(Color.WHITE);
+            AppTheme.styleTextComponent(resolutionField, false);
         } catch (NumberFormatException exception) {
-            resolutionField.setBackground(new Color(255, 224, 224));
+            AppTheme.styleTextComponent(resolutionField, true);
             statusLabel.setText("Enter a positive time-bank resolution");
             throw exception;
         }
@@ -922,9 +922,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             parentDirectory = Paths.get(outputDirectoryField.getText().trim())
                     .toAbsolutePath()
                     .normalize();
-            outputDirectoryField.setBackground(Color.WHITE);
+            AppTheme.styleTextComponent(outputDirectoryField, false);
         } catch (RuntimeException exception) {
-            outputDirectoryField.setBackground(new Color(255, 224, 224));
+            AppTheme.styleTextComponent(outputDirectoryField, true);
             statusLabel.setText("Enter a valid output folder");
             return;
         }
@@ -989,9 +989,9 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             parentDirectory = Paths.get(outputDirectoryField.getText().trim())
                     .toAbsolutePath()
                     .normalize();
-            outputDirectoryField.setBackground(Color.WHITE);
+            AppTheme.styleTextComponent(outputDirectoryField, false);
         } catch (RuntimeException exception) {
-            outputDirectoryField.setBackground(new Color(255, 224, 224));
+            AppTheme.styleTextComponent(outputDirectoryField, true);
             statusLabel.setText("Enter a valid output folder");
             return;
         }
@@ -1045,10 +1045,10 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             if (!Double.isFinite(value) || value < 0.0) {
                 throw new NumberFormatException();
             }
-            field.setBackground(Color.WHITE);
+            AppTheme.styleTextComponent(field, false);
             return value;
         } catch (NumberFormatException exception) {
-            field.setBackground(new Color(255, 224, 224));
+            AppTheme.styleTextComponent(field, true);
             throw exception;
         }
     }
@@ -1059,10 +1059,10 @@ final class TrackStitchingAnalysisPanel extends JPanel {
             if (!Double.isFinite(value) || value <= 0.0) {
                 throw new NumberFormatException();
             }
-            field.setBackground(Color.WHITE);
+            AppTheme.styleTextComponent(field, false);
             return value;
         } catch (NumberFormatException exception) {
-            field.setBackground(new Color(255, 224, 224));
+            AppTheme.styleTextComponent(field, true);
             throw exception;
         }
     }

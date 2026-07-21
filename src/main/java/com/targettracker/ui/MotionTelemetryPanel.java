@@ -12,7 +12,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JToggleButton;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridLayout;
@@ -62,7 +61,7 @@ final class MotionTelemetryPanel extends JPanel {
         this.model = model;
         this.editingLocked = editingLocked;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-        setBackground(new Color(246, 248, 251));
+        AppTheme.setRole(this, AppTheme.ROLE_APP);
 
         inspector = new TargetInspectorPanel(
                 model, onSelectionChanged, onExtrapolateAllTargets);
@@ -83,13 +82,13 @@ final class MotionTelemetryPanel extends JPanel {
 
         JPanel profileHeader = new JPanel();
         profileHeader.setLayout(new BoxLayout(profileHeader, BoxLayout.Y_AXIS));
-        profileHeader.setBackground(new Color(246, 248, 251));
+        AppTheme.setRole(profileHeader, AppTheme.ROLE_APP);
         profileHeader.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
         profileHeader.setAlignmentX(LEFT_ALIGNMENT);
         JLabel title = new JLabel("Motion profiles");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 17.0f));
         title.setAlignmentX(LEFT_ALIGNMENT);
-        profileTargetLabel.setForeground(new Color(85, 97, 108));
+        profileTargetLabel.setForeground(AppTheme.current().mutedText());
         profileTargetLabel.setAlignmentX(LEFT_ALIGNMENT);
         profileHeader.add(title);
         profileHeader.add(Box.createVerticalStrut(3));
@@ -122,10 +121,10 @@ final class MotionTelemetryPanel extends JPanel {
             Runnable onRemoveTarget) {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(Color.WHITE);
+        AppTheme.setRole(panel, AppTheme.ROLE_CARD);
         panel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(0, 12, 0, 12),
-                BorderFactory.createLineBorder(new Color(214, 220, 227))));
+                AppTheme.lineBorder()));
         panel.setAlignmentX(LEFT_ALIGNMENT);
         panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 246));
 
@@ -150,7 +149,7 @@ final class MotionTelemetryPanel extends JPanel {
         inner.add(Box.createVerticalStrut(10));
 
         JLabel drawingLabel = new JLabel("Drawing type");
-        drawingLabel.setForeground(new Color(61, 73, 84));
+        drawingLabel.setForeground(AppTheme.current().text());
         drawingLabel.setAlignmentX(LEFT_ALIGNMENT);
         inner.add(drawingLabel);
         inner.add(Box.createVerticalStrut(4));
@@ -197,7 +196,7 @@ final class MotionTelemetryPanel extends JPanel {
         inner.add(extrapolatePathButton);
         inner.add(Box.createVerticalStrut(10));
 
-        lockLabel.setForeground(new Color(44, 112, 62));
+        lockLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
         lockLabel.setAlignmentX(LEFT_ALIGNMENT);
         inner.add(lockLabel);
         return panel;
@@ -234,13 +233,13 @@ final class MotionTelemetryPanel extends JPanel {
         refreshExtrapolateControls(enabled && !presetScenarioActive);
         if (presetScenarioActive) {
             lockLabel.setText("Target structure locked by preset scenario");
-            lockLabel.setForeground(new Color(132, 74, 17));
+            lockLabel.setForeground(AppTheme.statusColor(AppTheme.Status.WARNING));
         } else if (editingLocked) {
             lockLabel.setText("Target editing locked during scenario activity");
-            lockLabel.setForeground(new Color(132, 74, 17));
+            lockLabel.setForeground(AppTheme.statusColor(AppTheme.Status.WARNING));
         } else {
             lockLabel.setText("Manual target editing enabled");
-            lockLabel.setForeground(new Color(44, 112, 62));
+            lockLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
         }
     }
 
@@ -281,10 +280,10 @@ final class MotionTelemetryPanel extends JPanel {
 
     private static JPanel wrapChart(ProfileEditor editor) {
         JPanel wrapper = new JPanel(new BorderLayout());
-        wrapper.setBackground(Color.WHITE);
+        AppTheme.setRole(wrapper, AppTheme.ROLE_CARD);
         wrapper.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(0, 12, 0, 12),
-                BorderFactory.createLineBorder(new Color(214, 220, 227))));
+                AppTheme.lineBorder()));
         wrapper.setAlignmentX(LEFT_ALIGNMENT);
         wrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 230));
         wrapper.setPreferredSize(new Dimension(400, 230));

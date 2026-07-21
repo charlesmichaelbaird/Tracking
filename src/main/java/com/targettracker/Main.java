@@ -1,5 +1,6 @@
 package com.targettracker;
 
+import com.targettracker.ui.AppTheme;
 import com.targettracker.ui.TrackerFrame;
 
 import javax.swing.SwingUtilities;
@@ -16,6 +17,7 @@ public final class Main {
             } catch (Exception ignored) {
                 // The cross-platform Swing look and feel remains a safe fallback.
             }
+            AppTheme.configureUiDefaults();
 
             TrackerFrame frame = new TrackerFrame();
             frame.setVisible(true);

@@ -161,6 +161,7 @@ final class EarthMapCanvas extends JPanel {
     private TargetTrajectory modificationOriginalState;
     private int modifiedPointIndex = -1;
     private GeodeticPoint shapeAnchor;
+    private GeodeticPoint racetrackLengthAnchor;
     private DirectionPlacementPhase directionPlacementPhase = DirectionPlacementPhase.NONE;
     private TargetTrajectory directionPlacementTarget;
     private List<EcefPoint> directionPlacementPath = List.of();
@@ -206,7 +207,7 @@ final class EarthMapCanvas extends JPanel {
         this.earthImage = loadEarthImage();
         this.detailLayer = new NaturalEarthDetailLayer(
                 this::repaint, !GraphicsEnvironment.isHeadless());
-        setBackground(new Color(246, 248, 251));
+        AppTheme.setRole(this, AppTheme.ROLE_APP);
         setPreferredSize(new Dimension(820, 620));
         setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
 
@@ -405,7 +406,7 @@ final class EarthMapCanvas extends JPanel {
         blackoutDrawing = false;
         blackoutFirstCorner = null;
         finishedSegmentedTarget = null;
-        shapeAnchor = null;
+        clearShapePlacement();
         clearDirectionPlacement();
         repaint();
     }
@@ -420,7 +421,7 @@ final class EarthMapCanvas extends JPanel {
             targetDragging = false;
             draggedTarget = null;
             trajectoryDragAnchor = null;
-            shapeAnchor = null;
+            clearShapePlacement();
             clearDirectionPlacement();
         }
         repaint();
@@ -446,7 +447,7 @@ final class EarthMapCanvas extends JPanel {
         freeHandDrawing = false;
         blackoutDrawing = false;
         blackoutFirstCorner = null;
-        shapeAnchor = null;
+        clearShapePlacement();
         clearDirectionPlacement();
         if (!enabled) {
             targetDragging = false;
@@ -480,7 +481,7 @@ final class EarthMapCanvas extends JPanel {
             freeHandDrawing = false;
             blackoutDrawing = false;
             blackoutFirstCorner = null;
-            shapeAnchor = null;
+            clearShapePlacement();
             clearDirectionPlacement();
         } else {
             cancelNodeModification();
@@ -511,7 +512,7 @@ final class EarthMapCanvas extends JPanel {
         freeHandDrawing = false;
         blackoutDrawing = false;
         blackoutFirstCorner = null;
-        shapeAnchor = null;
+        clearShapePlacement();
         TargetTrajectory target = selectedTarget.get();
         if (drawingMode == DrawingMode.SEGMENTED && target != null && !target.path().isEmpty()) {
             finishedSegmentedTarget = target;
@@ -706,7 +707,7 @@ final class EarthMapCanvas extends JPanel {
         } finally {
             clipped.dispose();
         }
-        g.setColor(new Color(102, 119, 132));
+        g.setColor(AppTheme.current().border());
         g.drawRect(map.x, map.y, map.width, map.height);
     }
 
@@ -731,7 +732,7 @@ final class EarthMapCanvas extends JPanel {
                 g.setColor(GRID_COLOR);
                 g.drawLine(x, map.y, x, map.y + map.height);
             }
-            g.setColor(new Color(73, 86, 97));
+            g.setColor(AppTheme.current().mutedText());
             String label = longitudeLabel(
                     GeodeticPoint.normalizeLongitude(longitude), longitudeStep);
             g.drawString(label, x - metrics.stringWidth(label) / 2, map.y + map.height + 18);
@@ -747,12 +748,12 @@ final class EarthMapCanvas extends JPanel {
                 g.setColor(GRID_COLOR);
                 g.drawLine(map.x, y, map.x + map.width, y);
             }
-            g.setColor(new Color(73, 86, 97));
+            g.setColor(AppTheme.current().mutedText());
             String label = latitudeLabel(latitude, latitudeStep);
             g.drawString(label, map.x - metrics.stringWidth(label) - 8, y + 4);
         }
 
-        g.setColor(new Color(52, 63, 74));
+        g.setColor(AppTheme.current().text());
         g.drawString("Longitude", map.x + map.width / 2 - 24, map.y + map.height + 38);
         g.rotate(-Math.PI / 2.0);
         g.drawString("Latitude", -map.y - map.height / 2 - 20, 17);
@@ -1386,7 +1387,10 @@ final class EarthMapCanvas extends JPanel {
         if (target == null) {
             return;
         }
-        List<EcefPoint> preview = buildShapePath(shapeAnchor, toGeodetic(mousePoint), drawingMode);
+        GeodeticPoint cursor = toGeodetic(mousePoint).withAltitude(0.0);
+        List<EcefPoint> preview = drawingMode == DrawingMode.RACETRACK
+                ? buildRacetrackPreview(cursor)
+                : buildShapePath(shapeAnchor, cursor, drawingMode);
         if (preview.size() < 2) {
             return;
         }
@@ -1403,7 +1407,26 @@ final class EarthMapCanvas extends JPanel {
             g.setColor(target.color());
             g.drawOval(anchor.x - 4, anchor.y - 4, 8, 8);
         }
+        Point lengthAnchor = racetrackLengthAnchor == null
+                ? null
+                : toScreen(racetrackLengthAnchor);
+        if (lengthAnchor != null) {
+            g.setColor(Color.WHITE);
+            g.fillOval(lengthAnchor.x - 4, lengthAnchor.y - 4, 8, 8);
+            g.setColor(target.color());
+            g.drawOval(lengthAnchor.x - 4, lengthAnchor.y - 4, 8, 8);
+        }
         g.setStroke(previousStroke);
+    }
+
+    private List<EcefPoint> buildRacetrackPreview(GeodeticPoint cursor) {
+        if (shapeAnchor == null) {
+            return List.of();
+        }
+        if (racetrackLengthAnchor == null) {
+            return buildRacetrackPath(shapeAnchor, cursor);
+        }
+        return buildRacetrackPath(shapeAnchor, racetrackLengthAnchor, cursor);
     }
 
     private void drawDirectionPlacement(Graphics2D g) {
@@ -1451,9 +1474,11 @@ final class EarthMapCanvas extends JPanel {
         int width = metrics.stringWidth(text) + 16;
         int x = point.x + 13;
         int y = point.y - 34;
-        g.setColor(new Color(255, 255, 255, 230));
+        g.setColor(AppTheme.isDarkMode()
+                ? new Color(18, 23, 30, 226)
+                : new Color(255, 255, 255, 230));
         g.fillRoundRect(x, y, width, 23, 9, 9);
-        g.setColor(new Color(45, 52, 60));
+        g.setColor(AppTheme.current().text());
         g.drawString(text, x + 8, y + 16);
     }
 
@@ -1489,9 +1514,11 @@ final class EarthMapCanvas extends JPanel {
                 .formatted(source, viewDescription(), viewSizeDescription());
         g.setFont(g.getFont().deriveFont(Font.PLAIN, 11.0f));
         int width = g.getFontMetrics().stringWidth(text) + 16;
-        g.setColor(new Color(255, 255, 255, 210));
+        g.setColor(AppTheme.isDarkMode()
+                ? new Color(18, 23, 30, 210)
+                : new Color(255, 255, 255, 210));
         g.fillRoundRect(map.x + 8, map.y + 8, width, 24, 10, 10);
-        g.setColor(new Color(66, 78, 89));
+        g.setColor(AppTheme.current().text());
         g.drawString(text, map.x + 16, map.y + 24);
     }
 
@@ -1505,9 +1532,11 @@ final class EarthMapCanvas extends JPanel {
         int width = metrics.stringWidth(text) + 20;
         int x = map.x + map.width - width - 8;
         int y = map.y + 8;
-        g.setColor(new Color(255, 255, 255, 220));
+        g.setColor(AppTheme.isDarkMode()
+                ? new Color(18, 23, 30, 222)
+                : new Color(255, 255, 255, 220));
         g.fillRoundRect(x, y, width, 27, 10, 10);
-        g.setColor(new Color(31, 39, 47));
+        g.setColor(AppTheme.current().text());
         g.drawString(text, x + 10, y + 19);
     }
 
@@ -1676,9 +1705,13 @@ final class EarthMapCanvas extends JPanel {
         int width = metrics.stringWidth(text) + padX * 2;
         int height = metrics.getHeight() + padY * 2;
         int y = baseline - metrics.getAscent() - padY;
-        g.setColor(new Color(255, 255, 255, 228));
+        g.setColor(AppTheme.isDarkMode()
+                ? new Color(18, 23, 30, 226)
+                : new Color(255, 255, 255, 228));
         g.fillRoundRect(x - padX, y, width, height, 8, 8);
-        g.setColor(new Color(122, 132, 143, 155));
+        g.setColor(AppTheme.isDarkMode()
+                ? new Color(118, 132, 147, 155)
+                : new Color(122, 132, 143, 155));
         g.drawRoundRect(x - padX, y, width, height, 8, 8);
         g.setColor(foreground);
         g.drawString(text, x, baseline);
@@ -1783,8 +1816,13 @@ final class EarthMapCanvas extends JPanel {
 
     private void handleShapeClick(TargetTrajectory target, Point point) {
         GeodeticPoint geodetic = toGeodetic(point).withAltitude(0.0);
+        if (drawingMode == DrawingMode.RACETRACK) {
+            handleRacetrackClick(target, point, geodetic);
+            return;
+        }
         if (shapeAnchor == null) {
             shapeAnchor = geodetic;
+            racetrackLengthAnchor = null;
             mousePoint = point;
             repaint();
             return;
@@ -1798,7 +1836,43 @@ final class EarthMapCanvas extends JPanel {
             finishedSegmentedTarget = null;
             onPathChanged.run();
         }
-        shapeAnchor = null;
+        clearShapePlacement();
+        mousePoint = directionPlacementPhase == DirectionPlacementPhase.NONE ? null : point;
+        repaint();
+    }
+
+    private void handleRacetrackClick(
+            TargetTrajectory target,
+            Point point,
+            GeodeticPoint geodetic) {
+        if (shapeAnchor == null) {
+            shapeAnchor = geodetic;
+            racetrackLengthAnchor = null;
+            mousePoint = point;
+            repaint();
+            return;
+        }
+        if (racetrackLengthAnchor == null) {
+            Wgs84Geodesic.GeodesicData centerline =
+                    Wgs84Geodesic.inverse(shapeAnchor, geodetic);
+            if (centerline.distanceMeters() < 10.0) {
+                mousePoint = point;
+                repaint();
+                return;
+            }
+            racetrackLengthAnchor = geodetic;
+            mousePoint = point;
+            repaint();
+            return;
+        }
+        List<EcefPoint> shape = buildRacetrackPath(shapeAnchor, racetrackLengthAnchor, geodetic);
+        if (shape.size() >= 2) {
+            target.replacePath(shape, TargetTrajectory.ExtrapolationMode.REPEAT_LOOP);
+            beginDirectionPlacement(target);
+            finishedSegmentedTarget = null;
+            onPathChanged.run();
+        }
+        clearShapePlacement();
         mousePoint = directionPlacementPhase == DirectionPlacementPhase.NONE ? null : point;
         repaint();
     }
@@ -1815,6 +1889,11 @@ final class EarthMapCanvas extends JPanel {
         directionPlacementTarget = null;
         directionPlacementPath = List.of();
         directionStartSnap = null;
+    }
+
+    private void clearShapePlacement() {
+        shapeAnchor = null;
+        racetrackLengthAnchor = null;
     }
 
     private void handleDirectionPlacementClick(Point point) {
@@ -2018,7 +2097,35 @@ final class EarthMapCanvas extends JPanel {
         if (centerline.distanceMeters() < 10.0) {
             return List.of();
         }
-        double radius = Math.max(50.0, centerline.distanceMeters() * 0.25);
+        return buildRacetrackPath(
+                firstTurnCenter,
+                secondTurnCenter,
+                Math.max(50.0, centerline.distanceMeters() * 0.25),
+                centerline);
+    }
+
+    private static List<EcefPoint> buildRacetrackPath(
+            GeodeticPoint firstTurnCenter,
+            GeodeticPoint secondTurnCenter,
+            GeodeticPoint widthControl) {
+        Wgs84Geodesic.GeodesicData centerline =
+                Wgs84Geodesic.inverse(firstTurnCenter, secondTurnCenter);
+        if (centerline.distanceMeters() < 10.0) {
+            return List.of();
+        }
+        double radius = racetrackRadiusMeters(
+                firstTurnCenter,
+                secondTurnCenter,
+                widthControl,
+                centerline.distanceMeters());
+        return buildRacetrackPath(firstTurnCenter, secondTurnCenter, radius, centerline);
+    }
+
+    private static List<EcefPoint> buildRacetrackPath(
+            GeodeticPoint firstTurnCenter,
+            GeodeticPoint secondTurnCenter,
+            double radius,
+            Wgs84Geodesic.GeodesicData centerline) {
         double leftBearing = centerline.initialBearingRadians() - Math.PI / 2.0;
         double rightBearing = centerline.initialBearingRadians() + Math.PI / 2.0;
         List<EcefPoint> points = new ArrayList<>();
@@ -2035,6 +2142,35 @@ final class EarthMapCanvas extends JPanel {
         appendGeodesic(points, secondRight, firstRight, 18);
         appendArc(points, firstTurnCenter, rightBearing, rightBearing + Math.PI, radius, 36);
         return points;
+    }
+
+    private static double racetrackRadiusMeters(
+            GeodeticPoint firstTurnCenter,
+            GeodeticPoint secondTurnCenter,
+            GeodeticPoint widthControl,
+            double centerlineMeters) {
+        double referenceLatitude = (firstTurnCenter.latitudeDegrees()
+                + secondTurnCenter.latitudeDegrees()
+                + widthControl.latitudeDegrees()) / 3.0;
+        double metersPerDegreeLongitude = Wgs84.metersPerDegreeLongitude(referenceLatitude);
+        double metersPerDegreeLatitude = Wgs84.metersPerDegreeLatitude(referenceLatitude);
+        double axisEast = GeodeticPoint.normalizeLongitude(
+                secondTurnCenter.longitudeDegrees() - firstTurnCenter.longitudeDegrees())
+                * metersPerDegreeLongitude;
+        double axisNorth = (secondTurnCenter.latitudeDegrees() - firstTurnCenter.latitudeDegrees())
+                * metersPerDegreeLatitude;
+        double axisLength = Math.hypot(axisEast, axisNorth);
+        if (axisLength < 1.0e-9) {
+            return Math.max(50.0, centerlineMeters * 0.25);
+        }
+        double controlEast = GeodeticPoint.normalizeLongitude(
+                widthControl.longitudeDegrees() - firstTurnCenter.longitudeDegrees())
+                * metersPerDegreeLongitude;
+        double controlNorth = (widthControl.latitudeDegrees() - firstTurnCenter.latitudeDegrees())
+                * metersPerDegreeLatitude;
+        double perpendicularDistance =
+                Math.abs(controlEast * axisNorth - controlNorth * axisEast) / axisLength;
+        return Math.max(50.0, perpendicularDistance);
     }
 
     private static void appendGeodesic(

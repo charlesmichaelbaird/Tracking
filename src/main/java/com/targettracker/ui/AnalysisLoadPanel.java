@@ -9,7 +9,6 @@ import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -49,7 +48,7 @@ final class AnalysisLoadPanel extends JPanel {
         this.listener = listener;
         setOpaque(false);
         setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(232, 235, 239)),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.current().border()),
                 BorderFactory.createEmptyBorder(0, 8, 1, 8)));
 
         JLabel title = new JLabel("Load scenario folder");
@@ -83,7 +82,7 @@ final class AnalysisLoadPanel extends JPanel {
         stitchingButton.addActionListener(event -> onTrackStitching.run());
         add(stitchingButton);
 
-        statusLabel.setForeground(new Color(91, 103, 115));
+        statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.MUTED));
         add(statusLabel);
         refreshFolders();
     }
@@ -94,7 +93,7 @@ final class AnalysisLoadPanel extends JPanel {
         try {
             Path parent = parentFolder();
             if (!Files.isDirectory(parent)) {
-                statusLabel.setForeground(new Color(176, 40, 40));
+                statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
                 statusLabel.setText("Directory not found");
                 return;
             }
@@ -113,15 +112,15 @@ final class AnalysisLoadPanel extends JPanel {
             if (previous != null) {
                 selectFolder(previous.path());
             }
-            statusLabel.setForeground(new Color(91, 103, 115));
+            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.MUTED));
             statusLabel.setText(folders.isEmpty()
                     ? "No recorded runs found"
                     : folders.size() + " run(s) found");
         } catch (InvalidPathException exception) {
-            statusLabel.setForeground(new Color(176, 40, 40));
+            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
             statusLabel.setText("Invalid top-level directory");
         } catch (IOException exception) {
-            statusLabel.setForeground(new Color(176, 40, 40));
+            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
             statusLabel.setText("Could not read directory");
         }
     }
@@ -165,7 +164,7 @@ final class AnalysisLoadPanel extends JPanel {
     private void loadSelectedScenario() {
         RunFolder selected = (RunFolder) scenarioFolderSelector.getSelectedItem();
         if (selected == null) {
-            statusLabel.setForeground(new Color(176, 40, 40));
+            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
             statusLabel.setText("Select a recorded run first");
             return;
         }

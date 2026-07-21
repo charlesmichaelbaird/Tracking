@@ -41,7 +41,7 @@ final class RecordingPanel extends JPanel {
         this.onRecordingStateChanged = onRecordingStateChanged;
         setOpaque(false);
         setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(232, 235, 239)),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.current().border()),
                 BorderFactory.createEmptyBorder(0, 8, 1, 8)));
 
         JLabel title = new JLabel("Track recording");
@@ -63,7 +63,7 @@ final class RecordingPanel extends JPanel {
         browseButton.addActionListener(event -> browseForFolder());
         add(browseButton);
 
-        statusLabel.setForeground(new Color(91, 103, 115));
+        statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.MUTED));
         add(statusLabel);
         refresh();
     }
@@ -100,16 +100,16 @@ final class RecordingPanel extends JPanel {
         recordButton.repaint();
 
         if (recorder.lastError() != null) {
-            statusLabel.setForeground(new Color(176, 40, 40));
+            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
             statusLabel.setText(recorder.lastError());
         } else if (active && recorder.runDirectory() != null) {
-            statusLabel.setForeground(new Color(196, 28, 28));
+            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
             statusLabel.setText("Recording to " + recorder.runDirectory().getFileName());
         } else if (recorder.isArmed()) {
-            statusLabel.setForeground(new Color(145, 52, 52));
+            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.WARNING));
             statusLabel.setText("Armed for next pre-compute");
         } else {
-            statusLabel.setForeground(new Color(91, 103, 115));
+            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.MUTED));
             statusLabel.setText("Off");
         }
     }

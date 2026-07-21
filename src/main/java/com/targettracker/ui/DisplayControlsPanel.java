@@ -5,7 +5,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
 import javax.swing.JToggleButton;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -16,7 +15,7 @@ final class DisplayControlsPanel extends JPanel {
         super(new FlowLayout(FlowLayout.LEFT, 8, 5));
         setOpaque(false);
         setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(232, 235, 239)),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.current().border()),
                 BorderFactory.createEmptyBorder(0, 8, 1, 8)));
 
         JLabel title = new JLabel("World-view layers");

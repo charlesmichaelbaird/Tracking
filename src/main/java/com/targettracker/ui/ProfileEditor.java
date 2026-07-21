@@ -57,7 +57,7 @@ final class ProfileEditor extends JPanel {
         this.onProfileCursorChanged = onProfileCursorChanged;
         setPreferredSize(new Dimension(390, 220));
         setMinimumSize(new Dimension(300, 180));
-        setBackground(Color.WHITE);
+        AppTheme.setRole(this, AppTheme.ROLE_CARD);
 
         MouseAdapter handler = new MouseAdapter() {
             @Override
@@ -114,22 +114,23 @@ final class ProfileEditor extends JPanel {
         ScalarProfile profile = target == null ? null : profileGetter.apply(target);
         int width = chartWidth();
         int height = chartHeight();
+        AppTheme.Palette palette = AppTheme.current();
 
-        g.setColor(new Color(43, 51, 59));
+        g.setColor(palette.text());
         g.setFont(g.getFont().deriveFont(Font.BOLD, 14.0f));
         g.drawString(title, LEFT, 21);
         g.setFont(g.getFont().deriveFont(Font.PLAIN, 11.0f));
-        g.setColor(new Color(102, 113, 124));
+        g.setColor(palette.mutedText());
 
         g.setStroke(new BasicStroke(1.0f));
         FontMetrics metrics = g.getFontMetrics();
         for (int i = 0; i <= 4; i++) {
             int x = LEFT + width * i / 4;
             int y = TOP + height * i / 4;
-            g.setColor(new Color(226, 231, 236));
+            g.setColor(palette.chartGrid());
             g.drawLine(x, TOP, x, TOP + height);
             g.drawLine(LEFT, y, LEFT + width, y);
-            g.setColor(new Color(103, 113, 124));
+            g.setColor(palette.mutedText());
             String xLabel = (i * 25) + "%";
             g.drawString(xLabel, x - metrics.stringWidth(xLabel) / 2, TOP + height + 20);
             if (profile != null) {
@@ -140,7 +141,7 @@ final class ProfileEditor extends JPanel {
             }
         }
 
-        g.setColor(new Color(143, 153, 163));
+        g.setColor(palette.chartFrame());
         g.drawRect(LEFT, TOP, width, height);
         if (profile == null) {
             return;
@@ -173,18 +174,18 @@ final class ProfileEditor extends JPanel {
                 || playback.elapsedSeconds() > 0.0)) {
             double normalizedTime = target.normalizedTimeAt(playback.elapsedSeconds());
             int x = LEFT + (int) Math.round(normalizedTime * width);
-            g.setColor(new Color(37, 44, 51, 175));
+            g.setColor(withAlpha(palette.text(), AppTheme.isDarkMode() ? 210 : 175));
             g.setStroke(new BasicStroke(1.5f));
             g.drawLine(x, TOP, x, TOP + height);
             double value = profile.valueAt(normalizedTime);
             int y = toY(value, profile);
-            g.setColor(Color.WHITE);
+            g.setColor(palette.card());
             g.fillOval(x - 6, y - 6, 12, 12);
             g.setColor(target.color());
             g.fillOval(x - 4, y - 4, 8, 8);
         }
 
-        g.setColor(new Color(102, 113, 124));
+        g.setColor(palette.mutedText());
         g.setFont(g.getFont().deriveFont(Font.PLAIN, 10.0f));
         String range = "%s to %s %s".formatted(
                 formatValue(profile.minimum()), formatValue(profile.maximum()), unit);

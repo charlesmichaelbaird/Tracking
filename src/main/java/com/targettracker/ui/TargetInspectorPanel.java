@@ -11,7 +11,6 @@ import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.util.List;
@@ -29,7 +28,7 @@ final class TargetInspectorPanel extends JPanel {
             Runnable onExtrapolateAllTargets) {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBorder(BorderFactory.createEmptyBorder(14, 16, 12, 16));
-        setBackground(Color.WHITE);
+        AppTheme.setRole(this, AppTheme.ROLE_CARD);
         setAlignmentX(LEFT_ALIGNMENT);
 
         JPanel titleRow = new JPanel(new BorderLayout(8, 0));
@@ -47,7 +46,7 @@ final class TargetInspectorPanel extends JPanel {
         add(titleRow);
         add(Box.createVerticalStrut(4));
         JLabel note = new JLabel("Select the target whose path/profile you want to edit.");
-        note.setForeground(new Color(80, 92, 104));
+        note.setForeground(AppTheme.current().mutedText());
         note.setAlignmentX(LEFT_ALIGNMENT);
         add(note);
         add(Box.createVerticalStrut(10));

@@ -41,7 +41,9 @@ final class TrackStitchingAnalysisDetailsWindow {
             List<TrackStitchingAnalyzer.EventResult> events) {
         JFrame frame = new JFrame("Track Stitching Analysis Values");
         frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        frame.setContentPane(createContent(events));
+        JComponent content = createContent(events);
+        AppTheme.applyTo(content);
+        frame.setContentPane(content);
         frame.setSize(new Dimension(1180, 780));
         frame.setLocationRelativeTo(owner);
         frame.setVisible(true);

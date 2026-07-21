@@ -191,17 +191,39 @@ public final class EarthMapCanvasSmokeTest {
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.RACETRACK);
         click(canvas, 420, 280);
         click(canvas, 520, 280);
+        if (!target.path().isEmpty() || canvas.hasPendingPathDirectionSelection()) {
+            throw new AssertionError(
+                    "Racetrack drawing should wait for a width click after length anchors");
+        }
+        click(canvas, 470, 272);
+        double narrowRaceLength = target.surfaceLengthMeters();
+        if (!canvas.hasPendingPathDirectionSelection()) {
+            throw new AssertionError(
+                    "Racetrack drawing should ask for a start point after width is placed");
+        }
+        canvas.finishPath();
+
+        target.clearPath();
+        canvas.setDrawingMode(EarthMapCanvas.DrawingMode.RACETRACK);
+        click(canvas, 420, 280);
+        click(canvas, 520, 280);
+        click(canvas, 470, 220);
+        double wideRaceLength = target.surfaceLengthMeters();
+        if (wideRaceLength <= narrowRaceLength * 1.25) {
+            throw new AssertionError(
+                    "Moving the racetrack width cursor outward should create a wider loop");
+        }
         if (!canvas.hasPendingPathDirectionSelection()) {
             throw new AssertionError(
                     "Racetrack drawing should ask for a start point after the loop is placed");
         }
         GeodeticPoint raceStartBefore = Wgs84.toGeodetic(target.path().get(0));
-        click(canvas, 470, 255);
+        click(canvas, 470, 220);
         if (!canvas.hasPendingPathDirectionSelection()) {
             throw new AssertionError(
                     "Racetrack drawing should ask for direction after the start point is placed");
         }
-        click(canvas, 520, 255);
+        click(canvas, 520, 220);
         if (canvas.hasPendingPathDirectionSelection()) {
             throw new AssertionError(
                     "Racetrack drawing should finish after start point and direction clicks");

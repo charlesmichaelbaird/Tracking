@@ -82,12 +82,16 @@ public final class TrackerFrame extends JFrame {
     private final JToggleButton moveToolButton = new JToggleButton("Move: Off");
     private final JToggleButton modifyToolButton = new JToggleButton("Modify: Off");
     private final JToggleButton trajectoryArrowButton = new JToggleButton("Arrow: On", true);
+    private final JToggleButton darkModeButton = new JToggleButton("Dark");
     private final Icon moveToolIcon = new MoveToolIcon();
     private final Icon modifyToolIcon = new ModifyToolIcon();
     private final Icon trajectoryArrowIcon = new TrajectoryArrowIcon();
+    private final Icon themeIcon = new ThemeIcon();
     private final JToggleButton generationModeButton =
             new JToggleButton("Scenario Generation", true);
     private final JToggleButton analysisModeButton = new JToggleButton("Analysis Mode");
+    private JPanel headerPanel;
+    private JPanel statusBarPanel;
     private TargetTrajectory selectedTarget;
     private TargetTrajectory copiedTarget;
     private BlackoutRegion selectedBlackoutRegion;
@@ -149,6 +153,7 @@ public final class TrackerFrame extends JFrame {
             }
         });
         refreshSavedScenarioChoices();
+        AppTheme.setRole(mapArea, AppTheme.ROLE_APP);
         earthMapCanvas = new EarthMapCanvas(
                 model,
                 playback,
@@ -208,16 +213,18 @@ public final class TrackerFrame extends JFrame {
         motionTelemetryPanel.setSelectedTarget(selectedTarget);
         updateStructuralEditingControls();
         refreshTelemetry();
+        refreshTheme();
         installTargetCopyPasteShortcuts();
         setLocationRelativeTo(null);
     }
 
     private JPanel createHeader() {
         JPanel container = new JPanel();
+        headerPanel = container;
         container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
-        container.setBackground(Color.WHITE);
+        AppTheme.setRole(container, AppTheme.ROLE_HEADER);
         container.setBorder(BorderFactory.createMatteBorder(
-                0, 0, 1, 0, new Color(214, 220, 227)));
+                0, 0, 1, 0, AppTheme.current().border()));
 
         JPanel titleRow = new JPanel(new BorderLayout());
         titleRow.setOpaque(false);
@@ -227,7 +234,7 @@ public final class TrackerFrame extends JFrame {
         titleRow.add(title, BorderLayout.WEST);
         JLabel frameLabel = new JLabel(
                 "WGS-84 ECEF • Plate Carrée view • Ellipsoidal altitude");
-        frameLabel.setForeground(new Color(91, 103, 115));
+        frameLabel.setForeground(AppTheme.current().mutedText());
         JPanel topRightControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         topRightControls.setOpaque(false);
         moveToolButton.setToolTipText(
@@ -254,13 +261,22 @@ public final class TrackerFrame extends JFrame {
         trajectoryArrowButton.setFocusPainted(false);
         trajectoryArrowButton.addActionListener(event ->
                 setTrajectoryArrowsVisible(trajectoryArrowButton.isSelected()));
+        darkModeButton.setToolTipText("Toggle dark mode");
+        darkModeButton.setIcon(themeIcon);
+        darkModeButton.setOpaque(true);
+        darkModeButton.setContentAreaFilled(true);
+        darkModeButton.setFocusPainted(false);
+        darkModeButton.addActionListener(event ->
+                setDarkMode(darkModeButton.isSelected()));
         refreshMoveToolButton();
         refreshModifyToolButton();
         refreshTrajectoryArrowButton();
+        refreshDarkModeButton();
         topRightControls.add(frameLabel);
         topRightControls.add(moveToolButton);
         topRightControls.add(modifyToolButton);
         topRightControls.add(trajectoryArrowButton);
+        topRightControls.add(darkModeButton);
         titleRow.add(topRightControls, BorderLayout.EAST);
         container.add(titleRow);
 
@@ -336,15 +352,49 @@ public final class TrackerFrame extends JFrame {
 
     private JPanel createStatusBar() {
         JPanel statusBar = new JPanel(new BorderLayout());
-        statusBar.setBackground(new Color(245, 247, 250));
+        statusBarPanel = statusBar;
+        AppTheme.setRole(statusBar, AppTheme.ROLE_STATUS);
         statusBar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(214, 220, 227)),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.current().border()),
                 BorderFactory.createEmptyBorder(5, 10, 5, 10)));
-        statusLabel.setForeground(new Color(76, 88, 100));
-        scenarioTimeLabel.setForeground(new Color(76, 88, 100));
+        statusLabel.setForeground(AppTheme.current().mutedText());
+        scenarioTimeLabel.setForeground(AppTheme.current().mutedText());
         statusBar.add(statusLabel, BorderLayout.WEST);
         statusBar.add(scenarioTimeLabel, BorderLayout.EAST);
         return statusBar;
+    }
+
+    private void setDarkMode(boolean enabled) {
+        if (darkModeButton.isSelected() != enabled) {
+            darkModeButton.setSelected(enabled);
+        }
+        AppTheme.setDarkMode(enabled);
+        refreshTheme();
+        statusLabel.setText(enabled ? "Dark mode enabled" : "Light mode enabled");
+    }
+
+    private void refreshTheme() {
+        getContentPane().setBackground(AppTheme.current().appBackground());
+        AppTheme.applyTo(this);
+        if (headerPanel != null) {
+            headerPanel.setBorder(BorderFactory.createMatteBorder(
+                    0, 0, 1, 0, AppTheme.current().border()));
+        }
+        if (statusBarPanel != null) {
+            statusBarPanel.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.current().border()),
+                    BorderFactory.createEmptyBorder(5, 10, 5, 10)));
+        }
+        statusLabel.setForeground(AppTheme.current().mutedText());
+        scenarioTimeLabel.setForeground(AppTheme.current().mutedText());
+        refreshMoveToolButton();
+        refreshModifyToolButton();
+        refreshTrajectoryArrowButton();
+        refreshDarkModeButton();
+        timelinePanel.refreshTheme();
+        earthMapCanvas.repaint();
+        revalidate();
+        repaint();
     }
 
     private void addTarget() {
@@ -479,15 +529,16 @@ public final class TrackerFrame extends JFrame {
 
     private void refreshMoveToolButton() {
         boolean selected = moveToolButton.isSelected();
+        AppTheme.Palette palette = AppTheme.current();
         moveToolButton.setText(selected ? "Move: On" : "Move: Off");
         moveToolButton.setBackground(selected
-                ? new Color(255, 218, 92)
-                : new Color(235, 238, 242));
-        moveToolButton.setForeground(new Color(28, 36, 44));
+                ? palette.moveSelectedBackground()
+                : palette.buttonBackground());
+        moveToolButton.setForeground(palette.buttonText());
         moveToolButton.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(selected
-                        ? new Color(166, 111, 0)
-                        : new Color(168, 176, 184)),
+                        ? palette.warning()
+                        : palette.border()),
                 BorderFactory.createEmptyBorder(3, 8, 3, 8)));
         moveToolButton.repaint();
     }
@@ -526,15 +577,16 @@ public final class TrackerFrame extends JFrame {
 
     private void refreshModifyToolButton() {
         boolean selected = modifyToolButton.isSelected();
+        AppTheme.Palette palette = AppTheme.current();
         modifyToolButton.setText(selected ? "Modify: On" : "Modify: Off");
         modifyToolButton.setBackground(selected
-                ? new Color(203, 236, 210)
-                : new Color(235, 238, 242));
-        modifyToolButton.setForeground(new Color(28, 36, 44));
+                ? palette.modifySelectedBackground()
+                : palette.buttonBackground());
+        modifyToolButton.setForeground(palette.buttonText());
         modifyToolButton.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(selected
-                        ? new Color(52, 130, 72)
-                        : new Color(168, 176, 184)),
+                        ? palette.success()
+                        : palette.border()),
                 BorderFactory.createEmptyBorder(3, 8, 3, 8)));
         modifyToolButton.repaint();
     }
@@ -552,17 +604,34 @@ public final class TrackerFrame extends JFrame {
 
     private void refreshTrajectoryArrowButton() {
         boolean selected = trajectoryArrowButton.isSelected();
+        AppTheme.Palette palette = AppTheme.current();
         trajectoryArrowButton.setText(selected ? "Arrow: On" : "Arrow: Off");
         trajectoryArrowButton.setBackground(selected
-                ? new Color(199, 231, 255)
-                : new Color(235, 238, 242));
-        trajectoryArrowButton.setForeground(new Color(28, 36, 44));
+                ? palette.arrowSelectedBackground()
+                : palette.buttonBackground());
+        trajectoryArrowButton.setForeground(palette.buttonText());
         trajectoryArrowButton.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(selected
-                        ? new Color(61, 126, 174)
-                        : new Color(168, 176, 184)),
+                        ? palette.selectionBackground()
+                        : palette.border()),
                 BorderFactory.createEmptyBorder(3, 8, 3, 8)));
         trajectoryArrowButton.repaint();
+    }
+
+    private void refreshDarkModeButton() {
+        boolean selected = darkModeButton.isSelected();
+        AppTheme.Palette palette = AppTheme.current();
+        darkModeButton.setText(selected ? "Light" : "Dark");
+        darkModeButton.setBackground(selected
+                ? palette.selectionBackground()
+                : palette.buttonBackground());
+        darkModeButton.setForeground(palette.buttonText());
+        darkModeButton.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(selected
+                        ? palette.selectionBackground()
+                        : palette.border()),
+                BorderFactory.createEmptyBorder(3, 8, 3, 8)));
+        darkModeButton.repaint();
     }
 
     private void clearSelectedPath() {
@@ -1280,6 +1349,8 @@ public final class TrackerFrame extends JFrame {
                 timelinePanel,
                 this::exitTrackStitchingAnalysis,
                 statusLabel::setText);
+        AppTheme.applyTo(stitchingAnalysisPanel);
+        AppTheme.applyTo(stitchingAnalysisPanel.tabStrip());
         mapArea.add(stitchingAnalysisPanel.tabStrip(), BorderLayout.NORTH);
         remove(controlSidebar);
         add(stitchingAnalysisPanel, BorderLayout.EAST);
@@ -1327,6 +1398,53 @@ public final class TrackerFrame extends JFrame {
         }
         int totalSeconds = Math.max(0, (int) Math.round(seconds));
         return "%02d:%02d".formatted(totalSeconds / 60, totalSeconds % 60);
+    }
+
+    private final class ThemeIcon implements Icon {
+        private static final int SIZE = 14;
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            try {
+                g2.setRenderingHint(
+                        RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                if (AppTheme.isDarkMode()) {
+                    g2.setColor(new Color(255, 216, 92));
+                    g2.fillOval(x + 2, y + 1, 10, 10);
+                    g2.setColor(component.getBackground());
+                    g2.fillOval(x + 6, y - 1, 10, 12);
+                    g2.setColor(new Color(255, 216, 92, 165));
+                    g2.drawOval(x + 2, y + 1, 10, 10);
+                } else {
+                    g2.setColor(new Color(246, 178, 44));
+                    g2.fillOval(x + 4, y + 4, 6, 6);
+                    g2.setStroke(new BasicStroke(1.2f, BasicStroke.CAP_ROUND,
+                            BasicStroke.JOIN_ROUND));
+                    for (int i = 0; i < 8; i++) {
+                        double angle = i * Math.PI / 4.0;
+                        int innerX = x + 7 + (int) Math.round(Math.cos(angle) * 5.0);
+                        int innerY = y + 7 + (int) Math.round(Math.sin(angle) * 5.0);
+                        int outerX = x + 7 + (int) Math.round(Math.cos(angle) * 6.5);
+                        int outerY = y + 7 + (int) Math.round(Math.sin(angle) * 6.5);
+                        g2.drawLine(innerX, innerY, outerX, outerY);
+                    }
+                }
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return SIZE;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return SIZE;
+        }
     }
 
     private final class MoveToolIcon implements Icon {

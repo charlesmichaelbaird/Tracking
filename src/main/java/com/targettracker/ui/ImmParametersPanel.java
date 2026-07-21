@@ -16,7 +16,6 @@ import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridLayout;
@@ -48,7 +47,7 @@ final class ImmParametersPanel extends JPanel {
         this.settings = settings;
         this.onParametersChanged = onParametersChanged;
         setBorder(BorderFactory.createEmptyBorder(15, 16, 15, 16));
-        setBackground(new Color(246, 248, 251));
+        AppTheme.setRole(this, AppTheme.ROLE_APP);
 
         JPanel header = new JPanel();
         header.setOpaque(false);
@@ -58,7 +57,7 @@ final class ImmParametersPanel extends JPanel {
         title.setAlignmentX(LEFT_ALIGNMENT);
         JLabel note = new JLabel("<html>ECEF state: position, velocity, acceleration. "
                 + "At least one model must remain enabled.</html>");
-        note.setForeground(new Color(80, 92, 104));
+        note.setForeground(AppTheme.current().mutedText());
         note.setAlignmentX(LEFT_ALIGNMENT);
         header.add(title);
         header.add(Box.createVerticalStrut(4));
@@ -66,9 +65,9 @@ final class ImmParametersPanel extends JPanel {
         add(header, BorderLayout.NORTH);
 
         JPanel form = new JPanel();
-        form.setBackground(Color.WHITE);
+        AppTheme.setRole(form, AppTheme.ROLE_CARD);
         form.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(211, 218, 225)),
+                AppTheme.lineBorder(),
                 BorderFactory.createEmptyBorder(10, 12, 10, 12)));
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
         ImmParameters defaults = settings.parameters();
@@ -116,7 +115,7 @@ final class ImmParametersPanel extends JPanel {
 
         JPanel footer = new JPanel(new BorderLayout(8, 0));
         footer.setOpaque(false);
-        validationLabel.setForeground(new Color(44, 112, 62));
+        validationLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
         footer.add(validationLabel, BorderLayout.CENTER);
         JButton applyButton = new JButton("Apply");
         applyButton.addActionListener(event -> commitParameters());
@@ -138,13 +137,13 @@ final class ImmParametersPanel extends JPanel {
         if (cvNoise == null || caNoise == null || association == null
                 || timeout == null || uncertainty == null || matrix == null) {
             validationLabel.setText("Correct the highlighted value(s)");
-            validationLabel.setForeground(new Color(177, 43, 43));
+            validationLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
             return false;
         }
         settings.setParameters(new ImmParameters(
                 models, cvNoise, caNoise, association, timeout, uncertainty, matrix));
         validationLabel.setText("Values applied immediately");
-        validationLabel.setForeground(new Color(44, 112, 62));
+        validationLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
         onParametersChanged.run();
         return true;
     }
@@ -153,7 +152,7 @@ final class ImmParametersPanel extends JPanel {
         if (!cvButton.isSelected() && !caButton.isSelected()) {
             changedButton.setSelected(true);
             validationLabel.setText("At least one model must remain enabled");
-            validationLabel.setForeground(new Color(177, 43, 43));
+            validationLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
             return;
         }
         double[][] defaults = selectedModels().size() == 1
@@ -214,8 +213,8 @@ final class ImmParametersPanel extends JPanel {
             if (Math.abs(rowSum - 1.0) > 1.0e-6) {
                 valid = false;
                 for (int column = 0; column < size; column++) {
-                    transitionFields.get(row * size + column)
-                            .setBackground(new Color(255, 224, 224));
+                    AppTheme.styleTextComponent(
+                            transitionFields.get(row * size + column), true);
                 }
             }
         }
@@ -285,10 +284,10 @@ final class ImmParametersPanel extends JPanel {
         try {
             double value = Double.parseDouble(field.getText().trim());
             boolean valid = Double.isFinite(value) && predicate.test(value);
-            field.setBackground(valid ? Color.WHITE : new Color(255, 224, 224));
+            AppTheme.styleTextComponent(field, !valid);
             return valid ? value : null;
         } catch (NumberFormatException exception) {
-            field.setBackground(new Color(255, 224, 224));
+            AppTheme.styleTextComponent(field, true);
             return null;
         }
     }

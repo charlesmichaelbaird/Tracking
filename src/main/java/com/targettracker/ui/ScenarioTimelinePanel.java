@@ -42,9 +42,9 @@ final class ScenarioTimelinePanel extends JPanel {
         this.model = model;
         this.playback = playback;
         this.recorder = recorder;
-        setBackground(new Color(247, 249, 251));
+        AppTheme.setRole(this, AppTheme.ROLE_STATUS);
         setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(210, 216, 222)),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.current().border()),
                 BorderFactory.createEmptyBorder(5, 10, 4, 10)));
         setPreferredSize(new Dimension(700, 84));
 
@@ -53,7 +53,7 @@ final class ScenarioTimelinePanel extends JPanel {
         JLabel title = new JLabel("Scenario timeline");
         title.setFont(title.getFont().deriveFont(Font.BOLD));
         controls.add(title);
-        stateLabel.setForeground(new Color(84, 96, 108));
+        stateLabel.setForeground(AppTheme.current().mutedText());
         controls.add(stateLabel);
         add(controls, BorderLayout.NORTH);
         add(ruler, BorderLayout.CENTER);
@@ -63,6 +63,7 @@ final class ScenarioTimelinePanel extends JPanel {
     void refresh() {
         boolean hasScenario = playback.durationSeconds() > 0.0;
         ruler.setEnabled(playback.canSeek());
+        stateLabel.setForeground(AppTheme.current().mutedText());
 
         if (recorder.isActive()) {
             stateLabel.setText("Track files are being written — seeking temporarily disabled");
@@ -78,6 +79,14 @@ final class ScenarioTimelinePanel extends JPanel {
             stateLabel.setText("Create a runnable scenario first");
         }
         ruler.repaint();
+    }
+
+    void refreshTheme() {
+        AppTheme.setRole(this, AppTheme.ROLE_STATUS);
+        setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.current().border()),
+                BorderFactory.createEmptyBorder(5, 10, 4, 10)));
+        refresh();
     }
 
     void setCandidateMarkers(List<Double> times, double selectedTime) {
@@ -153,7 +162,8 @@ final class ScenarioTimelinePanel extends JPanel {
                 int baseline = 19;
                 double duration = playback.durationSeconds();
 
-                g.setColor(isEnabled() ? new Color(68, 77, 86) : new Color(143, 150, 157));
+                AppTheme.Palette palette = AppTheme.current();
+                g.setColor(isEnabled() ? palette.text() : palette.mutedText());
                 g.setStroke(new BasicStroke(1.4f));
                 g.drawLine(LEFT, baseline, LEFT + width, baseline);
 
@@ -191,7 +201,7 @@ final class ScenarioTimelinePanel extends JPanel {
                         ? 0.0
                         : Math.max(0.0, Math.min(1.0, playback.elapsedSeconds() / duration));
                 int playheadX = LEFT + (int) Math.round(fraction * width);
-                g.setColor(Color.BLACK);
+                g.setColor(palette.text());
                 g.fillRect(playheadX - 2, 1, 4, baseline + 8);
                 int[] triangleX = {playheadX - 5, playheadX + 5, playheadX};
                 int[] triangleY = {1, 1, 7};

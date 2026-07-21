@@ -14,7 +14,6 @@ import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.JButton;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -53,7 +52,7 @@ final class PresetScenarioPanel extends JPanel {
         this.dialogParent = dialogParent;
         this.listener = listener;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-        setBackground(new Color(246, 248, 251));
+        AppTheme.setRole(this, AppTheme.ROLE_APP);
         setBorder(BorderFactory.createEmptyBorder(18, 18, 18, 18));
 
         JLabel title = new JLabel("Scenario");
@@ -63,13 +62,13 @@ final class PresetScenarioPanel extends JPanel {
         add(Box.createVerticalStrut(4));
         JLabel note = new JLabel("<html>Load a generated maneuver scenario, or select "
                 + "User generated to unlock target editing.</html>");
-        note.setForeground(new Color(80, 92, 104));
+        note.setForeground(AppTheme.current().mutedText());
         note.setAlignmentX(LEFT_ALIGNMENT);
         add(note);
         add(Box.createVerticalStrut(16));
 
         JLabel presetLabel = new JLabel("Scenario type");
-        presetLabel.setForeground(new Color(61, 73, 84));
+        presetLabel.setForeground(AppTheme.current().mutedText());
         presetLabel.setAlignmentX(LEFT_ALIGNMENT);
         add(presetLabel);
         add(Box.createVerticalStrut(4));
@@ -103,7 +102,7 @@ final class PresetScenarioPanel extends JPanel {
         applyButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
         add(applyButton);
         add(Box.createVerticalStrut(10));
-        modeLabel.setForeground(new Color(91, 103, 115));
+        modeLabel.setForeground(AppTheme.statusColor(AppTheme.Status.MUTED));
         modeLabel.setAlignmentX(LEFT_ALIGNMENT);
         add(modeLabel);
         add(Box.createVerticalStrut(18));
@@ -126,7 +125,7 @@ final class PresetScenarioPanel extends JPanel {
             durationField.setText(formatOptionalDuration(scenario.scenarioLengthSeconds()));
             configureScenarioActionButton();
             modeLabel.setText("Saved user scenario");
-            modeLabel.setForeground(new Color(44, 112, 62));
+            modeLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
             listener.loadSavedScenario(scenario);
             return;
         }
@@ -135,7 +134,7 @@ final class PresetScenarioPanel extends JPanel {
             durationField.setText("");
             configureScenarioActionButton();
             modeLabel.setText("Manual editing");
-            modeLabel.setForeground(new Color(91, 103, 115));
+            modeLabel.setForeground(AppTheme.statusColor(AppTheme.Status.MUTED));
             listener.selectUserGeneratedMode();
             listener.setUserScenarioLength(null);
             return;
@@ -173,7 +172,7 @@ final class PresetScenarioPanel extends JPanel {
                     parseDuration(durationField.getText()));
             listener.generatePreset(preset, parameters);
             modeLabel.setText("Preset locked");
-            modeLabel.setForeground(new Color(132, 74, 17));
+            modeLabel.setForeground(AppTheme.statusColor(AppTheme.Status.WARNING));
         } catch (IllegalArgumentException exception) {
             JOptionPane.showMessageDialog(
                     dialogParent,
@@ -195,7 +194,7 @@ final class PresetScenarioPanel extends JPanel {
             } else {
                 modeLabel.setText("Manual length set");
             }
-            modeLabel.setForeground(new Color(44, 112, 62));
+            modeLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
         } catch (IllegalArgumentException exception) {
             JOptionPane.showMessageDialog(
                     dialogParent,
@@ -220,16 +219,16 @@ final class PresetScenarioPanel extends JPanel {
         configureScenarioActionButton();
         if (!enabled) {
             modeLabel.setText("Disabled in Analysis Mode");
-            modeLabel.setForeground(new Color(132, 74, 17));
+            modeLabel.setForeground(AppTheme.statusColor(AppTheme.Status.WARNING));
         } else if (selected instanceof SavedScenarioDefinition) {
             modeLabel.setText("Saved user scenario");
-            modeLabel.setForeground(new Color(44, 112, 62));
+            modeLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
         } else if (preset == null || preset.isUserGenerated()) {
             modeLabel.setText("Manual editing");
-            modeLabel.setForeground(new Color(91, 103, 115));
+            modeLabel.setForeground(AppTheme.statusColor(AppTheme.Status.MUTED));
         } else {
             modeLabel.setText("Preset selected — press Apply");
-            modeLabel.setForeground(new Color(132, 74, 17));
+            modeLabel.setForeground(AppTheme.statusColor(AppTheme.Status.WARNING));
         }
     }
 
@@ -279,7 +278,7 @@ final class PresetScenarioPanel extends JPanel {
         panel.setAlignmentX(LEFT_ALIGNMENT);
         JLabel label = new JLabel("Save user-generated scenario");
         label.setFont(label.getFont().deriveFont(Font.BOLD, 14.0f));
-        label.setForeground(new Color(61, 73, 84));
+        label.setForeground(AppTheme.current().mutedText());
         label.setAlignmentX(LEFT_ALIGNMENT);
         panel.add(label);
         panel.add(Box.createVerticalStrut(6));

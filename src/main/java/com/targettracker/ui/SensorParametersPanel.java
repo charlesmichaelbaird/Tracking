@@ -20,7 +20,6 @@ import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridLayout;
@@ -65,7 +64,7 @@ final class SensorParametersPanel extends JPanel {
         this.onBlackoutRegionSelected = onBlackoutRegionSelected;
         this.onRemoveBlackoutRegionRequested = onRemoveBlackoutRegionRequested;
         setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
-        setBackground(new Color(246, 248, 251));
+        AppTheme.setRole(this, AppTheme.ROLE_APP);
 
         JPanel header = new JPanel();
         header.setOpaque(false);
@@ -75,7 +74,7 @@ final class SensorParametersPanel extends JPanel {
         title.setAlignmentX(LEFT_ALIGNMENT);
         JLabel note = new JLabel("<html>Omniscient looks for every target.<br>"
                 + "Select a value and type to overwrite it.</html>");
-        note.setForeground(new Color(80, 92, 104));
+        note.setForeground(AppTheme.current().mutedText());
         note.setAlignmentX(LEFT_ALIGNMENT);
         header.add(title);
         header.add(Box.createVerticalStrut(4));
@@ -83,9 +82,9 @@ final class SensorParametersPanel extends JPanel {
         add(header, BorderLayout.NORTH);
 
         JPanel form = new JPanel();
-        form.setBackground(Color.WHITE);
+        AppTheme.setRole(form, AppTheme.ROLE_CARD);
         form.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(211, 218, 225)),
+                AppTheme.lineBorder(),
                 BorderFactory.createEmptyBorder(12, 14, 8, 14)));
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
         SensorParameters defaults = sensorSettings.parameters();
@@ -127,7 +126,7 @@ final class SensorParametersPanel extends JPanel {
 
         JPanel footer = new JPanel(new BorderLayout(8, 0));
         footer.setOpaque(false);
-        validationLabel.setForeground(new Color(44, 112, 62));
+        validationLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
         footer.add(validationLabel, BorderLayout.CENTER);
         JButton applyButton = new JButton("Apply");
         applyButton.addActionListener(event -> commitSensorParameters());
@@ -145,7 +144,7 @@ final class SensorParametersPanel extends JPanel {
         if (lookTiming == null || lookOffset == null || positionDeviation == null
                 || velocityDeviation == null || probability == null) {
             validationLabel.setText("Correct the highlighted value(s)");
-            validationLabel.setForeground(new Color(177, 43, 43));
+            validationLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
             return false;
         }
 
@@ -153,7 +152,7 @@ final class SensorParametersPanel extends JPanel {
                 lookTiming, lookOffset, positionDeviation, velocityDeviation,
                 probability, sensorSettings.parameters().previousMeasurementsToShow()));
         validationLabel.setText("Values applied immediately");
-        validationLabel.setForeground(new Color(44, 112, 62));
+        validationLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
         onParametersChanged.run();
         return true;
     }
@@ -166,7 +165,7 @@ final class SensorParametersPanel extends JPanel {
         List<BlackoutRegion> regions = model.blackoutRegions();
         if (regions.isEmpty()) {
             JLabel empty = new JLabel("No blackout regions defined");
-            empty.setForeground(new Color(91, 103, 115));
+            empty.setForeground(AppTheme.current().mutedText());
             blackoutListPanel.add(empty);
         } else {
             int index = 1;
@@ -179,7 +178,7 @@ final class SensorParametersPanel extends JPanel {
                 row.setText("<html>%.2f km by %.2f km</html>".formatted(
                         region.widthMeters() / 1_000.0,
                         region.heightMeters() / 1_000.0));
-                row.setForeground(new Color(55, 65, 75));
+                row.setForeground(AppTheme.current().mutedText());
                 blackoutListPanel.add(row);
                 JButton removeButton = new JButton("Remove");
                 removeButton.setToolTipText("Remove this blackout region");
@@ -202,7 +201,7 @@ final class SensorParametersPanel extends JPanel {
                 BorderFactory.createEmptyBorder(4, 6, 6, 6)));
 
         JLabel note = new JLabel("<html>Sensor looks are suppressed inside shaded regions.</html>");
-        note.setForeground(new Color(80, 92, 104));
+        note.setForeground(AppTheme.current().mutedText());
         JButton addButton = new JButton("+");
         addButton.setToolTipText("Add a user-defined blackout rectangle with two map clicks");
         addButton.addActionListener(event -> onAddBlackoutRegionRequested.run());
@@ -237,7 +236,7 @@ final class SensorParametersPanel extends JPanel {
         });
         blackoutListPanel.add(blackoutSelector);
         blackoutListPanel.add(Box.createVerticalStrut(6));
-        blackoutDetailsLabel.setForeground(new Color(55, 65, 75));
+        blackoutDetailsLabel.setForeground(AppTheme.current().mutedText());
         blackoutDetailsLabel.setAlignmentX(LEFT_ALIGNMENT);
         blackoutListPanel.add(blackoutDetailsLabel);
         blackoutListPanel.add(Box.createVerticalStrut(6));
@@ -312,7 +311,7 @@ final class SensorParametersPanel extends JPanel {
 
     private static JTextField addField(JPanel panel, String name, double value) {
         JLabel label = new JLabel(name);
-        label.setForeground(new Color(61, 73, 84));
+        label.setForeground(AppTheme.current().mutedText());
         label.setAlignmentX(LEFT_ALIGNMENT);
         panel.add(label);
         panel.add(Box.createVerticalStrut(3));
@@ -334,10 +333,10 @@ final class SensorParametersPanel extends JPanel {
         try {
             double value = Double.parseDouble(field.getText().trim());
             boolean valid = Double.isFinite(value) && isValid.test(value);
-            field.setBackground(valid ? Color.WHITE : new Color(255, 224, 224));
+            AppTheme.styleTextComponent(field, !valid);
             return valid ? value : null;
         } catch (NumberFormatException exception) {
-            field.setBackground(new Color(255, 224, 224));
+            AppTheme.styleTextComponent(field, true);
             return null;
         }
     }
