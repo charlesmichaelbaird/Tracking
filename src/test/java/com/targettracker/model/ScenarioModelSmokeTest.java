@@ -1,5 +1,7 @@
 package com.targettracker.model;
 
+import java.util.List;
+
 /** Deterministic checks for scenario-level target and blackout bookkeeping. */
 public final class ScenarioModelSmokeTest {
     private ScenarioModelSmokeTest() {
@@ -9,6 +11,7 @@ public final class ScenarioModelSmokeTest {
         verifyTargetIdsAreReused();
         verifyTargetCopiesAreIndependent();
         verifyLongestTargetDefinesScenarioExtrapolation();
+        verifyLoopTargetsRepeatDuringExtrapolation();
         verifyBlackoutIdsAreReused();
         System.out.println("ScenarioModelSmokeTest passed");
     }
@@ -127,6 +130,48 @@ public final class ScenarioModelSmokeTest {
         model.removeTarget(longTarget);
         if (Math.abs(model.durationSeconds() - shortBaseDuration) > 1.0e-6) {
             throw new AssertionError("Extrapolated path length should not define the base scenario");
+        }
+    }
+
+    private static void verifyLoopTargetsRepeatDuringExtrapolation() {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory loopTarget = model.addTarget();
+        loopTarget.replacePath(List.of(
+                Wgs84.toEcef(new GeodeticPoint(0.0, 0.0, 0.0)),
+                Wgs84.toEcef(new GeodeticPoint(0.0, 0.01, 0.0)),
+                Wgs84.toEcef(new GeodeticPoint(0.01, 0.01, 0.0)),
+                Wgs84.toEcef(new GeodeticPoint(0.01, 0.0, 0.0)),
+                Wgs84.toEcef(new GeodeticPoint(0.0, 0.0, 0.0))
+        ), TargetTrajectory.ExtrapolationMode.REPEAT_LOOP);
+        double loopDuration = loopTarget.durationSeconds();
+        double loopLength = loopTarget.surfaceLengthMeters();
+
+        TargetTrajectory longTarget = model.addTarget();
+        GeodeticPoint start = new GeodeticPoint(2.0, 0.0, 0.0);
+        longTarget.addPathPoint(Wgs84.toEcef(start));
+        longTarget.addPathPoint(Wgs84.toEcef(Wgs84Geodesic.direct(
+                start,
+                Math.PI / 2.0,
+                loopLength * 2.25,
+                0.0)));
+
+        if (model.extrapolateTargetsToScenarioDuration() != 1) {
+            throw new AssertionError("The shorter loop target should be extrapolated");
+        }
+        if (loopTarget.extrapolationMode() != TargetTrajectory.ExtrapolationMode.REPEAT_LOOP) {
+            throw new AssertionError("Loop targets should keep their repeat extrapolation mode");
+        }
+        if (Math.abs(loopTarget.durationSeconds() - longTarget.durationSeconds()) > 1.0e-3) {
+            throw new AssertionError("Loop extrapolation should reach the scenario duration");
+        }
+        if (loopTarget.positionAt(loopDuration).distanceTo(loopTarget.positionAt(0.0)) > 5.0) {
+            throw new AssertionError("Loop extrapolation should repeat the maneuver after one lap");
+        }
+        if (!loopTarget.removeExtrapolation()) {
+            throw new AssertionError("Loop extrapolation should be removable");
+        }
+        if (Math.abs(loopTarget.surfaceLengthMeters() - loopLength) > 1.0e-6) {
+            throw new AssertionError("Removing loop extrapolation should restore the original loop");
         }
     }
 

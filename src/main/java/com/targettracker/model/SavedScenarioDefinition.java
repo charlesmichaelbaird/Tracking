@@ -35,11 +35,22 @@ public record SavedScenarioDefinition(
     public record TargetData(
             List<GeodeticPoint> path,
             List<Double> velocitySamples,
-            List<Double> altitudeSamples) {
+            List<Double> altitudeSamples,
+            TargetTrajectory.ExtrapolationMode extrapolationMode) {
+        public TargetData(
+                List<GeodeticPoint> path,
+                List<Double> velocitySamples,
+                List<Double> altitudeSamples) {
+            this(path, velocitySamples, altitudeSamples, TargetTrajectory.ExtrapolationMode.LINEAR);
+        }
+
         public TargetData {
             path = path == null ? List.of() : List.copyOf(path);
             velocitySamples = velocitySamples == null ? List.of() : List.copyOf(velocitySamples);
             altitudeSamples = altitudeSamples == null ? List.of() : List.copyOf(altitudeSamples);
+            extrapolationMode = extrapolationMode == null
+                    ? TargetTrajectory.ExtrapolationMode.LINEAR
+                    : extrapolationMode;
         }
     }
 }

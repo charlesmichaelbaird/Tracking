@@ -9,6 +9,11 @@ import java.util.Objects;
 public final class TargetTrajectory {
     private static final double TIME_EPSILON_SECONDS = 1.0e-6;
 
+    public enum ExtrapolationMode {
+        LINEAR,
+        REPEAT_LOOP
+    }
+
     private final String id;
     private final Color color;
     private final List<EcefPoint> path = new ArrayList<>();
@@ -19,6 +24,7 @@ public final class TargetTrajectory {
     private final ScalarProfile altitudeProfile = new ScalarProfile(0.0, 20_000.0, 1_000.0);
     private double surfaceLengthMeters;
     private boolean extrapolatedToScenarioLength;
+    private ExtrapolationMode extrapolationMode = ExtrapolationMode.LINEAR;
 
     public TargetTrajectory(String id, Color color) {
         this.id = id;
@@ -42,11 +48,13 @@ public final class TargetTrajectory {
         segmentLengthsMeters.clear();
         smoothingUndoPath.clear();
         clearExtrapolationState();
+        extrapolationMode = ExtrapolationMode.LINEAR;
         surfaceLengthMeters = 0.0;
     }
 
     public void addPathPoint(EcefPoint point) {
         clearExtrapolationState();
+        extrapolationMode = ExtrapolationMode.LINEAR;
         addNormalizedPathPoint(point);
     }
 
@@ -66,6 +74,11 @@ public final class TargetTrajectory {
     }
 
     public void replacePath(List<EcefPoint> points) {
+        replacePath(points, ExtrapolationMode.LINEAR);
+    }
+
+    public void replacePath(List<EcefPoint> points, ExtrapolationMode extrapolationMode) {
+        this.extrapolationMode = Objects.requireNonNull(extrapolationMode, "extrapolationMode");
         replacePath(points, true);
     }
 
@@ -83,6 +96,7 @@ public final class TargetTrajectory {
         extrapolationBasePath.clear();
         extrapolationBasePath.addAll(source.extrapolationBasePath);
         extrapolatedToScenarioLength = source.extrapolatedToScenarioLength;
+        extrapolationMode = source.extrapolationMode;
         copyProfile(source.velocityProfile, velocityProfile);
         copyProfile(source.altitudeProfile, altitudeProfile);
     }
@@ -136,6 +150,10 @@ public final class TargetTrajectory {
         return extrapolatedToScenarioLength;
     }
 
+    public ExtrapolationMode extrapolationMode() {
+        return extrapolationMode;
+    }
+
     public boolean canExtrapolateTo(double scenarioLengthSeconds) {
         return path.size() >= 2
                 && Double.isFinite(scenarioLengthSeconds)
@@ -166,15 +184,14 @@ public final class TargetTrajectory {
             return false;
         }
 
-        List<EcefPoint> extended = new ArrayList<>(path);
-        int samples = Math.max(1, Math.min(96, (int) Math.ceil(extraLength / 20_000.0)));
-        for (int sample = 1; sample <= samples; sample++) {
-            double distance = extraLength * sample / samples;
-            extended.add(Wgs84.toEcef(Wgs84Geodesic.direct(
-                    last,
-                    finalLeg.initialBearingRadians(),
-                    distance,
-                    0.0)));
+        List<EcefPoint> extended = switch (extrapolationMode) {
+            case REPEAT_LOOP -> loopExtrapolatedPath(path, extraLength);
+            case LINEAR -> linearExtrapolatedPath(path, last, finalLeg.initialBearingRadians(),
+                    extraLength);
+        };
+        if (extended.size() <= path.size()) {
+            clearExtrapolationState();
+            return false;
         }
         replacePathInternal(extended, false, false);
         extrapolationBasePath.clear();
@@ -344,6 +361,78 @@ public final class TargetTrajectory {
             length += surfaceDistance(points.get(index - 1), points.get(index));
         }
         return length;
+    }
+
+    private static List<EcefPoint> linearExtrapolatedPath(
+            List<EcefPoint> basePath,
+            GeodeticPoint last,
+            double bearingRadians,
+            double extraLength) {
+        List<EcefPoint> extended = new ArrayList<>(basePath);
+        int samples = Math.max(1, Math.min(96, (int) Math.ceil(extraLength / 20_000.0)));
+        for (int sample = 1; sample <= samples; sample++) {
+            double distance = extraLength * sample / samples;
+            extended.add(Wgs84.toEcef(Wgs84Geodesic.direct(
+                    last,
+                    bearingRadians,
+                    distance,
+                    0.0)));
+        }
+        return extended;
+    }
+
+    private static List<EcefPoint> loopExtrapolatedPath(
+            List<EcefPoint> basePath,
+            double extraLength) {
+        List<EcefPoint> cycle = repeatCyclePath(basePath);
+        if (cycle.size() < 3 || pathLengthMeters(cycle) <= 1.0) {
+            return List.copyOf(basePath);
+        }
+        List<EcefPoint> extended = new ArrayList<>(basePath);
+        double remaining = extraLength;
+        while (remaining > 1.0) {
+            double beforeCycle = remaining;
+            for (int index = 1; index < cycle.size() && remaining > 1.0; index++) {
+                EcefPoint start = cycle.get(index - 1);
+                EcefPoint end = cycle.get(index);
+                double segmentLength = surfaceDistance(start, end);
+                if (segmentLength <= 1.0) {
+                    continue;
+                }
+                if (remaining >= segmentLength - 1.0e-6) {
+                    extended.add(end);
+                    remaining -= segmentLength;
+                    continue;
+                }
+                extended.add(Wgs84.toEcef(Wgs84Geodesic.interpolate(
+                        Wgs84.toGeodetic(start),
+                        Wgs84.toGeodetic(end),
+                        remaining / segmentLength,
+                        0.0)));
+                remaining = 0.0;
+            }
+            if (remaining >= beforeCycle - 1.0e-6) {
+                break;
+            }
+        }
+        return extended;
+    }
+
+    private static List<EcefPoint> repeatCyclePath(List<EcefPoint> points) {
+        if (points.size() < 2) {
+            return List.copyOf(points);
+        }
+        List<EcefPoint> cycle = new ArrayList<>(points.size() + 1);
+        EcefPoint first = points.get(0);
+        EcefPoint last = points.get(points.size() - 1);
+        cycle.add(last);
+        if (surfaceDistance(last, first) > 1.0) {
+            cycle.add(first);
+        }
+        for (int index = 1; index < points.size(); index++) {
+            cycle.add(points.get(index));
+        }
+        return cycle;
     }
 
     private static void copyProfile(ScalarProfile source, ScalarProfile destination) {

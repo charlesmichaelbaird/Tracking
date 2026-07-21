@@ -69,6 +69,8 @@ public final class SavedScenarioRepository {
                         point.latitudeDegrees(),
                         point.longitudeDegrees()));
             }
+            properties.setProperty(prefix + "extrapolation.mode",
+                    target.extrapolationMode().name());
             properties.setProperty(prefix + "velocity",
                     samples(target.velocityProfile()));
             properties.setProperty(prefix + "altitude",
@@ -100,10 +102,11 @@ public final class SavedScenarioRepository {
         for (int index = 0; index < targets.size(); index++) {
             TargetTrajectory target = targets.get(index);
             SavedScenarioDefinition.TargetData data = scenario.targets().get(index);
-            target.clearPath();
+            List<EcefPoint> points = new ArrayList<>();
             for (GeodeticPoint point : data.path()) {
-                target.addPathPoint(Wgs84.toEcef(point.withAltitude(0.0)));
+                points.add(Wgs84.toEcef(point.withAltitude(0.0)));
             }
+            target.replacePath(points, data.extrapolationMode());
             applySamples(target.velocityProfile(), data.velocitySamples());
             applySamples(target.altitudeProfile(), data.altitudeSamples());
         }
@@ -138,7 +141,9 @@ public final class SavedScenarioRepository {
             targets.add(new SavedScenarioDefinition.TargetData(
                     points,
                     parseSamples(properties.getProperty(prefix + "velocity", "")),
-                    parseSamples(properties.getProperty(prefix + "altitude", ""))));
+                    parseSamples(properties.getProperty(prefix + "altitude", "")),
+                    parseExtrapolationMode(properties.getProperty(
+                            prefix + "extrapolation.mode", ""))));
         }
         int blackoutCount = parseInt(properties, "blackout.count", 0);
         List<BlackoutRegion> regions = new ArrayList<>();
@@ -191,6 +196,17 @@ public final class SavedScenarioRepository {
             samples.add(Double.parseDouble(part.trim()));
         }
         return List.copyOf(samples);
+    }
+
+    private static TargetTrajectory.ExtrapolationMode parseExtrapolationMode(String text) {
+        if (text == null || text.isBlank()) {
+            return TargetTrajectory.ExtrapolationMode.LINEAR;
+        }
+        try {
+            return TargetTrajectory.ExtrapolationMode.valueOf(text.trim());
+        } catch (IllegalArgumentException exception) {
+            return TargetTrajectory.ExtrapolationMode.LINEAR;
+        }
     }
 
     private static void applySamples(ScalarProfile profile, List<Double> samples) {

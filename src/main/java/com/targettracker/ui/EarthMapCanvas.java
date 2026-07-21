@@ -1791,7 +1791,7 @@ final class EarthMapCanvas extends JPanel {
         }
         List<EcefPoint> shape = buildShapePath(shapeAnchor, geodetic, drawingMode);
         if (shape.size() >= 2) {
-            target.replacePath(shape);
+            target.replacePath(shape, TargetTrajectory.ExtrapolationMode.REPEAT_LOOP);
             if (drawingMode == DrawingMode.CIRCLE || drawingMode == DrawingMode.RACETRACK) {
                 beginDirectionPlacement(target);
             }
@@ -1843,7 +1843,8 @@ final class EarthMapCanvas extends JPanel {
         boolean forward = directionStartSnap == null || isForwardDirection(directionStartSnap, snap);
         List<EcefPoint> oriented = orderedLoop(loop, directionStartSnap, forward);
         if (oriented.size() >= 2) {
-            directionPlacementTarget.replacePath(oriented);
+            directionPlacementTarget.replacePath(
+                    oriented, TargetTrajectory.ExtrapolationMode.REPEAT_LOOP);
             onPathChanged.run();
         }
         clearDirectionPlacement();

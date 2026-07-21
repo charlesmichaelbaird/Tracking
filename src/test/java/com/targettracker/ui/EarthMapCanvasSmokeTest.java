@@ -176,6 +176,10 @@ public final class EarthMapCanvasSmokeTest {
         if (target.path().size() < 40) {
             throw new AssertionError("Circle drawing should create a sampled closed trajectory");
         }
+        if (target.extrapolationMode()
+                != TargetTrajectory.ExtrapolationMode.REPEAT_LOOP) {
+            throw new AssertionError("Circle drawing should repeat during extrapolation");
+        }
         GeodeticPoint circleStartAfter = Wgs84.toGeodetic(target.path().get(0));
         if (Math.abs(circleStartAfter.longitudeDegrees() - circleStartBefore.longitudeDegrees())
                 < 1.0e-4) {
@@ -204,6 +208,10 @@ public final class EarthMapCanvasSmokeTest {
         }
         if (target.path().size() < 40) {
             throw new AssertionError("Racetrack drawing should create a sampled loop trajectory");
+        }
+        if (target.extrapolationMode()
+                != TargetTrajectory.ExtrapolationMode.REPEAT_LOOP) {
+            throw new AssertionError("Racetrack drawing should repeat during extrapolation");
         }
         GeodeticPoint raceStartAfter = Wgs84.toGeodetic(target.path().get(0));
         if (Math.abs(raceStartAfter.longitudeDegrees() - raceStartBefore.longitudeDegrees())
