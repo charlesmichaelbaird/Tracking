@@ -32,6 +32,7 @@ import javax.swing.text.JTextComponent;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Graphics;
 import java.awt.Insets;
 
 /** Shared application palette and recursive Swing theming helper. */
@@ -240,7 +241,7 @@ public final class AppTheme {
             return;
         }
         if (button instanceof JButton || button instanceof JToggleButton) {
-            button.setUI(new BasicButtonUI());
+            button.setUI(new ThemedButtonUi());
         }
         Color background = button.isSelected()
                 ? palette.selectionBackground()
@@ -256,11 +257,65 @@ public final class AppTheme {
         button.setContentAreaFilled(true);
         button.setFocusPainted(false);
         button.setBorderPainted(true);
+        button.setRolloverEnabled(true);
         button.setBackground(background);
         button.setForeground(button.isEnabled() ? palette.buttonText() : palette.mutedText());
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(border),
                 BorderFactory.createEmptyBorder(4, 9, 4, 9)));
+    }
+
+    private static Color buttonPaintBackground(AbstractButton button) {
+        Palette palette = current();
+        Color base = button.getBackground() == null
+                ? button.isSelected() ? palette.selectionBackground() : palette.buttonBackground()
+                : button.getBackground();
+        if (!button.isEnabled()) {
+            return palette.surface();
+        }
+        var model = button.getModel();
+        if (model.isPressed() && model.isArmed()) {
+            return interactiveButtonColor(base, 0.18);
+        }
+        if (model.isRollover()) {
+            return interactiveButtonColor(base, 0.08);
+        }
+        return base;
+    }
+
+    private static Color interactiveButtonColor(Color base, double amount) {
+        return darkMode
+                ? blend(base, Color.WHITE, amount)
+                : blend(base, Color.BLACK, amount);
+    }
+
+    private static Color blend(Color base, Color overlay, double amount) {
+        double clamped = Math.max(0.0, Math.min(1.0, amount));
+        int red = (int) Math.round(base.getRed() * (1.0 - clamped)
+                + overlay.getRed() * clamped);
+        int green = (int) Math.round(base.getGreen() * (1.0 - clamped)
+                + overlay.getGreen() * clamped);
+        int blue = (int) Math.round(base.getBlue() * (1.0 - clamped)
+                + overlay.getBlue() * clamped);
+        return new Color(red, green, blue);
+    }
+
+    private static final class ThemedButtonUi extends BasicButtonUI {
+        @Override
+        public void update(Graphics graphics, JComponent component) {
+            if (component instanceof AbstractButton button && component.isOpaque()) {
+                graphics.setColor(buttonPaintBackground(button));
+                graphics.fillRect(0, 0, component.getWidth(), component.getHeight());
+                paint(graphics, component);
+                return;
+            }
+            super.update(graphics, component);
+        }
+
+        @Override
+        protected void paintButtonPressed(Graphics graphics, AbstractButton button) {
+            // The pressed fill is painted in update() so text/icon layout remains unchanged.
+        }
     }
 
     private static void applyComboBox(JComboBox<?> comboBox) {

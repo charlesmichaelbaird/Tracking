@@ -8,7 +8,9 @@ import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollBar;
 import javax.swing.Timer;
+import java.awt.Adjustable;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -21,6 +23,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.RenderingHints;
+import java.awt.Shape;
 import java.awt.Stroke;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -29,6 +32,10 @@ import java.util.function.BooleanSupplier;
 
 /** Combined target availability rows and seekable scenario replay ruler. */
 final class ScenarioTimelinePanel extends JPanel {
+    private static final int VISIBLE_TARGET_ROWS = 3;
+    private static final int CANVAS_HEIGHT = 126;
+    private static final int PANEL_EXTRA_HEIGHT = 34;
+
     private final ScenarioModel model;
     private final ScenarioPlayback playback;
     private final TrackCsvRecorder recorder;
@@ -36,6 +43,7 @@ final class ScenarioTimelinePanel extends JPanel {
     private final Runnable onRunWindowChanged;
     private final JLabel stateLabel = new JLabel();
     private final TimelineCanvas canvas = new TimelineCanvas();
+    private final JScrollBar targetScrollBar = new JScrollBar(Adjustable.VERTICAL);
     private List<Double> candidateMarkerTimes = List.of();
     private double selectedCandidateTime = Double.NaN;
 
@@ -73,14 +81,20 @@ final class ScenarioTimelinePanel extends JPanel {
         controls.add(stateLabel);
         add(controls, BorderLayout.NORTH);
         add(canvas, BorderLayout.CENTER);
+
+        targetScrollBar.setUnitIncrement(1);
+        targetScrollBar.setBlockIncrement(VISIBLE_TARGET_ROWS);
+        targetScrollBar.setVisible(false);
+        targetScrollBar.addAdjustmentListener(event -> canvas.repaint());
+        add(targetScrollBar, BorderLayout.EAST);
         refresh();
     }
 
     void refresh() {
-        int targetCount = Math.max(1, model.targets().size());
-        int canvasHeight = Math.max(106, 72 + targetCount * 18);
-        canvas.setPreferredSize(new Dimension(700, canvasHeight));
-        setPreferredSize(new Dimension(700, canvasHeight + 34));
+        int targetCount = model.targets().size();
+        canvas.setPreferredSize(new Dimension(700, CANVAS_HEIGHT));
+        setPreferredSize(new Dimension(700, CANVAS_HEIGHT + PANEL_EXTRA_HEIGHT));
+        updateTargetScrollBar(targetCount);
         boolean hasScenario = durationForScale() > 0.0;
         canvas.setSeekEnabled(playback.canSeek());
         stateLabel.setForeground(AppTheme.current().mutedText());
@@ -100,6 +114,14 @@ final class ScenarioTimelinePanel extends JPanel {
         }
         revalidate();
         canvas.repaint();
+    }
+
+    private void updateTargetScrollBar(int targetCount) {
+        int maximum = Math.max(VISIBLE_TARGET_ROWS, targetCount);
+        int maxValue = Math.max(0, targetCount - VISIBLE_TARGET_ROWS);
+        int value = Math.min(targetScrollBar.getValue(), maxValue);
+        targetScrollBar.setValues(value, VISIBLE_TARGET_ROWS, 0, maximum);
+        targetScrollBar.setVisible(targetCount > VISIBLE_TARGET_ROWS);
     }
 
     void refreshTheme() {
@@ -203,6 +225,22 @@ final class ScenarioTimelinePanel extends JPanel {
             };
             addMouseListener(mouse);
             addMouseMotionListener(mouse);
+            addMouseWheelListener(event -> {
+                if (!targetScrollBar.isVisible()) {
+                    return;
+                }
+                int maximumValue = Math.max(
+                        targetScrollBar.getMinimum(),
+                        targetScrollBar.getMaximum() - targetScrollBar.getVisibleAmount());
+                int value = Math.max(
+                        targetScrollBar.getMinimum(),
+                        Math.min(maximumValue,
+                                targetScrollBar.getValue() + event.getWheelRotation()));
+                if (value != targetScrollBar.getValue()) {
+                    targetScrollBar.setValue(value);
+                    event.consume();
+                }
+            });
         }
 
         void setSeekEnabled(boolean enabled) {
@@ -274,27 +312,36 @@ final class ScenarioTimelinePanel extends JPanel {
 
         private void drawTargets(Graphics2D g, double duration) {
             List<TargetTrajectory> targets = model.targets();
-            int rowGap = rowGap(targets.size());
-            int y = TOP + 24;
+            int firstTarget = targetScrollBar.isVisible() ? targetScrollBar.getValue() : 0;
             FontMetrics metrics = g.getFontMetrics();
+            Shape oldClip = g.getClip();
             Stroke oldStroke = g.getStroke();
-            for (TargetTrajectory target : targets) {
-                g.setColor(AppTheme.current().mutedText());
-                g.drawString(
-                        target.id(),
-                        Math.max(4, LEFT - metrics.stringWidth(target.id()) - 8),
-                        y + 4);
-                int startX = xForTime(0.0, duration);
-                int stopX = xForTime(Math.min(duration, target.durationSeconds()), duration);
-                g.setColor(withAlpha(target.color(), target.isRunnable() ? 230 : 70));
-                g.setStroke(new BasicStroke(
-                        target.isRunnable() ? 5.0f : 2.0f,
-                        BasicStroke.CAP_ROUND,
-                        BasicStroke.JOIN_ROUND));
-                g.drawLine(startX, y, Math.max(startX, stopX), y);
-                y += rowGap;
+            g.clipRect(0, targetViewportTop(), getWidth(), targetViewportHeight());
+            try {
+                for (int index = firstTarget;
+                        index < targets.size()
+                                && index < firstTarget + VISIBLE_TARGET_ROWS;
+                        index++) {
+                    TargetTrajectory target = targets.get(index);
+                    int y = targetRowY(index - firstTarget);
+                    g.setColor(AppTheme.current().mutedText());
+                    g.drawString(
+                            target.id(),
+                            Math.max(4, LEFT - metrics.stringWidth(target.id()) - 8),
+                            y + 4);
+                    int startX = xForTime(0.0, duration);
+                    int stopX = xForTime(Math.min(duration, target.durationSeconds()), duration);
+                    g.setColor(withAlpha(target.color(), target.isRunnable() ? 230 : 70));
+                    g.setStroke(new BasicStroke(
+                            target.isRunnable() ? 5.0f : 2.0f,
+                            BasicStroke.CAP_ROUND,
+                            BasicStroke.JOIN_ROUND));
+                    g.drawLine(startX, y, Math.max(startX, stopX), y);
+                }
+            } finally {
+                g.setClip(oldClip);
+                g.setStroke(oldStroke);
             }
-            g.setStroke(oldStroke);
         }
 
         private void drawRuler(Graphics2D g, double duration) {
@@ -365,23 +412,17 @@ final class ScenarioTimelinePanel extends JPanel {
         private void drawRunHandles(Graphics2D g, double duration) {
             int top = runWindowTop();
             int height = runWindowHeight();
-            drawHandle(g, xForTime(model.runStartSeconds(), duration), top, height, "S");
-            drawHandle(g, xForTime(model.runStopSeconds(), duration), top, height, "E");
+            drawHandle(g, xForTime(model.runStartSeconds(), duration), top, height);
+            drawHandle(g, xForTime(model.runStopSeconds(), duration), top, height);
         }
 
-        private void drawHandle(Graphics2D g, int x, int top, int height, String label) {
+        private void drawHandle(Graphics2D g, int x, int top, int height) {
             AppTheme.Palette palette = AppTheme.current();
             int handleX = x - HANDLE_WIDTH / 2;
             g.setColor(withAlpha(palette.card(), 225));
             g.fillRoundRect(handleX, top + 1, HANDLE_WIDTH, height - 2, 5, 5);
             g.setColor(palette.border());
             g.drawRoundRect(handleX, top + 1, HANDLE_WIDTH, height - 2, 5, 5);
-            g.setColor(palette.text());
-            Font previous = g.getFont();
-            g.setFont(previous.deriveFont(Font.BOLD, 9.0f));
-            FontMetrics metrics = g.getFontMetrics();
-            g.drawString(label, x - metrics.stringWidth(label) / 2, top + 11);
-            g.setFont(previous);
         }
 
         private DragMode modeAt(Point point) {
@@ -508,9 +549,20 @@ final class ScenarioTimelinePanel extends JPanel {
             return Math.max(1, available / 2);
         }
 
-        private int rowGap(int targetCount) {
-            int available = Math.max(18, rulerBaseline() - TOP - 42);
-            return Math.max(14, Math.min(22, available / Math.max(1, targetCount)));
+        private int targetViewportTop() {
+            return TOP + 15;
+        }
+
+        private int targetViewportHeight() {
+            return targetRowGap() * VISIBLE_TARGET_ROWS + 7;
+        }
+
+        private int targetRowY(int visibleIndex) {
+            return TOP + 24 + visibleIndex * targetRowGap();
+        }
+
+        private int targetRowGap() {
+            return 16;
         }
     }
 

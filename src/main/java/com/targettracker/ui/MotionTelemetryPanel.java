@@ -3,6 +3,7 @@ package com.targettracker.ui;
 import com.targettracker.model.ScenarioModel;
 import com.targettracker.model.TargetTrajectory;
 
+import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -22,6 +23,8 @@ import java.util.function.Supplier;
 
 /** Combined target controls and editable velocity/altitude profiles. */
 final class MotionTelemetryPanel extends JPanel {
+    private static final int CONTROL_BUTTON_HEIGHT = 32;
+
     private final ScenarioModel model;
     private final TargetInspectorPanel inspector;
     private final JButton newTargetButton = fullWidthButton("New target");
@@ -137,7 +140,7 @@ final class MotionTelemetryPanel extends JPanel {
 
         JPanel buttonGrid = new JPanel(new GridLayout(1, 3, 8, 0));
         buttonGrid.setOpaque(false);
-        buttonGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        buttonGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, CONTROL_BUTTON_HEIGHT));
         newTargetButton.addActionListener(event -> onNewTarget.run());
         copyTargetButton.setToolTipText(
                 "Duplicate the selected target (or use Ctrl+C, then Ctrl+V)");
@@ -169,7 +172,7 @@ final class MotionTelemetryPanel extends JPanel {
 
         JPanel pathGrid = new JPanel(new GridLayout(1, 2, 8, 0));
         pathGrid.setOpaque(false);
-        pathGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        pathGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, CONTROL_BUTTON_HEIGHT));
         finishPathButton.addActionListener(event -> onFinishPath.run());
         clearPathButton.addActionListener(event -> onClearPath.run());
         pathGrid.add(finishPathButton);
@@ -179,7 +182,7 @@ final class MotionTelemetryPanel extends JPanel {
 
         JPanel editGrid = new JPanel(new GridLayout(1, 2, 8, 0));
         editGrid.setOpaque(false);
-        editGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        editGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, CONTROL_BUTTON_HEIGHT));
         smoothPathButton.setToolTipText("Smooth the selected target path");
         undoSmoothButton.setToolTipText("Undo the last smoothing pass for the selected target");
         smoothPathButton.addActionListener(event -> onSmoothPath.run());
@@ -192,9 +195,14 @@ final class MotionTelemetryPanel extends JPanel {
         extrapolatePathButton.setToolTipText(
                 "Extend or restore the selected path to match the scenario length");
         extrapolatePathButton.addActionListener(event -> onToggleExtrapolatePath.run());
-        extrapolatePathButton.setAlignmentX(LEFT_ALIGNMENT);
-        extrapolatePathButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
-        inner.add(extrapolatePathButton);
+        JPanel extrapolateGrid = new JPanel(new GridLayout(1, 2, 8, 0));
+        extrapolateGrid.setOpaque(false);
+        extrapolateGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, CONTROL_BUTTON_HEIGHT));
+        extrapolateGrid.add(extrapolatePathButton);
+        JPanel spacer = new JPanel();
+        spacer.setOpaque(false);
+        extrapolateGrid.add(spacer);
+        inner.add(extrapolateGrid);
         inner.add(Box.createVerticalStrut(10));
 
         lockLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
@@ -297,16 +305,22 @@ final class MotionTelemetryPanel extends JPanel {
 
     private static JButton fullWidthButton(String text) {
         JButton button = new JButton(text);
-        button.setAlignmentX(LEFT_ALIGNMENT);
-        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        sizeControlButton(button);
         return button;
     }
 
     private static JToggleButton fullWidthToggleButton(String text) {
         JToggleButton button = new JToggleButton(text);
-        button.setAlignmentX(LEFT_ALIGNMENT);
-        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        sizeControlButton(button);
         return button;
+    }
+
+    private static void sizeControlButton(AbstractButton button) {
+        Dimension preferred = button.getPreferredSize();
+        button.setPreferredSize(new Dimension(preferred.width, CONTROL_BUTTON_HEIGHT));
+        button.setMinimumSize(new Dimension(0, CONTROL_BUTTON_HEIGHT));
+        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, CONTROL_BUTTON_HEIGHT));
+        button.setAlignmentX(LEFT_ALIGNMENT);
     }
 
 }

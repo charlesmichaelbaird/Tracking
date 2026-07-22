@@ -123,7 +123,7 @@ public final class TrackerFrame extends JFrame {
         super("ECEF Target Tracker");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setMinimumSize(new Dimension(1_100, 680));
-        setSize(1_450, 860);
+        setSize(1_650, 900);
 
         selectedTarget = model.addTarget();
         measurementEngine = new MeasurementEngine(model, sensorSettings);

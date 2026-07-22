@@ -10,8 +10,10 @@ import com.targettracker.tracking.ImmSettings;
 import com.targettracker.tracking.ImmTracker;
 
 import javax.swing.JComponent;
+import javax.swing.JScrollBar;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.event.MouseEvent;
 
 /** Headless interaction check for the video-style replay ruler. */
@@ -71,7 +73,36 @@ public final class ScenarioTimelinePanelSmokeTest {
             throw new AssertionError(
                     "Completed pre-compute should remain seekable after recording becomes inactive");
         }
+        verifyTargetStackScrollDoesNotResize();
         verifyRunWindowDrag();
+    }
+
+    private static void verifyTargetStackScrollDoesNotResize() {
+        ScenarioModel model = new ScenarioModel();
+        ScenarioPlayback playback = new ScenarioPlayback(
+                model,
+                () -> {
+                },
+                new MeasurementEngine(model, new SensorSettings()),
+                new ImmTracker(new ImmSettings()),
+                new TrackCsvRecorder());
+        ScenarioTimelinePanel panel = new ScenarioTimelinePanel(model, playback, new TrackCsvRecorder());
+        Dimension initialSize = panel.getPreferredSize();
+        for (int index = 0; index < 5; index++) {
+            TargetTrajectory target = model.addTarget();
+            target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(35.0 + index * 0.01, -110.0, 0.0)));
+            target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(35.01 + index * 0.01, -110.0, 0.0)));
+        }
+        panel.refresh();
+        if (!panel.getPreferredSize().equals(initialSize)) {
+            throw new AssertionError("Adding targets should not resize the timeline panel");
+        }
+        JScrollBar scrollBar = findTargetScrollBar(panel);
+        if (scrollBar == null || !scrollBar.isVisible()
+                || scrollBar.getVisibleAmount() != 3
+                || scrollBar.getMaximum() != 5) {
+            throw new AssertionError("More than three targets should enable a three-row scroll window");
+        }
     }
 
     private static void verifyRunWindowDrag() {
@@ -120,6 +151,15 @@ public final class ScenarioTimelinePanelSmokeTest {
         for (Component component : panel.getComponents()) {
             if (component.getClass().getSimpleName().equals("TimelineCanvas")) {
                 return (JComponent) component;
+            }
+        }
+        return null;
+    }
+
+    private static JScrollBar findTargetScrollBar(ScenarioTimelinePanel panel) {
+        for (Component component : panel.getComponents()) {
+            if (component instanceof JScrollBar scrollBar) {
+                return scrollBar;
             }
         }
         return null;

@@ -5,6 +5,8 @@ import javax.swing.JComboBox;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
+import javax.swing.AbstractButton;
+import javax.swing.JButton;
 import javax.swing.SwingUtilities;
 import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
@@ -41,6 +43,7 @@ public final class AppThemeSmokeTest {
         JComboBox<String> comboBox = new JComboBox<>(new String[]{"Option"});
         JToggleButton navButton = new JToggleButton("IMM");
         JToggleButton selectedButton = new JToggleButton("Selected", true);
+        JButton actionButton = new JButton("Finish path");
         card.add(label);
         card.add(field);
         card.add(normalField);
@@ -48,6 +51,7 @@ public final class AppThemeSmokeTest {
         card.add(comboBox);
         card.add(navButton);
         card.add(selectedButton);
+        card.add(actionButton);
         root.add(card, BorderLayout.CENTER);
 
         AppTheme.setDarkMode(true);
@@ -92,6 +96,7 @@ public final class AppThemeSmokeTest {
                 "selected button painted background",
                 selectedButton,
                 AppTheme.current().selectionBackground());
+        assertPressedPaintDiffers(actionButton);
 
         AppTheme.setDarkMode(false);
         AppTheme.applyTo(root);
@@ -151,7 +156,7 @@ public final class AppThemeSmokeTest {
 
     private static void assertPaintedBackground(
             String label,
-            JToggleButton button,
+            AbstractButton button,
             Color expected) {
         button.setSize(96, 30);
         BufferedImage image = new BufferedImage(96, 30, BufferedImage.TYPE_INT_RGB);
@@ -163,6 +168,28 @@ public final class AppThemeSmokeTest {
             throw new AssertionError("%s: expected painted dark background near %s but got %s"
                     .formatted(label, expected, sample));
         }
+    }
+
+    private static void assertPressedPaintDiffers(AbstractButton button) {
+        button.setSize(112, 30);
+        Color normal = paintedSample(button);
+        button.getModel().setArmed(true);
+        button.getModel().setPressed(true);
+        Color pressed = paintedSample(button);
+        button.getModel().setPressed(false);
+        button.getModel().setArmed(false);
+        if (colorDistance(normal, pressed) < 12.0) {
+            throw new AssertionError(
+                    "Pressed buttons should paint visibly differently from resting buttons");
+        }
+    }
+
+    private static Color paintedSample(AbstractButton button) {
+        BufferedImage image = new BufferedImage(112, 30, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        button.paint(graphics);
+        graphics.dispose();
+        return new Color(image.getRGB(12, 12));
     }
 
     private static void assertPaintedComponentBackground(

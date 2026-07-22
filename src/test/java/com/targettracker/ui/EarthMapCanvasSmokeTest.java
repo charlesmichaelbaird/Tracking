@@ -11,8 +11,10 @@ import com.targettracker.tracking.ImmTracker;
 
 import javax.swing.SwingUtilities;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -64,6 +66,7 @@ public final class EarthMapCanvasSmokeTest {
                 ignored -> {
                 });
         canvas.setSize(900, 600);
+        verifyWideWorldViewDoesNotResizeOnZoom(canvas);
 
         for (int i = 0; i < 15; i++) {
             canvas.zoomIn();
@@ -315,6 +318,24 @@ public final class EarthMapCanvasSmokeTest {
         }
     }
 
+    private static void verifyWideWorldViewDoesNotResizeOnZoom(EarthMapCanvas canvas) {
+        canvas.setSize(1_300, 600);
+        canvas.resetView();
+        Rectangle defaultBounds = mapBounds(canvas);
+        double defaultLongitudeSpan = visibleLongitudeSpan(canvas);
+        canvas.zoomIn();
+        Rectangle zoomedBounds = mapBounds(canvas);
+        if (!defaultBounds.equals(zoomedBounds)) {
+            throw new AssertionError("Map viewport bounds should not change size when zooming");
+        }
+        if (defaultLongitudeSpan <= 360.0) {
+            throw new AssertionError(
+                    "Wide reset view should fill horizontal space by repeating the world map");
+        }
+        canvas.setSize(900, 600);
+        canvas.resetView();
+    }
+
     private static void click(EarthMapCanvas canvas, int x, int y) {
         press(canvas, x, y);
     }
@@ -403,5 +424,25 @@ public final class EarthMapCanvasSmokeTest {
                 1,
                 false,
                 MouseEvent.BUTTON1));
+    }
+
+    private static Rectangle mapBounds(EarthMapCanvas canvas) {
+        try {
+            Method method = EarthMapCanvas.class.getDeclaredMethod("mapBounds");
+            method.setAccessible(true);
+            return (Rectangle) method.invoke(canvas);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Could not inspect map bounds", exception);
+        }
+    }
+
+    private static double visibleLongitudeSpan(EarthMapCanvas canvas) {
+        try {
+            Method method = EarthMapCanvas.class.getDeclaredMethod("visibleLongitudeSpan");
+            method.setAccessible(true);
+            return (double) method.invoke(canvas);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Could not inspect visible longitude span", exception);
+        }
     }
 }
