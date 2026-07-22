@@ -16,6 +16,7 @@ import com.targettracker.recording.TrackCsvReader;
 import com.targettracker.tracking.ImmSettings;
 import com.targettracker.tracking.ImmTracker;
 
+import javax.imageio.ImageIO;
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -23,6 +24,7 @@ import javax.swing.ButtonGroup;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -31,6 +33,7 @@ import javax.swing.JSeparator;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
@@ -41,15 +44,23 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridLayout;
 import java.awt.Polygon;
 import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 public final class TrackerFrame extends JFrame {
+    private static final DateTimeFormatter SNAPSHOT_TIMESTAMP_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss_SSS");
+
     private final ScenarioModel model = new ScenarioModel();
     private final SensorSettings sensorSettings = new SensorSettings();
     private final ImmSettings immSettings = new ImmSettings();
@@ -77,8 +88,11 @@ public final class TrackerFrame extends JFrame {
     private final JLabel statusLabel = new JLabel("Ready");
     private final JLabel scenarioTimeLabel = new JLabel(formatScenarioClock(0.0));
     private final JButton pauseButton = new JButton("Pause");
+    private final JButton loadScenarioButton = new JButton("Load");
     private final JButton precomputeButton = new JButton("Pre-compute scenario");
     private final JButton replayButton = new JButton("Replay scenario");
+    private final JButton saveCsvButton = new JButton("Save CSVs");
+    private final JButton snapshotButton = new JButton("Snapshot");
     private final JToggleButton moveToolButton = new JToggleButton("Move: Off");
     private final JToggleButton rotateToolButton = new JToggleButton("Rotate: Off");
     private final JToggleButton modifyToolButton = new JToggleButton("Modify: Off");
@@ -116,8 +130,13 @@ public final class TrackerFrame extends JFrame {
         immTracker = new ImmTracker(immSettings);
         playback = new ScenarioPlayback(
                 model, this::onPlaybackUpdated, measurementEngine, immTracker, recorder);
-        timelinePanel = new ScenarioTimelinePanel(model, playback, recorder);
-        recordingPanel = new RecordingPanel(this, recorder, this::onRecordingStateChanged);
+        timelinePanel = new ScenarioTimelinePanel(
+                model,
+                playback,
+                recorder,
+                this::isRunWindowEditingLocked,
+                this::onRunWindowChanged);
+        recordingPanel = new RecordingPanel(this, recorder);
         analysisLoadPanel = new AnalysisLoadPanel(
                 this,
                 recorder.outputParent(),
@@ -338,6 +357,10 @@ public final class TrackerFrame extends JFrame {
         scenarioControlsLabel.setFont(
                 scenarioControlsLabel.getFont().deriveFont(Font.BOLD));
         toolbar.add(scenarioControlsLabel);
+        loadScenarioButton.setToolTipText("Load an editable .scenario file");
+        loadScenarioButton.addActionListener(event -> loadScenarioFile());
+        toolbar.add(loadScenarioButton);
+
         precomputeButton.setToolTipText(
                 "Compute the complete sensor and tracker history without real-time waiting");
         precomputeButton.addActionListener(event -> precomputeScenario());
@@ -353,13 +376,29 @@ public final class TrackerFrame extends JFrame {
         toolbar.add(pauseButton);
 
         JButton resetScenarioButton = new JButton("Reset");
-        resetScenarioButton.setToolTipText("Rewind to t = 0 and pause");
+        resetScenarioButton.setToolTipText("Rewind the scenario replay and pause");
         resetScenarioButton.addActionListener(event -> resetScenario());
         toolbar.add(resetScenarioButton);
 
+        toolbar.add(verticalSeparator());
+        JLabel exportControlsLabel = new JLabel("Export:");
+        exportControlsLabel.setFont(exportControlsLabel.getFont().deriveFont(Font.BOLD));
+        toolbar.add(exportControlsLabel);
+        saveCsvButton.setEnabled(false);
+        saveCsvButton.setToolTipText("Save CSV files from the most recent pre-compute");
+        saveCsvButton.addActionListener(event -> savePrecomputedCsvs());
+        toolbar.add(saveCsvButton);
+        snapshotButton.setToolTipText("Save a PNG snapshot of the map and timeline");
+        snapshotButton.addActionListener(event -> saveSnapshot());
+        toolbar.add(snapshotButton);
+
+        JPanel lowerControls = new JPanel(new GridLayout(1, 2, 10, 0));
+        lowerControls.setOpaque(false);
+        lowerControls.add(displayControlsPanel);
+        lowerControls.add(dataModePanel);
+
         container.add(toolbar);
-        container.add(dataModePanel);
-        container.add(displayControlsPanel);
+        container.add(lowerControls);
         return container;
     }
 
@@ -465,7 +504,7 @@ public final class TrackerFrame extends JFrame {
         reconcileActiveExtrapolations();
         updateStructuralEditingControls();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         earthMapCanvas.repaint();
         statusLabel.setText("Created %s from the copied trajectory".formatted(target.id()));
     }
@@ -510,7 +549,7 @@ public final class TrackerFrame extends JFrame {
         resetCompletedPlayback();
         reconcileActiveExtrapolations();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         earthMapCanvas.repaint();
         statusLabel.setText("%s set to %s: %.0f m altitude, %.0f m/s velocity"
                 .formatted(
@@ -730,7 +769,7 @@ public final class TrackerFrame extends JFrame {
         motionTelemetryPanel.setSelectedTarget(target);
         statusLabel.setText("Path cleared for %s".formatted(target.id()));
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         earthMapCanvas.repaint();
     }
 
@@ -748,7 +787,7 @@ public final class TrackerFrame extends JFrame {
         if (target.smoothPath()) {
             reconcileActiveExtrapolations();
             refreshTelemetry();
-            timelinePanel.refresh();
+            refreshTimelinePanels();
             earthMapCanvas.repaint();
             statusLabel.setText("Smoothed path for %s".formatted(target.id()));
         } else {
@@ -770,7 +809,7 @@ public final class TrackerFrame extends JFrame {
         if (target.undoSmoothing()) {
             reconcileActiveExtrapolations();
             refreshTelemetry();
-            timelinePanel.refresh();
+            refreshTimelinePanels();
             earthMapCanvas.repaint();
             statusLabel.setText("Restored pre-smoothing path for %s".formatted(target.id()));
         } else {
@@ -802,7 +841,7 @@ public final class TrackerFrame extends JFrame {
             statusLabel.setText("%s already reaches the scenario length".formatted(target.id()));
         }
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         earthMapCanvas.repaint();
     }
 
@@ -827,7 +866,7 @@ public final class TrackerFrame extends JFrame {
                     formatClockTime(durationSeconds)));
         }
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         earthMapCanvas.repaint();
     }
 
@@ -847,7 +886,7 @@ public final class TrackerFrame extends JFrame {
         motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
         updateStructuralEditingControls();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         earthMapCanvas.repaint();
         statusLabel.setText("Removed %s".formatted(target.id()));
     }
@@ -873,7 +912,7 @@ public final class TrackerFrame extends JFrame {
         sensorParametersPanel.refreshBlackoutRegions();
         sensorParametersPanel.setSelectedBlackoutRegion(region);
         earthMapCanvas.repaint();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         statusLabel.setText("Added blackout region");
     }
 
@@ -898,7 +937,7 @@ public final class TrackerFrame extends JFrame {
             sensorParametersPanel.refreshBlackoutRegions();
             sensorParametersPanel.setSelectedBlackoutRegion(selectedBlackoutRegion);
             earthMapCanvas.repaint();
-            timelinePanel.refresh();
+            refreshTimelinePanels();
             statusLabel.setText("Removed blackout region");
         }
     }
@@ -913,7 +952,7 @@ public final class TrackerFrame extends JFrame {
         selectedBlackoutRegion = model.moveBlackoutRegion(region, newCenter);
         sensorParametersPanel.refreshBlackoutRegions();
         sensorParametersPanel.setSelectedBlackoutRegion(selectedBlackoutRegion);
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         return selectedBlackoutRegion;
     }
 
@@ -937,7 +976,7 @@ public final class TrackerFrame extends JFrame {
         updateStructuralEditingControls();
         earthMapCanvas.focusOnTargets();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         scenarioTimeLabel.setText(formatScenarioClock(0.0, model.durationSeconds()));
         statusLabel.setText("Loaded %s — preset target structure is locked".formatted(preset));
     }
@@ -969,10 +1008,41 @@ public final class TrackerFrame extends JFrame {
         updateStructuralEditingControls();
         earthMapCanvas.focusOnTargets();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         scenarioTimeLabel.setText(formatScenarioClock(0.0, model.durationSeconds()));
         statusLabel.setText("Loaded saved user scenario %s — editing enabled"
                 .formatted(scenario.name()));
+    }
+
+    private void loadScenarioFile() {
+        if (analysisMode || playback.isRunning() || playback.isComputing()) {
+            return;
+        }
+        Path initial = savedScenarioRepository.directory();
+        if (!java.nio.file.Files.isDirectory(initial)) {
+            initial = Path.of(".").toAbsolutePath().normalize();
+        }
+        JFileChooser chooser = new JFileChooser(initial.toFile());
+        chooser.setDialogTitle("Load scenario file");
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setAcceptAllFileFilterUsed(true);
+        chooser.setFileFilter(new FileNameExtensionFilter(
+                "Target Tracker scenario (*.scenario)", "scenario"));
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        try {
+            SavedScenarioDefinition scenario =
+                    savedScenarioRepository.read(chooser.getSelectedFile().toPath());
+            loadSavedUserScenario(scenario);
+            statusLabel.setText("Loaded scenario file %s".formatted(scenario.name()));
+        } catch (IOException | RuntimeException exception) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    exception.getMessage(),
+                    "Scenario load failed",
+                    JOptionPane.WARNING_MESSAGE);
+        }
     }
 
     private void updateUserScenarioLength(Double durationSeconds) {
@@ -988,7 +1058,7 @@ public final class TrackerFrame extends JFrame {
         resetCompletedPlayback();
         reconcileActiveExtrapolations();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         earthMapCanvas.repaint();
         scenarioTimeLabel.setText(model.hasScenarioLength()
                 ? formatScenarioClock(0.0, model.durationSeconds())
@@ -1076,7 +1146,7 @@ public final class TrackerFrame extends JFrame {
         updateStructuralEditingControls();
         earthMapCanvas.resetView();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         scenarioTimeLabel.setText(formatScenarioClock(0.0));
         statusLabel.setText("User-generated mode — draw a target trajectory");
     }
@@ -1086,6 +1156,12 @@ public final class TrackerFrame extends JFrame {
                 || playback.isRunning()
                 || playback.isComputing()
                 || presetScenarioActive;
+    }
+
+    private boolean isRunWindowEditingLocked() {
+        return analysisMode
+                || playback.isRunning()
+                || playback.isComputing();
     }
 
     private void updateStructuralEditingControls() {
@@ -1111,9 +1187,7 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         earthMapCanvas.cancelNodeModification();
-        if (!validateSensorParameters()
-                || !validateImmParameters()
-                || !recordingPanel.commitParentFolder()) {
+        if (!validateSensorParameters() || !validateImmParameters()) {
             return;
         }
         earthMapCanvas.finishPath();
@@ -1126,42 +1200,129 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
-        statusLabel.setText(recorder.isArmed()
-                ? "Pre-computing tracker history and writing one-second samples…"
-                : "Pre-computing sensor and tracker history…");
+        statusLabel.setText("Pre-computing sensor and tracker history...");
         statusLabel.paintImmediately(statusLabel.getBounds());
         try {
             if (!playback.precompute(scenarioNameForRecording())) {
-                String message = recorder.lastError() == null
-                        ? "Draw or load at least one runnable target trajectory first."
-                        : recorder.lastError();
                 JOptionPane.showMessageDialog(
                         this,
-                        message,
+                        "Draw or load at least one runnable target trajectory first, and keep the run window non-empty.",
                         "Scenario could not be pre-computed",
                         JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
-            if (recorder.lastError() != null) {
-                statusLabel.setText("Pre-compute complete with a recording error");
-                JOptionPane.showMessageDialog(
-                        this,
-                        recorder.lastError(),
-                        "Track recording stopped",
-                        JOptionPane.WARNING_MESSAGE);
-            } else {
-                statusLabel.setText("Pre-compute complete — replay or drag the timeline");
-            }
+            statusLabel.setText("Pre-compute complete - replay, seek, or save CSVs");
         } finally {
             setCursor(java.awt.Cursor.getDefaultCursor());
             recordingPanel.refresh();
-            timelinePanel.refresh();
+            refreshTimelinePanels();
             updateStructuralEditingControls();
         }
     }
 
     private String scenarioNameForRecording() {
         return presetScenarioPanel.scenarioNameForRecording(currentScenarioName);
+    }
+
+    private void savePrecomputedCsvs() {
+        if (analysisMode || !playback.canExportRecording()) {
+            return;
+        }
+        String scenarioName = scenarioNameForRecording();
+        if (!recordingPanel.commitOutputSettings(scenarioName)) {
+            return;
+        }
+        String folderName = recordingPanel.folderName(scenarioName);
+        setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
+        statusLabel.setText("Saving pre-computed CSV data...");
+        statusLabel.paintImmediately(statusLabel.getBounds());
+        try {
+            if (!playback.saveRecording(scenarioName, folderName)) {
+                String message = recorder.lastError() == null
+                        ? "Pre-compute the scenario before saving CSV data."
+                        : recorder.lastError();
+                JOptionPane.showMessageDialog(
+                        this,
+                        message,
+                        "CSV save failed",
+                        JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            savedScenarioRepository.saveCopy(
+                    recorder.runDirectory().resolve("scenario_definition.scenario"),
+                    scenarioName,
+                    model);
+            recordingPanel.rememberOutputFolder(recorder.runDirectory());
+            analysisLoadPanel.setParentFolder(recorder.outputParent());
+            statusLabel.setText("Saved scenario and CSV data to "
+                    + recorder.runDirectory().getFileName());
+        } catch (IOException | RuntimeException exception) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    exception.getMessage(),
+                    "Scenario save failed",
+                    JOptionPane.WARNING_MESSAGE);
+        } finally {
+            setCursor(java.awt.Cursor.getDefaultCursor());
+            recordingPanel.refresh();
+            refreshTimelinePanels();
+            updateStructuralEditingControls();
+        }
+    }
+
+    private void saveSnapshot() {
+        if (analysisMode || playback.isComputing()) {
+            return;
+        }
+        String scenarioName = scenarioNameForRecording();
+        if (!recordingPanel.commitOutputSettings(scenarioName)) {
+            return;
+        }
+        if (mapArea.getWidth() <= 0 || mapArea.getHeight() <= 0) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "The map view is not ready for a snapshot yet.",
+                    "Snapshot unavailable",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
+        try {
+            Path scenarioFolder = recordingPanel.outputFolder(scenarioName);
+            Files.createDirectories(scenarioFolder);
+            savedScenarioRepository.saveCopy(
+                    scenarioFolder.resolve("scenario_definition.scenario"),
+                    scenarioName,
+                    model);
+            Path snapshotFolder = scenarioFolder.resolve("snapshots");
+            Files.createDirectories(snapshotFolder);
+            Path file = snapshotFolder.resolve(snapshotFileName(scenarioName));
+
+            BufferedImage image = new BufferedImage(
+                    mapArea.getWidth(),
+                    mapArea.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = image.createGraphics();
+            try {
+                graphics.setColor(mapArea.getBackground());
+                graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+                mapArea.paintAll(graphics);
+            } finally {
+                graphics.dispose();
+            }
+            ImageIO.write(image, "png", file.toFile());
+            analysisLoadPanel.setParentFolder(recorder.outputParent());
+            statusLabel.setText("Saved snapshot to " + file.getFileName());
+        } catch (IOException | RuntimeException exception) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    exception.getMessage(),
+                    "Snapshot save failed",
+                    JOptionPane.WARNING_MESSAGE);
+        } finally {
+            setCursor(java.awt.Cursor.getDefaultCursor());
+            recordingPanel.refresh();
+        }
     }
 
     private void replayScenario() {
@@ -1183,7 +1344,7 @@ public final class TrackerFrame extends JFrame {
             earthMapCanvas.setProfileHighlightNormalizedTime(Double.NaN);
             updateStructuralEditingControls();
             refreshTelemetry();
-            timelinePanel.refresh();
+            refreshTimelinePanels();
             earthMapCanvas.repaint();
             scenarioTimeLabel.setText(formatScenarioClock(0.0));
             statusLabel.setText("Scenario reset — editing unlocked");
@@ -1208,7 +1369,7 @@ public final class TrackerFrame extends JFrame {
         resetCompletedPlayback();
         reconcileActiveExtrapolations();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         statusLabel.setText(selectedTarget.path().size() < 2
                 ? "%s: add another point".formatted(selectedTarget.id())
                 : "%s: %d ECEF path points, %,.0f m geodesic length".formatted(
@@ -1224,9 +1385,23 @@ public final class TrackerFrame extends JFrame {
         resetCompletedPlayback();
         reconcileActiveExtrapolations();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         earthMapCanvas.repaint();
         statusLabel.setText("Updated motion profile for %s".formatted(selectedTarget.id()));
+    }
+
+    private void onRunWindowChanged() {
+        if (isRunWindowEditingLocked()) {
+            return;
+        }
+        resetCompletedPlayback();
+        refreshTimelinePanels();
+        earthMapCanvas.repaint();
+        scenarioTimeLabel.setText(formatScenarioClock(
+                model.runStartSeconds(), model.runStopSeconds()));
+        statusLabel.setText("Run window set to %s - %s".formatted(
+                formatClockTime(model.runStartSeconds()),
+                formatClockTime(model.runStopSeconds())));
     }
 
     private void onCursorChanged(GeodeticPoint point) {
@@ -1241,17 +1416,23 @@ public final class TrackerFrame extends JFrame {
     private void onPlaybackUpdated() {
         earthMapCanvas.repaint();
         refreshTelemetry();
+        double displayedStopSeconds = playback.isReplayReady()
+                ? playback.runStopSeconds()
+                : playback.durationSeconds();
         scenarioTimeLabel.setText(formatScenarioClock(
-                playback.elapsedSeconds(), playback.durationSeconds()));
+                playback.elapsedSeconds(), displayedStopSeconds));
         pauseButton.setEnabled(playback.isRunning());
         pauseButton.setText(playback.isPaused() ? "Resume" : "Pause");
+        loadScenarioButton.setEnabled(!analysisMode
+                && !playback.isComputing() && !playback.isRunning());
+        snapshotButton.setEnabled(!analysisMode && !playback.isComputing());
         precomputeButton.setEnabled(!analysisMode
                 && !playback.isComputing() && !playback.isRunning());
         replayButton.setEnabled(!analysisMode && playback.isReplayReady()
                 && !playback.isComputing() && !playback.isRunning());
         updateStructuralEditingControls();
         recordingPanel.refresh();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         if (playback.isComputing()) {
             statusLabel.setText("Pre-computing scenario…");
         } else if (playback.isPaused()) {
@@ -1269,6 +1450,11 @@ public final class TrackerFrame extends JFrame {
 
     private void refreshTelemetry() {
         motionTelemetryPanel.refresh(selectedTarget, playback);
+    }
+
+    private void refreshTimelinePanels() {
+        timelinePanel.refresh();
+        saveCsvButton.setEnabled(!analysisMode && playback.canExportRecording());
     }
 
     private void resetCompletedPlayback() {
@@ -1315,10 +1501,6 @@ public final class TrackerFrame extends JFrame {
         earthMapCanvas.repaint();
     }
 
-    private void onRecordingStateChanged() {
-        timelinePanel.refresh();
-    }
-
     private boolean validateImmParameters() {
         if (immParametersPanel.commitParameters()) {
             return true;
@@ -1362,7 +1544,7 @@ public final class TrackerFrame extends JFrame {
         }
         updateModeControls();
         refreshTelemetry();
-        timelinePanel.refresh();
+        refreshTimelinePanels();
         earthMapCanvas.resetView();
         earthMapCanvas.repaint();
     }
@@ -1372,6 +1554,9 @@ public final class TrackerFrame extends JFrame {
         analysisModeButton.setSelected(analysisMode);
         precomputeButton.setEnabled(!analysisMode
                 && !playback.isComputing() && !playback.isRunning());
+        loadScenarioButton.setEnabled(!analysisMode
+                && !playback.isComputing() && !playback.isRunning());
+        snapshotButton.setEnabled(!analysisMode && !playback.isComputing());
         replayButton.setEnabled(!analysisMode && playback.isReplayReady()
                 && !playback.isComputing() && !playback.isRunning());
         presetScenarioPanel.setGenerationEnabled(!analysisMode);
@@ -1399,7 +1584,7 @@ public final class TrackerFrame extends JFrame {
             playback.loadRecordedScenario(scenario);
             playback.rewindReplayPaused();
             earthMapCanvas.focusOnPoints(playback.scenarioExtentPoints());
-            timelinePanel.refresh();
+            refreshTimelinePanels();
             scenarioTimeLabel.setText(formatScenarioClock(0.0, scenario.durationSeconds()));
             long trackCount = scenario.records().stream()
                     .map(record -> record.trackId())
@@ -1484,6 +1669,20 @@ public final class TrackerFrame extends JFrame {
         }
         int totalSeconds = Math.max(0, (int) Math.round(seconds));
         return "%02d:%02d".formatted(totalSeconds / 60, totalSeconds % 60);
+    }
+
+    private static String snapshotFileName(String scenarioName) {
+        return safeFileStem(scenarioName) + "_"
+                + LocalDateTime.now().format(SNAPSHOT_TIMESTAMP_FORMAT)
+                + ".png";
+    }
+
+    private static String safeFileStem(String text) {
+        String safe = text == null ? "" : text
+                .toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9._-]+", "_")
+                .replaceAll("^_+|_+$", "");
+        return safe.isBlank() ? "scenario" : safe;
     }
 
     private final class ThemeIcon implements Icon {

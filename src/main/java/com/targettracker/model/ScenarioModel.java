@@ -19,6 +19,8 @@ public final class ScenarioModel {
     private final List<TargetTrajectory> targets = new ArrayList<>();
     private final List<BlackoutRegion> blackoutRegions = new ArrayList<>();
     private Double scenarioLengthSeconds;
+    private double runStartSeconds;
+    private Double runStopSeconds;
 
     public ScenarioModel() {
     }
@@ -42,12 +44,61 @@ public final class ScenarioModel {
     public void setScenarioLengthSeconds(Double seconds) {
         if (seconds == null) {
             scenarioLengthSeconds = null;
+            clampRunWindow();
             return;
         }
         if (!Double.isFinite(seconds) || seconds <= 0.0) {
             throw new IllegalArgumentException("Scenario length must be greater than zero seconds");
         }
         scenarioLengthSeconds = seconds;
+        clampRunWindow();
+    }
+
+    public double runStartSeconds() {
+        double durationSeconds = durationSeconds();
+        if (durationSeconds <= 0.0) {
+            return 0.0;
+        }
+        return Math.max(0.0, Math.min(runStartSeconds, durationSeconds));
+    }
+
+    public double runStopSeconds() {
+        double durationSeconds = durationSeconds();
+        if (durationSeconds <= 0.0) {
+            return 0.0;
+        }
+        double stop = runStopSeconds == null ? durationSeconds : runStopSeconds;
+        return Math.max(runStartSeconds(), Math.min(stop, durationSeconds));
+    }
+
+    public double runDurationSeconds() {
+        return Math.max(0.0, runStopSeconds() - runStartSeconds());
+    }
+
+    public void setRunWindowSeconds(double startSeconds, double stopSeconds) {
+        double durationSeconds = durationSeconds();
+        if (durationSeconds <= 0.0) {
+            runStartSeconds = 0.0;
+            runStopSeconds = null;
+            return;
+        }
+        if (!Double.isFinite(startSeconds) || !Double.isFinite(stopSeconds)) {
+            throw new IllegalArgumentException("Scenario start/stop times must be finite");
+        }
+        double start = Math.max(0.0, Math.min(startSeconds, durationSeconds));
+        double stop = Math.max(0.0, Math.min(stopSeconds, durationSeconds));
+        if (start > stop) {
+            double midpoint = (start + stop) * 0.5;
+            start = midpoint;
+            stop = midpoint;
+        }
+        runStartSeconds = start;
+        runStopSeconds = stop;
+    }
+
+    public void resetRunWindow() {
+        runStartSeconds = 0.0;
+        runStopSeconds = null;
     }
 
     public void addBlackoutRegion(BlackoutRegion region) {
@@ -132,6 +183,7 @@ public final class ScenarioModel {
         targets.clear();
         blackoutRegions.clear();
         scenarioLengthSeconds = null;
+        resetRunWindow();
         for (int index = 0; index < targetCount; index++) {
             addTarget();
         }
@@ -173,6 +225,14 @@ public final class ScenarioModel {
                 .mapToDouble(TargetTrajectory::unextrapolatedDurationSeconds)
                 .max()
                 .orElse(0.0);
+    }
+
+    private void clampRunWindow() {
+        if (durationSeconds() <= 0.0) {
+            resetRunWindow();
+            return;
+        }
+        setRunWindowSeconds(runStartSeconds(), runStopSeconds());
     }
 
     private static <T> int nextAvailableNumber(

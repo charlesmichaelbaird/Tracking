@@ -39,7 +39,6 @@ public final class SavedScenarioTrackStitchingSmokeTest {
             SensorSettings sensorSettings = new SensorSettings();
             TrackCsvRecorder recorder = new TrackCsvRecorder();
             recorder.setOutputParent(parent);
-            recorder.setArmed(true);
             ScenarioPlayback playback = new ScenarioPlayback(
                     model,
                     () -> {
@@ -50,6 +49,12 @@ public final class SavedScenarioTrackStitchingSmokeTest {
 
             if (!playback.precompute(savedScenario.name())) {
                 throw new AssertionError("Saved blackout scenario should precompute");
+            }
+            if (recorder.runDirectory() != null) {
+                throw new AssertionError("Pre-compute should not save saved-scenario CSV files automatically");
+            }
+            if (!playback.saveRecording(savedScenario.name())) {
+                throw new AssertionError("Explicit CSV export should save saved-scenario data");
             }
             RecordedScenario recorded = TrackCsvReader.read(recorder.runDirectory());
             TrackStitchingAnalyzer.AnalysisResult result =

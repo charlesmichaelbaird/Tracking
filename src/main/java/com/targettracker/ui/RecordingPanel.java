@@ -3,69 +3,93 @@ package com.targettracker.ui;
 import com.targettracker.recording.TrackCsvRecorder;
 
 import javax.swing.BorderFactory;
-import javax.swing.Icon;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
-import javax.swing.JToggleButton;
-import java.awt.BasicStroke;
-import java.awt.Color;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.Locale;
 
-/** Compact recording controls embedded in the main window header. */
+/** Compact CSV output controls embedded in the main window header. */
 final class RecordingPanel extends JPanel {
     private final Component dialogParent;
     private final TrackCsvRecorder recorder;
-    private final Runnable onRecordingStateChanged;
-    private final JTextField folderField;
-    private final JButton browseButton = new JButton("Browse…");
-    private final JToggleButton recordButton = new JToggleButton("Record");
-    private final JLabel statusLabel = new JLabel("Off");
+    private final JTextField parentFolderField;
+    private final JTextField folderNameField = new JTextField("scenario-output", 36);
+    private final JButton browseButton = new JButton("Browse...");
+    private final JLabel statusLabel = new JLabel("Ready");
+    private final JLabel outputPathLabel = new JLabel();
+    private String previewScenarioName = "scenario";
 
-    RecordingPanel(
-            Component dialogParent,
-            TrackCsvRecorder recorder,
-            Runnable onRecordingStateChanged) {
-        super(new FlowLayout(FlowLayout.LEFT, 8, 5));
+    RecordingPanel(Component dialogParent, TrackCsvRecorder recorder) {
         this.dialogParent = dialogParent;
         this.recorder = recorder;
-        this.onRecordingStateChanged = onRecordingStateChanged;
+        setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setOpaque(false);
         setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.current().border()),
                 BorderFactory.createEmptyBorder(0, 8, 1, 8)));
 
-        JLabel title = new JLabel("Track recording");
+        JPanel parentRow = row();
+        JLabel title = new JLabel("CSV output");
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD));
-        add(title);
+        parentRow.add(title);
 
-        recordButton.setIcon(new RecordDotIcon());
-        recordButton.setToolTipText("Arm one-second track recording for the next pre-compute");
-        recordButton.addActionListener(event -> toggleRecording());
-        add(recordButton);
-
-        add(new JLabel("Parent folder:"));
-        folderField = new JTextField(recorder.outputParent().toString(), 38);
-        folderField.setToolTipText(
-                "Each pre-compute creates a unique <scenario-name>_yyyy-MM-dd_HH-mm-ss_SSS subfolder here");
-        folderField.addActionListener(event -> commitParentFolder());
-        add(folderField);
+        parentRow.add(new JLabel("Output path:"));
+        parentFolderField = new JTextField(recorder.outputParent().toString(), 48);
+        parentFolderField.setToolTipText("Parent folder where Save CSVs creates the export folder");
+        parentFolderField.addActionListener(event -> commitParentFolder());
+        parentRow.add(parentFolderField);
 
         browseButton.addActionListener(event -> browseForFolder());
-        add(browseButton);
+        parentRow.add(browseButton);
 
         statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.MUTED));
-        add(statusLabel);
+        parentRow.add(statusLabel);
+        add(parentRow);
+
+        JPanel folderRow = row();
+        folderRow.add(new JLabel("Folder name:"));
+        folderNameField.setToolTipText(
+                "Name for the export subfolder; existing names receive a numeric suffix");
+        folderNameField.addActionListener(event -> updateOutputPathPreview(previewScenarioName));
+        folderNameField.getDocument().addDocumentListener(new SimpleDocumentListener(
+                () -> updateOutputPathPreview(previewScenarioName)));
+        folderRow.add(folderNameField);
+        folderRow.add(new JLabel("Output folder:"));
+        outputPathLabel.setForeground(AppTheme.current().mutedText());
+        outputPathLabel.setPreferredSize(new Dimension(260, 18));
+        folderRow.add(outputPathLabel);
+        add(folderRow);
+
         refresh();
+    }
+
+    boolean commitOutputSettings(String scenarioName) {
+        if (!commitParentFolder()) {
+            return false;
+        }
+        String folderName = folderName(scenarioName);
+        if (folderName.isBlank()) {
+            JOptionPane.showMessageDialog(
+                    dialogParent,
+                    "Enter a folder name before saving CSV data.",
+                    "Missing export folder name",
+                    JOptionPane.WARNING_MESSAGE);
+            folderNameField.requestFocusInWindow();
+            return false;
+        }
+        updateOutputPathPreview(scenarioName);
+        return true;
     }
 
     boolean commitParentFolder() {
@@ -73,12 +97,12 @@ final class RecordingPanel extends JPanel {
             return true;
         }
         try {
-            String text = folderField.getText().trim();
+            String text = parentFolderField.getText().trim();
             if (text.isEmpty()) {
                 throw new InvalidPathException(text, "Choose a parent folder");
             }
             recorder.setOutputParent(Path.of(text));
-            folderField.setText(recorder.outputParent().toString());
+            parentFolderField.setText(recorder.outputParent().toString());
             refresh();
             return true;
         } catch (IllegalArgumentException exception) {
@@ -87,47 +111,54 @@ final class RecordingPanel extends JPanel {
                     "Choose a valid parent folder.\n" + exception.getMessage(),
                     "Invalid recording folder",
                     JOptionPane.WARNING_MESSAGE);
-            folderField.requestFocusInWindow();
+            parentFolderField.requestFocusInWindow();
             return false;
+        }
+    }
+
+    String folderName(String scenarioName) {
+        String text = folderNameField.getText().trim();
+        if (!text.isBlank()) {
+            return text;
+        }
+        return scenarioName == null || scenarioName.isBlank() ? "scenario" : scenarioName;
+    }
+
+    Path outputFolder(String scenarioName) {
+        return recorder.outputParent().resolve(safeFolderName(folderName(scenarioName)));
+    }
+
+    void rememberOutputFolder(Path folder) {
+        if (folder == null || folder.getFileName() == null) {
+            return;
+        }
+        Path parent = folder.toAbsolutePath().normalize().getParent();
+        if (parent != null && parent.equals(recorder.outputParent())) {
+            folderNameField.setText(folder.getFileName().toString());
+            updateOutputPathPreview(previewScenarioName);
         }
     }
 
     void refresh() {
         boolean active = recorder.isActive();
-        recordButton.setSelected(recorder.isArmed());
-        folderField.setEnabled(!active);
+        parentFolderField.setEnabled(!active);
+        folderNameField.setEnabled(!active);
         browseButton.setEnabled(!active);
-        recordButton.repaint();
+        updateOutputPathPreview(previewScenarioName);
 
         if (recorder.lastError() != null) {
             statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
             statusLabel.setText(recorder.lastError());
         } else if (active && recorder.runDirectory() != null) {
             statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.DANGER));
-            statusLabel.setText("Recording to " + recorder.runDirectory().getFileName());
-        } else if (recorder.isArmed()) {
-            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.WARNING));
-            statusLabel.setText("Armed for next pre-compute");
+            statusLabel.setText("Saving to " + recorder.runDirectory().getFileName());
+        } else if (recorder.runDirectory() != null) {
+            statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.SUCCESS));
+            statusLabel.setText("Last saved to " + recorder.runDirectory().getFileName());
         } else {
             statusLabel.setForeground(AppTheme.statusColor(AppTheme.Status.MUTED));
-            statusLabel.setText("Off");
+            statusLabel.setText("Ready");
         }
-    }
-
-    private void toggleRecording() {
-        if (recordButton.isSelected()) {
-            if (!commitParentFolder()) {
-                recordButton.setSelected(false);
-                recorder.setArmed(false);
-                refresh();
-                return;
-            }
-            recorder.setArmed(true);
-        } else {
-            recorder.setArmed(false);
-        }
-        refresh();
-        onRecordingStateChanged.run();
     }
 
     private void browseForFolder() {
@@ -136,41 +167,49 @@ final class RecordingPanel extends JPanel {
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);
         if (chooser.showOpenDialog(dialogParent) == JFileChooser.APPROVE_OPTION) {
-            folderField.setText(chooser.getSelectedFile().toPath().toString());
+            parentFolderField.setText(chooser.getSelectedFile().toPath().toString());
             commitParentFolder();
         }
     }
 
-    private final class RecordDotIcon implements Icon {
-        private static final int SIZE = 14;
+    private void updateOutputPathPreview(String scenarioName) {
+        String effectiveName = scenarioName == null || scenarioName.isBlank()
+                ? "scenario"
+                : scenarioName;
+        previewScenarioName = effectiveName;
+        Path outputFolder = outputFolder(effectiveName);
+        outputPathLabel.setText(outputFolder.toString());
+    }
 
+    private static JPanel row() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        panel.setOpaque(false);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        return panel;
+    }
+
+    private static String safeFolderName(String text) {
+        String safe = text == null ? "" : text
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        return safe.isBlank() ? "scenario" : safe;
+    }
+
+    private record SimpleDocumentListener(Runnable onChange) implements DocumentListener {
         @Override
-        public void paintIcon(Component component, Graphics graphics, int x, int y) {
-            Graphics2D g2 = (Graphics2D) graphics.create();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            Color fill = recorder.isActive()
-                    ? new Color(238, 35, 35)
-                    : recorder.isArmed() ? new Color(151, 54, 54) : new Color(155, 160, 166);
-            if (recorder.isActive()) {
-                g2.setColor(new Color(238, 35, 35, 70));
-                g2.fillOval(x, y, SIZE, SIZE);
-            }
-            g2.setColor(fill);
-            g2.fillOval(x + 2, y + 2, SIZE - 4, SIZE - 4);
-            g2.setStroke(new BasicStroke(1.0f));
-            g2.setColor(new Color(110, 20, 20, 120));
-            g2.drawOval(x + 2, y + 2, SIZE - 4, SIZE - 4);
-            g2.dispose();
+        public void insertUpdate(DocumentEvent event) {
+            onChange.run();
         }
 
         @Override
-        public int getIconWidth() {
-            return SIZE;
+        public void removeUpdate(DocumentEvent event) {
+            onChange.run();
         }
 
         @Override
-        public int getIconHeight() {
-            return SIZE;
+        public void changedUpdate(DocumentEvent event) {
+            onChange.run();
         }
     }
 }

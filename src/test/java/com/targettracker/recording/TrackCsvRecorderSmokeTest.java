@@ -103,6 +103,33 @@ public final class TrackCsvRecorderSmokeTest {
                 throw new AssertionError("Run directory should include the safe scenario name");
             }
             recorder.finishRun();
+
+            if (!recorder.beginExportRun(
+                    "Ignored Scenario Name",
+                    "Operator Folder 01",
+                    120.0,
+                    List.of())) {
+                throw new AssertionError("A named export run should start");
+            }
+            if (!recorder.runDirectory().getFileName().toString()
+                    .equals("operator_folder_01")) {
+                throw new AssertionError("Export folder should use the requested folder name");
+            }
+            recorder.finishRun();
+
+            Path snapshotOnly = parent.resolve("operator_folder_02");
+            Files.createDirectories(snapshotOnly.resolve("snapshots"));
+            if (!recorder.beginExportRun(
+                    "Ignored Scenario Name",
+                    "Operator Folder 02",
+                    120.0,
+                    List.of())) {
+                throw new AssertionError("A snapshot-only export folder should be reusable");
+            }
+            if (!recorder.runDirectory().equals(snapshotOnly)) {
+                throw new AssertionError("Snapshot-only folders should be reused for CSV export");
+            }
+            recorder.finishRun();
             System.out.println("TrackCsvRecorderSmokeTest passed");
         } finally {
             try (var paths = Files.walk(parent)) {

@@ -138,6 +138,7 @@ final class EarthMapCanvas extends JPanel {
     private final Consumer<GeodeticPoint> onCursorChanged;
     private final BufferedImage earthImage;
     private final NaturalEarthDetailLayer detailLayer;
+    private final List<Rectangle> labelReservations = new ArrayList<>();
 
     private DrawingMode drawingMode = DrawingMode.FREE_HAND;
     private boolean freeHandDrawing;
@@ -723,6 +724,7 @@ final class EarthMapCanvas extends JPanel {
             drawPlannedTrajectories(g);
             drawRecentHistory(g);
             drawMeasurements(g);
+            labelReservations.clear();
             drawTracks(g);
             drawDeadStitchingSegments(g);
             drawStitchingOverlays(g);
@@ -1095,7 +1097,7 @@ final class EarthMapCanvas extends JPanel {
                 radius * 2 + 4, radius * 2 + 4);
         g.setColor(color);
         g.fillOval(point.x - radius, point.y - radius, radius * 2, radius * 2);
-        drawLabelChip(g, id, point.x + radius + 5, point.y - radius - 2,
+        drawLabelChipAvoiding(g, id, point.x + radius + 5, point.y - radius - 2,
                 new Color(31, 38, 45));
     }
 
@@ -1145,14 +1147,14 @@ final class EarthMapCanvas extends JPanel {
                     ? new Color(105, 110, 116)
                     : new Color(25, 31, 37));
             String label = track.dead() ? track.id() + " (dead)" : track.id();
-            drawLabelChip(g, label, point.x + radius + 5, point.y - radius - 2,
+            drawLabelChipAvoiding(g, label, point.x + radius + 5, point.y - radius - 2,
                     track.dead() || greyed
                             ? new Color(82, 88, 96)
                             : new Color(25, 31, 37));
             if (track.dead() && !track.deadReason().isBlank()) {
                 Font previousFont = g.getFont();
                 g.setFont(g.getFont().deriveFont(Font.PLAIN, 10.0f));
-                drawLabelChip(g, track.deadReason(), point.x + radius + 5,
+                drawLabelChipAvoiding(g, track.deadReason(), point.x + radius + 5,
                         point.y + radius + 10, new Color(82, 88, 96));
                 g.setFont(previousFont);
             }
@@ -1191,7 +1193,7 @@ final class EarthMapCanvas extends JPanel {
             g.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
             g.setColor(Color.WHITE);
             g.drawRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
-            drawLabelChip(g, segment.trackId() + " (dead)",
+            drawLabelChipAvoiding(g, segment.trackId() + " (dead)",
                     point.x + radius + 5,
                     point.y - radius - 2,
                     new Color(82, 88, 96));
@@ -1781,6 +1783,82 @@ final class EarthMapCanvas extends JPanel {
         return previous != null
                 && next != null
                 && Math.abs(next.x - previous.x) < mapBounds().width / 2;
+    }
+
+    private void drawLabelChipAvoiding(
+            Graphics2D g,
+            String text,
+            int preferredX,
+            int preferredBaseline,
+            Color foreground) {
+        int x = clampedLabelX(g, text, preferredX);
+        int baseline = clampedLabelBaseline(g, preferredBaseline);
+        int step = Math.max(18, g.getFontMetrics().getHeight() + 6);
+        Rectangle chosenBounds = labelChipBounds(g, text, x, baseline);
+        int chosenBaseline = baseline;
+
+        for (int attempt = 0; attempt < 13; attempt++) {
+            int multiplier = attempt == 0
+                    ? 0
+                    : ((attempt + 1) / 2) * (attempt % 2 == 1 ? 1 : -1);
+            int candidateBaseline = clampedLabelBaseline(
+                    g,
+                    preferredBaseline + multiplier * step);
+            Rectangle candidateBounds = labelChipBounds(g, text, x, candidateBaseline);
+            if (!overlapsReservedLabel(candidateBounds)) {
+                chosenBaseline = candidateBaseline;
+                chosenBounds = candidateBounds;
+                break;
+            }
+        }
+
+        drawLabelChip(g, text, x, chosenBaseline, foreground);
+        labelReservations.add(chosenBounds);
+    }
+
+    private int clampedLabelX(Graphics2D g, String text, int preferredX) {
+        Rectangle map = mapBounds();
+        Rectangle bounds = labelChipBounds(g, text, preferredX, 0);
+        int minTextX = map.x + 8;
+        int maxTextX = map.x + map.width - bounds.width + 5 - 8;
+        if (maxTextX < minTextX) {
+            return minTextX;
+        }
+        return Math.max(minTextX, Math.min(preferredX, maxTextX));
+    }
+
+    private int clampedLabelBaseline(Graphics2D g, int preferredBaseline) {
+        Rectangle map = mapBounds();
+        FontMetrics metrics = g.getFontMetrics();
+        int minBaseline = map.y + metrics.getAscent() + 6;
+        int maxBaseline = map.y + map.height - metrics.getDescent() - 6;
+        if (maxBaseline < minBaseline) {
+            return minBaseline;
+        }
+        return Math.max(minBaseline, Math.min(preferredBaseline, maxBaseline));
+    }
+
+    private boolean overlapsReservedLabel(Rectangle candidate) {
+        for (Rectangle reserved : labelReservations) {
+            if (candidate.intersects(reserved)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Rectangle labelChipBounds(
+            Graphics2D g,
+            String text,
+            int x,
+            int baseline) {
+        FontMetrics metrics = g.getFontMetrics();
+        int padX = 5;
+        int padY = 3;
+        int width = metrics.stringWidth(text) + padX * 2;
+        int height = metrics.getHeight() + padY * 2;
+        int y = baseline - metrics.getAscent() - padY;
+        return new Rectangle(x - padX, y, width + 1, height + 1);
     }
 
     private static void drawLabelChip(

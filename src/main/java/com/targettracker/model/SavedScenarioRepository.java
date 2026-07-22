@@ -50,11 +50,46 @@ public final class SavedScenarioRepository {
         }
         Files.createDirectories(directory);
         Path path = uniquePath(name);
+        write(path, name, model);
+        return read(path);
+    }
+
+    public SavedScenarioDefinition saveCopy(Path path, String requestedName, ScenarioModel model)
+            throws IOException {
+        if (path == null) {
+            throw new IllegalArgumentException("A scenario file path is required");
+        }
+        String name = sanitizeDisplayName(requestedName);
+        if (name.isBlank()) {
+            name = baseName(path);
+        }
+        if (name.isBlank()) {
+            name = "scenario";
+        }
+        Path parent = path.toAbsolutePath().normalize().getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        write(path.toAbsolutePath().normalize(), name, model);
+        return read(path.toAbsolutePath().normalize());
+    }
+
+    public SavedScenarioDefinition read(Path path) throws IOException {
+        return readDefinition(path);
+    }
+
+    private void write(Path path, String name, ScenarioModel model) throws IOException {
         Properties properties = new Properties();
         properties.setProperty("name", name);
         if (model.hasScenarioLength()) {
             properties.setProperty("scenario.length.seconds",
                     Double.toString(model.explicitScenarioLengthSeconds()));
+        }
+        if (model.durationSeconds() > 0.0) {
+            properties.setProperty("scenario.run.start.seconds",
+                    Double.toString(model.runStartSeconds()));
+            properties.setProperty("scenario.run.stop.seconds",
+                    Double.toString(model.runStopSeconds()));
         }
         properties.setProperty("target.count", Integer.toString(model.targets().size()));
         for (int targetIndex = 0; targetIndex < model.targets().size(); targetIndex++) {
@@ -95,7 +130,6 @@ public final class SavedScenarioRepository {
         try (Writer writer = Files.newBufferedWriter(path)) {
             properties.store(writer, "ECEF Target Tracker saved scenario");
         }
-        return read(path);
     }
 
     public void loadInto(SavedScenarioDefinition scenario, ScenarioModel model) {
@@ -115,9 +149,14 @@ public final class SavedScenarioRepository {
         }
         model.clearBlackoutRegions();
         scenario.blackoutRegions().forEach(model::addBlackoutRegion);
+        if (scenario.runStartSeconds() != null && scenario.runStopSeconds() != null) {
+            model.setRunWindowSeconds(scenario.runStartSeconds(), scenario.runStopSeconds());
+        } else {
+            model.resetRunWindow();
+        }
     }
 
-    private SavedScenarioDefinition read(Path path) throws IOException {
+    private SavedScenarioDefinition readDefinition(Path path) throws IOException {
         Properties properties = new Properties();
         try (Reader reader = Files.newBufferedReader(path)) {
             properties.load(reader);
@@ -125,6 +164,10 @@ public final class SavedScenarioRepository {
         String name = properties.getProperty("name", baseName(path));
         Double scenarioLengthSeconds = parseOptionalDouble(
                 properties, "scenario.length.seconds");
+        Double runStartSeconds = parseOptionalNonNegativeDouble(
+                properties, "scenario.run.start.seconds");
+        Double runStopSeconds = parseOptionalNonNegativeDouble(
+                properties, "scenario.run.stop.seconds");
         int targetCount = parseInt(properties, "target.count", 0);
         List<SavedScenarioDefinition.TargetData> targets = new ArrayList<>();
         for (int targetIndex = 0; targetIndex < targetCount; targetIndex++) {
@@ -165,7 +208,14 @@ public final class SavedScenarioRepository {
                         Double.parseDouble(properties.getProperty(prefix + "height", "1000"))));
             }
         }
-        return new SavedScenarioDefinition(name, path, scenarioLengthSeconds, targets, regions);
+        return new SavedScenarioDefinition(
+                name,
+                path,
+                scenarioLengthSeconds,
+                runStartSeconds,
+                runStopSeconds,
+                targets,
+                regions);
     }
 
     private Path uniquePath(String name) {
@@ -242,6 +292,15 @@ public final class SavedScenarioRepository {
         }
         double parsed = Double.parseDouble(value);
         return Double.isFinite(parsed) && parsed > 0.0 ? parsed : null;
+    }
+
+    private static Double parseOptionalNonNegativeDouble(Properties properties, String key) {
+        String value = properties.getProperty(key);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        double parsed = Double.parseDouble(value);
+        return Double.isFinite(parsed) && parsed >= 0.0 ? parsed : null;
     }
 
     private static String sanitizeDisplayName(String text) {

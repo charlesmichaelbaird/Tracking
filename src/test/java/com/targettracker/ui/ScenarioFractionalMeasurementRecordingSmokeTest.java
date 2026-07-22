@@ -37,7 +37,6 @@ public final class ScenarioFractionalMeasurementRecordingSmokeTest {
             settings.setParameters(new SensorParameters(1.0, 0.5, 1.0, 1.0, 1.0, 10));
             TrackCsvRecorder recorder = new TrackCsvRecorder();
             recorder.setOutputParent(parent);
-            recorder.setArmed(true);
             ScenarioPlayback playback = new ScenarioPlayback(
                     model,
                     () -> {
@@ -47,6 +46,12 @@ public final class ScenarioFractionalMeasurementRecordingSmokeTest {
                     recorder);
             if (!playback.precompute("fractional looks")) {
                 throw new AssertionError("Fractional-look scenario did not pre-compute");
+            }
+            if (recorder.runDirectory() != null) {
+                throw new AssertionError("Pre-compute should not save fractional CSV files automatically");
+            }
+            if (!playback.saveRecording("fractional looks")) {
+                throw new AssertionError("Explicit CSV export should save fractional-look data");
             }
 
             List<String> lines = Files.readAllLines(

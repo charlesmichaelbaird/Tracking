@@ -41,10 +41,21 @@ final class MeasurementEngine {
     }
 
     void beginScenario() {
+        beginScenario(0.0);
+    }
+
+    void beginScenario(double startSeconds) {
         newlyGeneratedMeasurements.clear();
         allMeasurements.clear();
         activeParameters = settings.parameters();
-        nextLookSeconds = activeParameters.lookOffsetSeconds();
+        double offset = activeParameters.lookOffsetSeconds();
+        double interval = activeParameters.lookIntervalSeconds();
+        if (startSeconds <= offset + TIME_EPSILON_SECONDS) {
+            nextLookSeconds = offset;
+        } else {
+            double intervals = Math.ceil((startSeconds - offset) / interval - TIME_EPSILON_SECONDS);
+            nextLookSeconds = offset + Math.max(0.0, intervals) * interval;
+        }
     }
 
     void reset() {
@@ -151,6 +162,9 @@ final class MeasurementEngine {
     private void makeLook(double lookTimeSeconds) {
         for (TargetTrajectory target : model.targets()) {
             if (!target.isRunnable()) {
+                continue;
+            }
+            if (lookTimeSeconds > target.durationSeconds() + TIME_EPSILON_SECONDS) {
                 continue;
             }
             EcefPoint truePosition = target.positionAt(lookTimeSeconds);

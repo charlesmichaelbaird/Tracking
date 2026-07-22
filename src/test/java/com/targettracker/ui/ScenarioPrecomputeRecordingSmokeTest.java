@@ -42,7 +42,6 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
                     model, sensorSettings, new Random(4));
             TrackCsvRecorder recorder = new TrackCsvRecorder();
             recorder.setOutputParent(parent);
-            recorder.setArmed(true);
             ScenarioPlayback playback = new ScenarioPlayback(
                     model,
                     () -> {
@@ -53,7 +52,13 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
 
             if (!playback.precompute() || recorder.isActive() || !playback.canSeek()) {
                 throw new AssertionError(
-                        "Recorded pre-compute should finish files and leave replay seekable");
+                        "Pre-compute should finish and leave replay seekable");
+            }
+            if (recorder.runDirectory() != null) {
+                throw new AssertionError("Pre-compute should not save CSV files automatically");
+            }
+            if (!playback.canExportRecording() || !playback.saveRecording("precompute recording")) {
+                throw new AssertionError("Explicit CSV export should save pre-computed data");
             }
             List<String> lines = Files.readAllLines(recorder.runDirectory()
                     .resolve(TrackCsvRecorder.TRACK_DIRECTORY).resolve("TRK-001.csv"));
@@ -148,7 +153,6 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
                 1.0, 0.0, 1.0, 1.0, 1.0, 10));
         TrackCsvRecorder recorder = new TrackCsvRecorder();
         recorder.setOutputParent(parent);
-        recorder.setArmed(true);
         ScenarioPlayback playback = new ScenarioPlayback(
                 model,
                 () -> {
@@ -159,6 +163,12 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
 
         if (!playback.precompute("capped")) {
             throw new AssertionError("Capped scenario should pre-compute");
+        }
+        if (recorder.runDirectory() != null) {
+            throw new AssertionError("Pre-compute should not save capped CSV files automatically");
+        }
+        if (!playback.saveRecording("capped")) {
+            throw new AssertionError("Explicit CSV export should save capped scenario data");
         }
         Path truthFile = recorder.runDirectory()
                 .resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY)
@@ -183,6 +193,69 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
                         "track CSV " + trackFile.getFileName());
             }
         }
+        verifyRunWindowCapsRecording(parent);
+    }
+
+    private static void verifyRunWindowCapsRecording(Path parent) throws Exception {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory target = model.addTarget();
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(20.0, 12.0, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(20.005, 12.0, 0.0)));
+        double wantedDuration = 5.55;
+        double speed = target.surfaceLengthMeters() / wantedDuration;
+        for (int index = 0; index < target.velocityProfile().sampleCount(); index++) {
+            target.velocityProfile().setSample(index, speed);
+        }
+        double runStart = 1.25;
+        double runStop = 2.35;
+        model.setRunWindowSeconds(runStart, runStop);
+
+        SensorSettings sensorSettings = new SensorSettings();
+        sensorSettings.setParameters(new SensorParameters(
+                1.0, 0.0, 1.0, 1.0, 1.0, 10));
+        TrackCsvRecorder recorder = new TrackCsvRecorder();
+        recorder.setOutputParent(parent);
+        ScenarioPlayback playback = new ScenarioPlayback(
+                model,
+                () -> {
+                },
+                new MeasurementEngine(model, sensorSettings, new Random(21)),
+                new ImmTracker(new ImmSettings()),
+                recorder);
+
+        if (!playback.precompute("windowed")) {
+            throw new AssertionError("Windowed scenario should pre-compute");
+        }
+        if (!playback.saveRecording("windowed")) {
+            throw new AssertionError("Explicit CSV export should save windowed scenario data");
+        }
+        Path truthFile = recorder.runDirectory()
+                .resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY)
+                .resolve("TGT-001.csv");
+        List<String> truthLines = Files.readAllLines(truthFile);
+        double firstTruthTime = Double.parseDouble(truthLines.get(1).split(",", -1)[1]);
+        double lastTruthTime = Double.parseDouble(
+                truthLines.get(truthLines.size() - 1).split(",", -1)[1]);
+        requireClose(runStart, firstTruthTime, 1.0e-9, "windowed truth start");
+        requireClose(runStop, lastTruthTime, 1.0e-9, "windowed truth stop");
+        requireNoTimesBefore(truthLines, 1, runStart, "windowed ground-truth target CSV");
+        requireNoTimesBeyond(truthLines, 1, runStop, "windowed ground-truth target CSV");
+        try (var paths = Files.list(recorder.runDirectory()
+                .resolve(TrackCsvRecorder.TRACK_DIRECTORY))) {
+            for (Path trackFile : paths.filter(path -> path.toString().endsWith(".csv")).toList()) {
+                List<String> trackLines = Files.readAllLines(trackFile);
+                requireNoTimesBefore(
+                        trackLines,
+                        1,
+                        runStart,
+                        "windowed track CSV " + trackFile.getFileName());
+                requireNoTimesBeyond(
+                        trackLines,
+                        1,
+                        runStop,
+                        "windowed track CSV " + trackFile.getFileName());
+            }
+        }
     }
 
     private static void requireNoTimesBeyond(
@@ -195,6 +268,20 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
             if (timeSeconds > maximumSeconds + 1.0e-9) {
                 throw new AssertionError("%s should not include time %.3f past %.3f"
                         .formatted(label, timeSeconds, maximumSeconds));
+            }
+        }
+    }
+
+    private static void requireNoTimesBefore(
+            List<String> lines,
+            int timeColumn,
+            double minimumSeconds,
+            String label) {
+        for (int index = 1; index < lines.size(); index++) {
+            double timeSeconds = Double.parseDouble(lines.get(index).split(",", -1)[timeColumn]);
+            if (timeSeconds < minimumSeconds - 1.0e-9) {
+                throw new AssertionError("%s should not include time %.3f before %.3f"
+                        .formatted(label, timeSeconds, minimumSeconds));
             }
         }
     }

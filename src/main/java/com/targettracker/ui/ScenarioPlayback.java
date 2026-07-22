@@ -49,8 +49,12 @@ final class ScenarioPlayback {
     private final List<Map<TargetTrajectory, Integer>> generatedTargetHistoryCounts =
             new ArrayList<>();
     private final Map<String, GroundTruthCache> importedGroundTruthCaches = new LinkedHashMap<>();
+    private final List<TrackRecord> exportTrackRecords = new ArrayList<>();
+    private final List<GroundTruthRecord> exportGroundTruthRecords = new ArrayList<>();
 
     private double elapsedSeconds;
+    private double runStartSeconds;
+    private double runStopSeconds;
     private long lastTickNanos;
     private boolean running;
     private boolean paused;
@@ -91,11 +95,16 @@ final class ScenarioPlayback {
         return precompute("scenario");
     }
 
-    /** Computes and optionally records a complete named scenario. */
+    /** Computes and caches a complete named scenario for replay and optional export. */
     boolean precompute(String scenarioName) {
         double duration = model.durationSeconds();
-        boolean hasRunnableTarget = model.targets().stream().anyMatch(TargetTrajectory::isRunnable);
-        if (duration <= 0.0 || !hasRunnableTarget || computing) {
+        double startSeconds = model.runStartSeconds();
+        double stopSeconds = model.runStopSeconds();
+        double runDuration = stopSeconds - startSeconds;
+        boolean hasRunnableTarget = model.targets().stream()
+                .anyMatch(target -> target.isRunnable()
+                        && target.durationSeconds() >= startSeconds - TIME_EPSILON_SECONDS);
+        if (duration <= 0.0 || runDuration <= 0.0 || !hasRunnableTarget || computing) {
             return false;
         }
 
@@ -106,32 +115,31 @@ final class ScenarioPlayback {
         importedReplay = false;
         importedDurationSeconds = 0.0;
         clearReplayData();
-        elapsedSeconds = 0.0;
+        exportTrackRecords.clear();
+        exportGroundTruthRecords.clear();
+        runStartSeconds = startSeconds;
+        runStopSeconds = stopSeconds;
+        elapsedSeconds = runStartSeconds;
         recentHistory.clear();
         immTracker.reset();
-        measurementEngine.beginScenario();
-        if (!recorder.beginRun(scenarioName, duration, model.blackoutRegions())) {
-            computing = false;
-            onUpdate.run();
-            return false;
-        }
+        measurementEngine.beginScenario(runStartSeconds);
         onUpdate.run();
 
         try {
-            int steps = Math.max(1, (int) Math.ceil(duration / PRECOMPUTE_STEP_SECONDS));
-            for (int step = 0; step <= steps; step++) {
-                double time = Math.min(duration, step * PRECOMPUTE_STEP_SECONDS);
-                recordGroundTruth(time);
+            double time = runStartSeconds;
+            while (true) {
+                exportGroundTruthRecords.addAll(groundTruthRecordsAt(time));
                 measurementEngine.advanceTo(time);
                 immTracker.processMeasurements(measurementEngine.drainNewMeasurements());
                 List<TrackRecord> measurementUpdates = immTracker.drainUpdatedRecords();
-                recordFractionalMeasurementUpdates(measurementUpdates);
+                cacheFractionalMeasurementUpdates(measurementUpdates);
                 immTracker.advanceToForReplay(time);
                 captureReplayFrame(time);
-                recordIntegerSecond(time, measurementUpdates);
-                if (time >= duration) {
+                cacheIntegerSecond(time, measurementUpdates);
+                if (time >= runStopSeconds - TIME_EPSILON_SECONDS) {
                     break;
                 }
+                time = nextPrecomputeTime(time);
             }
         } finally {
             recorder.finishRun();
@@ -142,7 +150,7 @@ final class ScenarioPlayback {
         rebuildGeneratedTargetHistoryCache();
         replayReady = true;
         replayDisplayActive = true;
-        seekToInternal(0.0);
+        seekToInternal(runStartSeconds);
         onUpdate.run();
         return true;
     }
@@ -160,6 +168,8 @@ final class ScenarioPlayback {
         clearReplayData();
         importedReplay = true;
         importedDurationSeconds = scenario.durationSeconds();
+        runStartSeconds = 0.0;
+        runStopSeconds = importedDurationSeconds;
 
         TreeMap<Double, List<TrackRecord>> recordsByTime = new TreeMap<>();
         for (TrackRecord record : scenario.records()) {
@@ -233,8 +243,9 @@ final class ScenarioPlayback {
         if (!replayReady || computing) {
             return false;
         }
-        if (elapsedSeconds >= durationSeconds() - TIME_EPSILON_SECONDS) {
-            seekToInternal(0.0);
+        if (elapsedSeconds >= runStopSeconds() - TIME_EPSILON_SECONDS
+                || elapsedSeconds < runStartSeconds() - TIME_EPSILON_SECONDS) {
+            seekToInternal(runStartSeconds());
         }
         running = true;
         paused = false;
@@ -249,7 +260,7 @@ final class ScenarioPlayback {
         if (!replayReady || computing) {
             return false;
         }
-        seekToInternal(0.0);
+        seekToInternal(runStartSeconds());
         running = true;
         paused = true;
         replayDisplayActive = true;
@@ -287,6 +298,10 @@ final class ScenarioPlayback {
         clearReplayData();
         importedReplay = false;
         importedDurationSeconds = 0.0;
+        runStartSeconds = 0.0;
+        runStopSeconds = 0.0;
+        exportTrackRecords.clear();
+        exportGroundTruthRecords.clear();
         recorder.finishRun();
         onUpdate.run();
     }
@@ -319,6 +334,24 @@ final class ScenarioPlayback {
         return importedReplay ? importedDurationSeconds : model.durationSeconds();
     }
 
+    double runStartSeconds() {
+        return importedReplay ? 0.0 : runStartSeconds;
+    }
+
+    double runStopSeconds() {
+        return importedReplay
+                ? importedDurationSeconds
+                : Math.max(runStartSeconds, runStopSeconds);
+    }
+
+    boolean canExportRecording() {
+        return replayReady
+                && !importedReplay
+                && !computing
+                && !recorder.isActive()
+                && (!exportTrackRecords.isEmpty() || !exportGroundTruthRecords.isEmpty());
+    }
+
     boolean canSeek() {
         return replayReady && !computing && !recorder.isActive();
     }
@@ -344,7 +377,11 @@ final class ScenarioPlayback {
     }
 
     EcefPoint currentPosition(TargetTrajectory target) {
-        return target.isRunnable() ? target.positionAt(elapsedSeconds) : null;
+        if (!target.isRunnable()
+                || elapsedSeconds > target.durationSeconds() + TIME_EPSILON_SECONDS) {
+            return null;
+        }
+        return target.positionAt(elapsedSeconds);
     }
 
     Map<TargetTrajectory, Deque<EcefPoint>> recentHistory() {
@@ -361,6 +398,32 @@ final class ScenarioPlayback {
         return true;
     }
 
+    boolean saveRecording(String scenarioName) {
+        return saveRecording(scenarioName, null);
+    }
+
+    boolean saveRecording(String scenarioName, String folderName) {
+        if (!canExportRecording()) {
+            return false;
+        }
+        if (!recorder.beginExportRun(
+                scenarioName,
+                folderName,
+                runStopSeconds(),
+                model.blackoutRegions())) {
+            onUpdate.run();
+            return false;
+        }
+        try {
+            recorder.recordGroundTruth(exportGroundTruthRecords);
+            recorder.recordSamples(exportTrackRecords);
+        } finally {
+            recorder.finishRun();
+        }
+        onUpdate.run();
+        return recorder.lastError() == null;
+    }
+
     private void replayTick() {
         long now = System.nanoTime();
         if (paused) {
@@ -368,7 +431,7 @@ final class ScenarioPlayback {
             return;
         }
 
-        double duration = durationSeconds();
+        double duration = runStopSeconds();
         double wantedTime = elapsedSeconds + (now - lastTickNanos) / 1_000_000_000.0;
         lastTickNanos = now;
         seekToInternal(Math.min(wantedTime, duration));
@@ -380,9 +443,21 @@ final class ScenarioPlayback {
         onUpdate.run();
     }
 
-    private void recordIntegerSecond(double time, List<TrackRecord> measurementUpdates) {
+    private double nextPrecomputeTime(double currentTime) {
+        double nextGrid = Math.ceil(
+                (currentTime + TIME_EPSILON_SECONDS) / PRECOMPUTE_STEP_SECONDS)
+                * PRECOMPUTE_STEP_SECONDS;
+        if (nextGrid <= currentTime + TIME_EPSILON_SECONDS) {
+            nextGrid = currentTime + PRECOMPUTE_STEP_SECONDS;
+        }
+        return Math.min(runStopSeconds, nextGrid);
+    }
+
+    private void cacheIntegerSecond(double time, List<TrackRecord> measurementUpdates) {
         long integerSecond = Math.round(time);
-        if (Math.abs(time - integerSecond) > TIME_EPSILON_SECONDS || !recorder.isActive()) {
+        if (Math.abs(time - integerSecond) > TIME_EPSILON_SECONDS
+                || integerSecond < runStartSeconds() - TIME_EPSILON_SECONDS
+                || integerSecond > runStopSeconds() + TIME_EPSILON_SECONDS) {
             return;
         }
         Set<String> updatedTrackIds = new HashSet<>();
@@ -391,25 +466,24 @@ final class ScenarioPlayback {
                 updatedTrackIds.add(update.trackId());
             }
         }
-        recorder.recordSamples(immTracker.recordsAt(integerSecond, updatedTrackIds));
+        exportTrackRecords.addAll(immTracker.recordsAt(integerSecond, updatedTrackIds));
     }
 
-    private void recordFractionalMeasurementUpdates(List<TrackRecord> measurementUpdates) {
-        if (!recorder.isActive() || measurementUpdates.isEmpty()) {
+    private void cacheFractionalMeasurementUpdates(List<TrackRecord> measurementUpdates) {
+        if (measurementUpdates.isEmpty()) {
             return;
         }
         List<TrackRecord> fractionalUpdates = measurementUpdates.stream()
                 .filter(update -> Math.abs(
                         update.timeSeconds() - Math.rint(update.timeSeconds()))
                         > TIME_EPSILON_SECONDS)
+                .filter(update -> update.timeSeconds() >= runStartSeconds() - TIME_EPSILON_SECONDS
+                        && update.timeSeconds() <= runStopSeconds() + TIME_EPSILON_SECONDS)
                 .toList();
-        recorder.recordSamples(fractionalUpdates);
+        exportTrackRecords.addAll(fractionalUpdates);
     }
 
-    private void recordGroundTruth(double timeSeconds) {
-        if (!recorder.isActive()) {
-            return;
-        }
+    private List<GroundTruthRecord> groundTruthRecordsAt(double timeSeconds) {
         List<GroundTruthRecord> records = new ArrayList<>();
         for (TargetTrajectory target : model.targets()) {
             if (!target.isRunnable()) {
@@ -440,7 +514,7 @@ final class ScenarioPlayback {
                     state,
                     model.isInBlackout(position)));
         }
-        recorder.recordGroundTruth(records);
+        return List.copyOf(records);
     }
 
     private static double groundTruthEndTime(double targetDurationSeconds) {
@@ -470,7 +544,9 @@ final class ScenarioPlayback {
             recentHistory.clear();
             return;
         }
-        elapsedSeconds = Math.max(0.0, Math.min(durationSeconds(), wantedSeconds));
+        double lower = replayReady ? runStartSeconds() : 0.0;
+        double upper = replayReady ? runStopSeconds() : durationSeconds();
+        elapsedSeconds = Math.max(lower, Math.min(upper, wantedSeconds));
         int frameIndex = closestFrameIndex(elapsedSeconds);
         ReplayFrame selectedFrame = replayFrames.get(frameIndex);
         Map<String, Integer> tailCounts = frameIndex < replayTrackTailCounts.size()
@@ -656,6 +732,8 @@ final class ScenarioPlayback {
         generatedTargetHistoryPoints.clear();
         generatedTargetHistoryCounts.clear();
         importedGroundTruthCaches.clear();
+        exportTrackRecords.clear();
+        exportGroundTruthRecords.clear();
         replayReady = false;
         replayDisplayActive = false;
     }

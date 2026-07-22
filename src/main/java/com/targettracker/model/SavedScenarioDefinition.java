@@ -8,6 +8,8 @@ public record SavedScenarioDefinition(
         String name,
         Path path,
         Double scenarioLengthSeconds,
+        Double runStartSeconds,
+        Double runStopSeconds,
         List<TargetData> targets,
         List<BlackoutRegion> blackoutRegions) {
     public SavedScenarioDefinition {
@@ -15,8 +17,29 @@ public record SavedScenarioDefinition(
                 && (!Double.isFinite(scenarioLengthSeconds) || scenarioLengthSeconds <= 0.0)) {
             scenarioLengthSeconds = null;
         }
+        if (runStartSeconds != null
+                && (!Double.isFinite(runStartSeconds) || runStartSeconds < 0.0)) {
+            runStartSeconds = null;
+        }
+        if (runStopSeconds != null
+                && (!Double.isFinite(runStopSeconds) || runStopSeconds < 0.0)) {
+            runStopSeconds = null;
+        }
+        if ((runStartSeconds == null) != (runStopSeconds == null)) {
+            runStartSeconds = null;
+            runStopSeconds = null;
+        }
         targets = targets == null ? List.of() : List.copyOf(targets);
         blackoutRegions = blackoutRegions == null ? List.of() : List.copyOf(blackoutRegions);
+    }
+
+    public SavedScenarioDefinition(
+            String name,
+            Path path,
+            Double scenarioLengthSeconds,
+            List<TargetData> targets,
+            List<BlackoutRegion> blackoutRegions) {
+        this(name, path, scenarioLengthSeconds, null, null, targets, blackoutRegions);
     }
 
     public SavedScenarioDefinition(

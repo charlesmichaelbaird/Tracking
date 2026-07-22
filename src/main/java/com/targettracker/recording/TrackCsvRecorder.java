@@ -110,8 +110,42 @@ public final class TrackCsvRecorder implements AutoCloseable {
             String scenarioName,
             double durationSeconds,
             List<BlackoutRegion> blackoutRegions) {
+        return beginRun(scenarioName, durationSeconds, blackoutRegions, false);
+    }
+
+    /** Starts an explicit user-requested export run. */
+    public boolean beginExportRun(
+            String scenarioName,
+            double durationSeconds,
+            List<BlackoutRegion> blackoutRegions) {
+        return beginRun(scenarioName, null, durationSeconds, blackoutRegions, true);
+    }
+
+    /** Starts an explicit user-requested export run in a named output folder. */
+    public boolean beginExportRun(
+            String scenarioName,
+            String folderName,
+            double durationSeconds,
+            List<BlackoutRegion> blackoutRegions) {
+        return beginRun(scenarioName, folderName, durationSeconds, blackoutRegions, true);
+    }
+
+    private boolean beginRun(
+            String scenarioName,
+            double durationSeconds,
+            List<BlackoutRegion> blackoutRegions,
+            boolean force) {
+        return beginRun(scenarioName, null, durationSeconds, blackoutRegions, force);
+    }
+
+    private boolean beginRun(
+            String scenarioName,
+            String folderName,
+            double durationSeconds,
+            List<BlackoutRegion> blackoutRegions,
+            boolean force) {
         finishRun();
-        if (!armed) {
+        if (!force && !armed) {
             return true;
         }
         if (!Double.isFinite(durationSeconds) || durationSeconds < 0.0) {
@@ -119,13 +153,14 @@ public final class TrackCsvRecorder implements AutoCloseable {
         }
         try {
             Files.createDirectories(outputParent);
-            runDirectory = uniqueRunDirectory(scenarioName);
-            Files.createDirectory(runDirectory);
-            groundTruthDirectory = Files.createDirectory(
-                    runDirectory.resolve(GROUND_TRUTH_DIRECTORY));
-            trackDirectory = Files.createDirectory(runDirectory.resolve(TRACK_DIRECTORY));
-            measurementDirectory = Files.createDirectory(
-                    runDirectory.resolve(MEASUREMENT_DIRECTORY));
+            runDirectory = uniqueRunDirectory(scenarioName, folderName);
+            Files.createDirectories(runDirectory);
+            groundTruthDirectory = runDirectory.resolve(GROUND_TRUTH_DIRECTORY);
+            trackDirectory = runDirectory.resolve(TRACK_DIRECTORY);
+            measurementDirectory = runDirectory.resolve(MEASUREMENT_DIRECTORY);
+            Files.createDirectories(groundTruthDirectory);
+            Files.createDirectories(trackDirectory);
+            Files.createDirectories(measurementDirectory);
             writeMetadata(scenarioName, durationSeconds, blackoutRegions);
             writeReadme(scenarioName, durationSeconds);
             active = true;
@@ -296,7 +331,10 @@ public final class TrackCsvRecorder implements AutoCloseable {
         return failure;
     }
 
-    private Path uniqueRunDirectory(String scenarioName) {
+    private Path uniqueRunDirectory(String scenarioName, String folderName) {
+        if (folderName != null && !folderName.isBlank()) {
+            return uniqueNamedRunDirectory(safeScenarioName(folderName));
+        }
         String baseName = safeScenarioName(scenarioName) + "_"
                 + LocalDateTime.now(clock).format(RUN_FOLDER_FORMAT);
         Path candidate = outputParent.resolve(baseName);
@@ -306,6 +344,38 @@ public final class TrackCsvRecorder implements AutoCloseable {
             suffix++;
         }
         return candidate;
+    }
+
+    private Path uniqueNamedRunDirectory(String baseName) {
+        Path candidate = outputParent.resolve(baseName);
+        int suffix = 2;
+        while (!canReuseNamedExportDirectory(candidate)) {
+            candidate = outputParent.resolve(baseName + "_" + suffix);
+            suffix++;
+        }
+        return candidate;
+    }
+
+    private static boolean canReuseNamedExportDirectory(Path candidate) {
+        if (!Files.exists(candidate)) {
+            return true;
+        }
+        return Files.isDirectory(candidate)
+                && !containsCsv(candidate.resolve(TRACK_DIRECTORY))
+                && !containsCsv(candidate.resolve(GROUND_TRUTH_DIRECTORY))
+                && !containsCsv(candidate.resolve(MEASUREMENT_DIRECTORY));
+    }
+
+    private static boolean containsCsv(Path directory) {
+        if (!Files.isDirectory(directory)) {
+            return false;
+        }
+        try (var paths = Files.list(directory)) {
+            return paths.anyMatch(path -> Files.isRegularFile(path)
+                    && path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".csv"));
+        } catch (IOException exception) {
+            return true;
+        }
     }
 
     private void writeMetadata(

@@ -11,6 +11,7 @@ public final class ScenarioModelSmokeTest {
         verifyTargetIdsAreReused();
         verifyTargetCopiesAreIndependent();
         verifyLongestTargetDefinesScenarioExtrapolation();
+        verifyRunWindowClampsToScenarioDuration();
         verifyLoopTargetsRepeatDuringExtrapolation();
         verifyBlackoutIdsAreReused();
         System.out.println("ScenarioModelSmokeTest passed");
@@ -130,6 +131,29 @@ public final class ScenarioModelSmokeTest {
         model.removeTarget(longTarget);
         if (Math.abs(model.durationSeconds() - shortBaseDuration) > 1.0e-6) {
             throw new AssertionError("Extrapolated path length should not define the base scenario");
+        }
+    }
+
+    private static void verifyRunWindowClampsToScenarioDuration() {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory target = model.addTarget();
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(0.0, 0.0, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(0.0, 0.04, 0.0)));
+        model.setScenarioLengthSeconds(20.0);
+        model.setRunWindowSeconds(5.0, 15.0);
+        if (Math.abs(model.runStartSeconds() - 5.0) > 1.0e-9
+                || Math.abs(model.runStopSeconds() - 15.0) > 1.0e-9) {
+            throw new AssertionError("Run window should accept in-range start/stop times");
+        }
+        model.setScenarioLengthSeconds(10.0);
+        if (Math.abs(model.runStartSeconds() - 5.0) > 1.0e-9
+                || Math.abs(model.runStopSeconds() - 10.0) > 1.0e-9) {
+            throw new AssertionError("Run window should clamp when scenario duration shrinks");
+        }
+        model.resetRunWindow();
+        if (Math.abs(model.runStartSeconds()) > 1.0e-9
+                || Math.abs(model.runStopSeconds() - 10.0) > 1.0e-9) {
+            throw new AssertionError("Default run window should span the full scenario");
         }
     }
 
