@@ -14,14 +14,59 @@ public final class TargetTrajectory {
         REPEAT_LOOP
     }
 
+    public enum PlatformType {
+        AIR("Air", 150.0, 3_000.0, 600.0),
+        GROUND("Ground", 20.0, 0.0, 150.0);
+
+        private final String displayName;
+        private final double presetVelocityMetersPerSecond;
+        private final double presetAltitudeMeters;
+        private final double maximumVelocityMetersPerSecond;
+
+        PlatformType(
+                String displayName,
+                double presetVelocityMetersPerSecond,
+                double presetAltitudeMeters,
+                double maximumVelocityMetersPerSecond) {
+            this.displayName = displayName;
+            this.presetVelocityMetersPerSecond = presetVelocityMetersPerSecond;
+            this.presetAltitudeMeters = presetAltitudeMeters;
+            this.maximumVelocityMetersPerSecond = maximumVelocityMetersPerSecond;
+        }
+
+        public double presetVelocityMetersPerSecond() {
+            return presetVelocityMetersPerSecond;
+        }
+
+        public double presetAltitudeMeters() {
+            return presetAltitudeMeters;
+        }
+
+        public double maximumVelocityMetersPerSecond() {
+            return maximumVelocityMetersPerSecond;
+        }
+
+        @Override
+        public String toString() {
+            return displayName;
+        }
+    }
+
     private final String id;
     private final Color color;
     private final List<EcefPoint> path = new ArrayList<>();
     private final List<Double> segmentLengthsMeters = new ArrayList<>();
     private final List<EcefPoint> smoothingUndoPath = new ArrayList<>();
     private final List<EcefPoint> extrapolationBasePath = new ArrayList<>();
-    private final ScalarProfile velocityProfile = new ScalarProfile(0.0, 600.0, 200.0);
-    private final ScalarProfile altitudeProfile = new ScalarProfile(0.0, 20_000.0, 1_000.0);
+    private PlatformType platformType = PlatformType.AIR;
+    private ScalarProfile velocityProfile = new ScalarProfile(
+            0.0,
+            PlatformType.AIR.maximumVelocityMetersPerSecond(),
+            PlatformType.AIR.presetVelocityMetersPerSecond());
+    private final ScalarProfile altitudeProfile = new ScalarProfile(
+            0.0,
+            20_000.0,
+            PlatformType.AIR.presetAltitudeMeters());
     private double surfaceLengthMeters;
     private boolean extrapolatedToScenarioLength;
     private ExtrapolationMode extrapolationMode = ExtrapolationMode.LINEAR;
@@ -37,6 +82,33 @@ public final class TargetTrajectory {
 
     public Color color() {
         return color;
+    }
+
+    public PlatformType platformType() {
+        return platformType;
+    }
+
+    public void setPlatformType(PlatformType platformType) {
+        PlatformType next = Objects.requireNonNull(platformType, "platformType");
+        if (this.platformType == next
+                && Math.abs(velocityProfile.maximum()
+                - next.maximumVelocityMetersPerSecond()) <= 1.0e-9) {
+            return;
+        }
+        this.platformType = next;
+        ScalarProfile previous = velocityProfile;
+        velocityProfile = new ScalarProfile(
+                0.0,
+                next.maximumVelocityMetersPerSecond(),
+                next.presetVelocityMetersPerSecond());
+        copyProfile(previous, velocityProfile);
+    }
+
+    public void applyPlatformPreset(PlatformType platformType) {
+        PlatformType next = Objects.requireNonNull(platformType, "platformType");
+        setPlatformType(next);
+        fillProfile(velocityProfile, next.presetVelocityMetersPerSecond());
+        fillProfile(altitudeProfile, next.presetAltitudeMeters());
     }
 
     public List<EcefPoint> path() {
@@ -97,6 +169,11 @@ public final class TargetTrajectory {
         extrapolationBasePath.addAll(source.extrapolationBasePath);
         extrapolatedToScenarioLength = source.extrapolatedToScenarioLength;
         extrapolationMode = source.extrapolationMode;
+        platformType = source.platformType;
+        velocityProfile = new ScalarProfile(
+                0.0,
+                platformType.maximumVelocityMetersPerSecond(),
+                platformType.presetVelocityMetersPerSecond());
         copyProfile(source.velocityProfile, velocityProfile);
         copyProfile(source.altitudeProfile, altitudeProfile);
     }
@@ -143,6 +220,57 @@ public final class TargetTrajectory {
                     0.0)));
         }
         replacePath(translated, true);
+        return true;
+    }
+
+    public GeodeticPoint approximateCenter() {
+        if (path.isEmpty()) {
+            return null;
+        }
+        GeodeticPoint first = Wgs84.toGeodetic(path.get(0));
+        double minLatitude = first.latitudeDegrees();
+        double maxLatitude = first.latitudeDegrees();
+        double minLongitudeOffset = 0.0;
+        double maxLongitudeOffset = 0.0;
+        double referenceLongitude = first.longitudeDegrees();
+        for (EcefPoint point : path) {
+            GeodeticPoint geodetic = Wgs84.toGeodetic(point);
+            minLatitude = Math.min(minLatitude, geodetic.latitudeDegrees());
+            maxLatitude = Math.max(maxLatitude, geodetic.latitudeDegrees());
+            double longitudeOffset = GeodeticPoint.normalizeLongitude(
+                    geodetic.longitudeDegrees() - referenceLongitude);
+            minLongitudeOffset = Math.min(minLongitudeOffset, longitudeOffset);
+            maxLongitudeOffset = Math.max(maxLongitudeOffset, longitudeOffset);
+        }
+        return new GeodeticPoint(
+                (minLatitude + maxLatitude) * 0.5,
+                referenceLongitude + (minLongitudeOffset + maxLongitudeOffset) * 0.5,
+                0.0);
+    }
+
+    public boolean rotatePath(GeodeticPoint center, double angleRadians) {
+        if (path.size() < 2
+                || center == null
+                || !Double.isFinite(angleRadians)
+                || Math.abs(angleRadians) <= 1.0e-9) {
+            return false;
+        }
+        GeodeticPoint surfaceCenter = center.withAltitude(0.0);
+        List<EcefPoint> rotated = new ArrayList<>(path.size());
+        for (EcefPoint point : path) {
+            GeodeticPoint geodetic = Wgs84.toGeodetic(point).withAltitude(0.0);
+            Wgs84Geodesic.GeodesicData offset =
+                    Wgs84Geodesic.inverse(surfaceCenter, geodetic);
+            GeodeticPoint rotatedPoint = offset.distanceMeters() <= 1.0e-6
+                    ? surfaceCenter
+                    : Wgs84Geodesic.direct(
+                            surfaceCenter,
+                            offset.initialBearingRadians() + angleRadians,
+                            offset.distanceMeters(),
+                            0.0);
+            rotated.add(Wgs84.toEcef(rotatedPoint));
+        }
+        replacePath(rotated, true);
         return true;
     }
 
@@ -438,6 +566,12 @@ public final class TargetTrajectory {
     private static void copyProfile(ScalarProfile source, ScalarProfile destination) {
         for (int index = 0; index < source.sampleCount(); index++) {
             destination.setSample(index, source.sample(index));
+        }
+    }
+
+    private static void fillProfile(ScalarProfile profile, double value) {
+        for (int index = 0; index < profile.sampleCount(); index++) {
+            profile.setSample(index, value);
         }
     }
 

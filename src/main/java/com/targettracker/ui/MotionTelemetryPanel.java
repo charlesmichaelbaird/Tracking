@@ -47,6 +47,7 @@ final class MotionTelemetryPanel extends JPanel {
             BooleanSupplier editingLocked,
             Runnable onProfileChanged,
             Consumer<TargetTrajectory> onSelectionChanged,
+            Consumer<TargetTrajectory.PlatformType> onPlatformChanged,
             Runnable onExtrapolateAllTargets,
             Runnable onNewTarget,
             Runnable onCopyTarget,
@@ -64,8 +65,8 @@ final class MotionTelemetryPanel extends JPanel {
         AppTheme.setRole(this, AppTheme.ROLE_APP);
 
         inspector = new TargetInspectorPanel(
-                model, onSelectionChanged, onExtrapolateAllTargets);
-        inspector.setMaximumSize(new Dimension(Integer.MAX_VALUE, 116));
+                model, onSelectionChanged, onPlatformChanged, onExtrapolateAllTargets);
+        inspector.setMaximumSize(new Dimension(Integer.MAX_VALUE, 124));
         add(inspector);
         add(Box.createVerticalStrut(8));
         add(createTargetControls(
@@ -230,6 +231,7 @@ final class MotionTelemetryPanel extends JPanel {
         undoSmoothButton.setEnabled(enabled && !presetScenarioActive
                 && selectedTarget() != null
                 && selectedTarget().canUndoSmoothing());
+        inspector.setPlatformControlsEnabled(enabled && !presetScenarioActive);
         refreshExtrapolateControls(enabled && !presetScenarioActive);
         if (presetScenarioActive) {
             lockLabel.setText("Target structure locked by preset scenario");
@@ -257,6 +259,8 @@ final class MotionTelemetryPanel extends JPanel {
                 && target.canUndoSmoothing());
         copyTargetButton.setEnabled(!editingLocked.getAsBoolean()
                 && canCopySelectedTarget());
+        inspector.setPlatformControlsEnabled(!editingLocked.getAsBoolean()
+                && target != null);
         refreshExtrapolateControls(!editingLocked.getAsBoolean());
     }
 

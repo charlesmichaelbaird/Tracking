@@ -115,6 +115,7 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
             if (accelerationMagnitude > 1.0) {
                 throw new AssertionError("Terminal truth acceleration should stay physically small");
             }
+            verifyExplicitScenarioLengthCapsRecording(parent);
             System.out.println("ScenarioPrecomputeRecordingSmokeTest passed");
         } finally {
             try (var paths = Files.walk(parent)) {
@@ -125,6 +126,75 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
                         throw new RuntimeException(exception);
                     }
                 });
+            }
+        }
+    }
+
+    private static void verifyExplicitScenarioLengthCapsRecording(Path parent) throws Exception {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory target = model.addTarget();
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(20.0, 11.0, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(20.005, 11.0, 0.0)));
+        double wantedDuration = 5.55;
+        double speed = target.surfaceLengthMeters() / wantedDuration;
+        for (int index = 0; index < target.velocityProfile().sampleCount(); index++) {
+            target.velocityProfile().setSample(index, speed);
+        }
+        double scenarioLength = 2.35;
+        model.setScenarioLengthSeconds(scenarioLength);
+
+        SensorSettings sensorSettings = new SensorSettings();
+        sensorSettings.setParameters(new SensorParameters(
+                1.0, 0.0, 1.0, 1.0, 1.0, 10));
+        TrackCsvRecorder recorder = new TrackCsvRecorder();
+        recorder.setOutputParent(parent);
+        recorder.setArmed(true);
+        ScenarioPlayback playback = new ScenarioPlayback(
+                model,
+                () -> {
+                },
+                new MeasurementEngine(model, sensorSettings, new Random(12)),
+                new ImmTracker(new ImmSettings()),
+                recorder);
+
+        if (!playback.precompute("capped")) {
+            throw new AssertionError("Capped scenario should pre-compute");
+        }
+        Path truthFile = recorder.runDirectory()
+                .resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY)
+                .resolve("TGT-001.csv");
+        List<String> truthLines = Files.readAllLines(truthFile);
+        double lastTruthTime = Double.parseDouble(
+                truthLines.get(truthLines.size() - 1).split(",", -1)[1]);
+        requireClose(scenarioLength, lastTruthTime, 1.0e-9,
+                "explicit scenario truth endpoint");
+        requireNoTimesBeyond(
+                truthLines,
+                1,
+                scenarioLength,
+                "ground-truth target CSV");
+        try (var paths = Files.list(recorder.runDirectory()
+                .resolve(TrackCsvRecorder.TRACK_DIRECTORY))) {
+            for (Path trackFile : paths.filter(path -> path.toString().endsWith(".csv")).toList()) {
+                requireNoTimesBeyond(
+                        Files.readAllLines(trackFile),
+                        1,
+                        scenarioLength,
+                        "track CSV " + trackFile.getFileName());
+            }
+        }
+    }
+
+    private static void requireNoTimesBeyond(
+            List<String> lines,
+            int timeColumn,
+            double maximumSeconds,
+            String label) {
+        for (int index = 1; index < lines.size(); index++) {
+            double timeSeconds = Double.parseDouble(lines.get(index).split(",", -1)[timeColumn]);
+            if (timeSeconds > maximumSeconds + 1.0e-9) {
+                throw new AssertionError("%s should not include time %.3f past %.3f"
+                        .formatted(label, timeSeconds, maximumSeconds));
             }
         }
     }

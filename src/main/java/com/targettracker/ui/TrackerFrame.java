@@ -80,10 +80,12 @@ public final class TrackerFrame extends JFrame {
     private final JButton precomputeButton = new JButton("Pre-compute scenario");
     private final JButton replayButton = new JButton("Replay scenario");
     private final JToggleButton moveToolButton = new JToggleButton("Move: Off");
+    private final JToggleButton rotateToolButton = new JToggleButton("Rotate: Off");
     private final JToggleButton modifyToolButton = new JToggleButton("Modify: Off");
     private final JToggleButton trajectoryArrowButton = new JToggleButton("Arrow: On", true);
     private final JToggleButton darkModeButton = new JToggleButton("Dark");
     private final Icon moveToolIcon = new MoveToolIcon();
+    private final Icon rotateToolIcon = new RotateToolIcon();
     private final Icon modifyToolIcon = new ModifyToolIcon();
     private final Icon trajectoryArrowIcon = new TrajectoryArrowIcon();
     private final Icon themeIcon = new ThemeIcon();
@@ -175,6 +177,7 @@ public final class TrackerFrame extends JFrame {
                 this::isScenarioEditingLocked,
                 this::onProfileChanged,
                 this::selectTarget,
+                this::setSelectedTargetPlatform,
                 this::extrapolateAllTargets,
                 this::addTarget,
                 this::copySelectedTarget,
@@ -245,6 +248,14 @@ public final class TrackerFrame extends JFrame {
         moveToolButton.setFocusPainted(false);
         moveToolButton.addActionListener(event ->
                 setMoveToolActive(moveToolButton.isSelected()));
+        rotateToolButton.setToolTipText(
+                "Toggle click-and-drag rotation for target trajectories");
+        rotateToolButton.setIcon(rotateToolIcon);
+        rotateToolButton.setOpaque(true);
+        rotateToolButton.setContentAreaFilled(true);
+        rotateToolButton.setFocusPainted(false);
+        rotateToolButton.addActionListener(event ->
+                setRotateToolActive(rotateToolButton.isSelected()));
         modifyToolButton.setToolTipText(
                 "Pick and place vertices on segmented target trajectories");
         modifyToolButton.setIcon(modifyToolIcon);
@@ -269,11 +280,13 @@ public final class TrackerFrame extends JFrame {
         darkModeButton.addActionListener(event ->
                 setDarkMode(darkModeButton.isSelected()));
         refreshMoveToolButton();
+        refreshRotateToolButton();
         refreshModifyToolButton();
         refreshTrajectoryArrowButton();
         refreshDarkModeButton();
         topRightControls.add(frameLabel);
         topRightControls.add(moveToolButton);
+        topRightControls.add(rotateToolButton);
         topRightControls.add(modifyToolButton);
         topRightControls.add(trajectoryArrowButton);
         topRightControls.add(darkModeButton);
@@ -388,6 +401,7 @@ public final class TrackerFrame extends JFrame {
         statusLabel.setForeground(AppTheme.current().mutedText());
         scenarioTimeLabel.setForeground(AppTheme.current().mutedText());
         refreshMoveToolButton();
+        refreshRotateToolButton();
         refreshModifyToolButton();
         refreshTrajectoryArrowButton();
         refreshDarkModeButton();
@@ -488,6 +502,24 @@ public final class TrackerFrame extends JFrame {
         earthMapCanvas.repaint();
     }
 
+    private void setSelectedTargetPlatform(TargetTrajectory.PlatformType platformType) {
+        if (selectedTarget == null || isScenarioEditingLocked()) {
+            return;
+        }
+        selectedTarget.applyPlatformPreset(platformType);
+        resetCompletedPlayback();
+        reconcileActiveExtrapolations();
+        refreshTelemetry();
+        timelinePanel.refresh();
+        earthMapCanvas.repaint();
+        statusLabel.setText("%s set to %s: %.0f m altitude, %.0f m/s velocity"
+                .formatted(
+                        selectedTarget.id(),
+                        platformType,
+                        platformType.presetAltitudeMeters(),
+                        platformType.presetVelocityMetersPerSecond()));
+    }
+
     private void setDrawingMode(EarthMapCanvas.DrawingMode drawingMode) {
         this.drawingMode = drawingMode;
         earthMapCanvas.setDrawingMode(drawingMode);
@@ -512,6 +544,11 @@ public final class TrackerFrame extends JFrame {
 
     private void setMoveToolActive(boolean active) {
         boolean enabled = active && !isScenarioEditingLocked();
+        if (enabled && rotateToolButton.isSelected()) {
+            rotateToolButton.setSelected(false);
+            earthMapCanvas.setRotateToolEnabled(false);
+            refreshRotateToolButton();
+        }
         if (enabled && modifyToolButton.isSelected()) {
             modifyToolButton.setSelected(false);
             earthMapCanvas.setModifyToolEnabled(false);
@@ -543,6 +580,44 @@ public final class TrackerFrame extends JFrame {
         moveToolButton.repaint();
     }
 
+    private void setRotateToolActive(boolean active) {
+        boolean enabled = active && !isScenarioEditingLocked();
+        if (enabled && moveToolButton.isSelected()) {
+            moveToolButton.setSelected(false);
+            earthMapCanvas.setMoveToolEnabled(false);
+            refreshMoveToolButton();
+        }
+        if (enabled && modifyToolButton.isSelected()) {
+            modifyToolButton.setSelected(false);
+            earthMapCanvas.setModifyToolEnabled(false);
+            refreshModifyToolButton();
+        }
+        if (rotateToolButton.isSelected() != enabled) {
+            rotateToolButton.setSelected(enabled);
+        }
+        earthMapCanvas.setRotateToolEnabled(enabled);
+        refreshRotateToolButton();
+        statusLabel.setText(enabled
+                ? "Rotate tool enabled - drag a trajectory around its center"
+                : "Rotate tool disabled");
+    }
+
+    private void refreshRotateToolButton() {
+        boolean selected = rotateToolButton.isSelected();
+        AppTheme.Palette palette = AppTheme.current();
+        rotateToolButton.setText(selected ? "Rotate: On" : "Rotate: Off");
+        rotateToolButton.setBackground(selected
+                ? palette.arrowSelectedBackground()
+                : palette.buttonBackground());
+        rotateToolButton.setForeground(palette.buttonText());
+        rotateToolButton.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(selected
+                        ? palette.success()
+                        : palette.border()),
+                BorderFactory.createEmptyBorder(3, 8, 3, 8)));
+        rotateToolButton.repaint();
+    }
+
     private void setModifyToolActive(boolean active) {
         boolean enabled = active
                 && !isScenarioEditingLocked()
@@ -552,6 +627,11 @@ public final class TrackerFrame extends JFrame {
             moveToolButton.setSelected(false);
             earthMapCanvas.setMoveToolEnabled(false);
             refreshMoveToolButton();
+        }
+        if (enabled && rotateToolButton.isSelected()) {
+            rotateToolButton.setSelected(false);
+            earthMapCanvas.setRotateToolEnabled(false);
+            refreshRotateToolButton();
         }
         if (modifyToolButton.isSelected() != enabled) {
             modifyToolButton.setSelected(enabled);
@@ -1016,7 +1096,13 @@ public final class TrackerFrame extends JFrame {
             moveToolButton.setSelected(false);
             earthMapCanvas.setMoveToolEnabled(false);
         }
+        rotateToolButton.setEnabled(canMove);
+        if (!canMove && rotateToolButton.isSelected()) {
+            rotateToolButton.setSelected(false);
+            earthMapCanvas.setRotateToolEnabled(false);
+        }
         refreshMoveToolButton();
+        refreshRotateToolButton();
         updateModifyToolAvailability();
     }
 
@@ -1472,6 +1558,46 @@ public final class TrackerFrame extends JFrame {
                         ? new Color(18, 83, 40, 160)
                         : new Color(96, 103, 111, 140));
                 g2.drawOval(x + 2, y + 2, SIZE - 4, SIZE - 4);
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return SIZE;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return SIZE;
+        }
+    }
+
+    private final class RotateToolIcon implements Icon {
+        private static final int SIZE = 14;
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            try {
+                g2.setRenderingHint(
+                        RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                boolean selected = rotateToolButton.isSelected();
+                Color color = selected
+                        ? new Color(30, 105, 178)
+                        : new Color(145, 153, 161);
+                g2.setColor(color);
+                g2.setStroke(new BasicStroke(1.7f, BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND));
+                g2.drawArc(x + 2, y + 2, 10, 10, 35, 285);
+                Polygon arrow = new Polygon();
+                arrow.addPoint(x + 11, y + 1);
+                arrow.addPoint(x + 13, y + 6);
+                arrow.addPoint(x + 8, y + 5);
+                g2.fillPolygon(arrow);
+                g2.fillOval(x + 6, y + 6, 2, 2);
             } finally {
                 g2.dispose();
             }

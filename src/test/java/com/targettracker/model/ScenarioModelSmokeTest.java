@@ -123,8 +123,8 @@ public final class ScenarioModelSmokeTest {
         }
 
         model.setScenarioLengthSeconds(longDuration / 2.0);
-        if (Math.abs(model.durationSeconds() - longDuration) > 1.0e-6) {
-            throw new AssertionError("Manual length should not cut off a longer target trajectory");
+        if (Math.abs(model.durationSeconds() - longDuration / 2.0) > 1.0e-6) {
+            throw new AssertionError("Manual length should cap a longer target trajectory");
         }
         model.setScenarioLengthSeconds(null);
         model.removeTarget(longTarget);

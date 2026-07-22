@@ -71,6 +71,8 @@ public final class SavedScenarioRepository {
             }
             properties.setProperty(prefix + "extrapolation.mode",
                     target.extrapolationMode().name());
+            properties.setProperty(prefix + "platform",
+                    target.platformType().name());
             properties.setProperty(prefix + "velocity",
                     samples(target.velocityProfile()));
             properties.setProperty(prefix + "altitude",
@@ -102,6 +104,7 @@ public final class SavedScenarioRepository {
         for (int index = 0; index < targets.size(); index++) {
             TargetTrajectory target = targets.get(index);
             SavedScenarioDefinition.TargetData data = scenario.targets().get(index);
+            target.setPlatformType(data.platformType());
             List<EcefPoint> points = new ArrayList<>();
             for (GeodeticPoint point : data.path()) {
                 points.add(Wgs84.toEcef(point.withAltitude(0.0)));
@@ -143,7 +146,8 @@ public final class SavedScenarioRepository {
                     parseSamples(properties.getProperty(prefix + "velocity", "")),
                     parseSamples(properties.getProperty(prefix + "altitude", "")),
                     parseExtrapolationMode(properties.getProperty(
-                            prefix + "extrapolation.mode", ""))));
+                            prefix + "extrapolation.mode", "")),
+                    parsePlatformType(properties.getProperty(prefix + "platform", ""))));
         }
         int blackoutCount = parseInt(properties, "blackout.count", 0);
         List<BlackoutRegion> regions = new ArrayList<>();
@@ -206,6 +210,17 @@ public final class SavedScenarioRepository {
             return TargetTrajectory.ExtrapolationMode.valueOf(text.trim());
         } catch (IllegalArgumentException exception) {
             return TargetTrajectory.ExtrapolationMode.LINEAR;
+        }
+    }
+
+    private static TargetTrajectory.PlatformType parsePlatformType(String text) {
+        if (text == null || text.isBlank()) {
+            return TargetTrajectory.PlatformType.AIR;
+        }
+        try {
+            return TargetTrajectory.PlatformType.valueOf(text.trim());
+        } catch (IllegalArgumentException exception) {
+            return TargetTrajectory.PlatformType.AIR;
         }
     }
 

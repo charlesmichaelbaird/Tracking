@@ -18,14 +18,14 @@ public final class TargetTrajectorySmokeTest {
 
         double expectedEquatorialDegree = Math.PI * Wgs84.SEMI_MAJOR_AXIS_METERS / 180.0;
         requireClose(expectedEquatorialDegree, target.surfaceLengthMeters(), 0.001, "surface path length");
-        requireClose(expectedEquatorialDegree / 200.0, target.durationSeconds(), 0.001,
-                "duration at 200 m/s");
+        requireClose(expectedEquatorialDegree / 150.0, target.durationSeconds(), 0.001,
+                "duration at air preset speed");
 
         EcefPoint midpointEcef = target.positionAt(target.durationSeconds() / 2.0);
         GeodeticPoint midpoint = Wgs84.toGeodetic(midpointEcef);
         requireClose(0.0, midpoint.latitudeDegrees(), 1.0e-9, "midpoint latitude");
         requireClose(0.5, midpoint.longitudeDegrees(), 1.0e-9, "midpoint longitude");
-        requireClose(1_000.0, midpoint.altitudeMeters(), 1.0e-6, "default altitude");
+        requireClose(3_000.0, midpoint.altitudeMeters(), 1.0e-6, "default air altitude");
         EcefVector endpointVelocity = target.ecefVelocityAt(target.durationSeconds());
         if (endpointVelocity.magnitude() < 100.0) {
             throw new AssertionError("Endpoint velocity should preserve terminal motion");
@@ -101,6 +101,8 @@ public final class TargetTrajectorySmokeTest {
             throw new AssertionError("A rising speed profile should cover less than half the distance by half time");
         }
         verifyPathEditingUtilities();
+        verifyPathRotation();
+        verifyPlatformPresets();
 
         BufferedImage earthMap = ImageIO.read(TargetTrajectorySmokeTest.class
                 .getResource("/maps/blue_marble_2048.png"));
@@ -147,6 +149,54 @@ public final class TargetTrajectorySmokeTest {
                 || Math.abs(target.surfaceLengthMeters() - translatedLength) < 1.0) {
             throw new AssertionError(
                     "Moving a node should preserve path cardinality and recalculate length");
+        }
+    }
+
+    private static void verifyPathRotation() {
+        TargetTrajectory target = new TargetTrajectory("TEST-004", Color.MAGENTA);
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.00, -74.00, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.01, -73.99, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.00, -73.98, 0.0)));
+        GeodeticPoint center = target.approximateCenter();
+        GeodeticPoint firstBefore = Wgs84.toGeodetic(target.path().get(0));
+        double lengthBefore = target.surfaceLengthMeters();
+        if (center == null || !target.rotatePath(center, Math.PI / 2.0)) {
+            throw new AssertionError("A runnable target path should rotate around its center");
+        }
+        GeodeticPoint firstAfter = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(firstAfter.latitudeDegrees() - firstBefore.latitudeDegrees()) < 0.001
+                && Math.abs(firstAfter.longitudeDegrees() - firstBefore.longitudeDegrees())
+                < 0.001) {
+            throw new AssertionError("Rotating a target path should move its vertices");
+        }
+        requireClose(lengthBefore, target.surfaceLengthMeters(), 5.0,
+                "rotated path length");
+    }
+
+    private static void verifyPlatformPresets() {
+        TargetTrajectory target = new TargetTrajectory("TEST-005", Color.ORANGE);
+        if (target.platformType() != TargetTrajectory.PlatformType.AIR
+                || target.velocityProfile().maximum() != 600.0
+                || target.velocityProfile().sample(0) != 150.0
+                || target.altitudeProfile().sample(0) != 3_000.0) {
+            throw new AssertionError("New targets should start with the Air preset");
+        }
+        target.applyPlatformPreset(TargetTrajectory.PlatformType.GROUND);
+        if (target.platformType() != TargetTrajectory.PlatformType.GROUND
+                || target.velocityProfile().maximum() != 150.0
+                || target.velocityProfile().sample(50) != 20.0
+                || target.altitudeProfile().sample(50) != 0.0) {
+            throw new AssertionError("Ground preset should set velocity, altitude, and velocity max");
+        }
+        target.velocityProfile().setSample(0, 500.0);
+        if (target.velocityProfile().sample(0) != 150.0) {
+            throw new AssertionError("Ground velocity profile should clamp to 150 m/s");
+        }
+        target.applyPlatformPreset(TargetTrajectory.PlatformType.AIR);
+        if (target.velocityProfile().maximum() != 600.0
+                || target.velocityProfile().sample(50) != 150.0
+                || target.altitudeProfile().sample(50) != 3_000.0) {
+            throw new AssertionError("Air preset should restore the 600 m/s velocity max");
         }
     }
 

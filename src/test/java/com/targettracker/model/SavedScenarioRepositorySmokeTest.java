@@ -19,6 +19,7 @@ public final class SavedScenarioRepositorySmokeTest {
                 Wgs84.toEcef(new GeodeticPoint(40.0, -75.0, 0.0)),
                 Wgs84.toEcef(new GeodeticPoint(40.1, -74.9, 0.0))
         ), TargetTrajectory.ExtrapolationMode.REPEAT_LOOP);
+        target.applyPlatformPreset(TargetTrajectory.PlatformType.GROUND);
         target.velocityProfile().setSample(20, 123.0);
         target.altitudeProfile().setSample(20, 4_321.0);
         model.setScenarioLengthSeconds(420.0);
@@ -46,6 +47,10 @@ public final class SavedScenarioRepositorySmokeTest {
         if (restored.targets().get(0).extrapolationMode()
                 != TargetTrajectory.ExtrapolationMode.REPEAT_LOOP) {
             throw new AssertionError("Saved target extrapolation mode was not restored");
+        }
+        if (restored.targets().get(0).platformType() != TargetTrajectory.PlatformType.GROUND
+                || restored.targets().get(0).velocityProfile().maximum() != 150.0) {
+            throw new AssertionError("Saved target platform was not restored");
         }
         if (Math.abs(restored.targets().get(0).velocityProfile().sample(20) - 123.0) > 1.0e-9
                 || Math.abs(restored.targets().get(0).altitudeProfile().sample(20) - 4_321.0)

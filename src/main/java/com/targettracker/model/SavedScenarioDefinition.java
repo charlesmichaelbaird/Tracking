@@ -36,12 +36,31 @@ public record SavedScenarioDefinition(
             List<GeodeticPoint> path,
             List<Double> velocitySamples,
             List<Double> altitudeSamples,
-            TargetTrajectory.ExtrapolationMode extrapolationMode) {
+            TargetTrajectory.ExtrapolationMode extrapolationMode,
+            TargetTrajectory.PlatformType platformType) {
         public TargetData(
                 List<GeodeticPoint> path,
                 List<Double> velocitySamples,
                 List<Double> altitudeSamples) {
-            this(path, velocitySamples, altitudeSamples, TargetTrajectory.ExtrapolationMode.LINEAR);
+            this(
+                    path,
+                    velocitySamples,
+                    altitudeSamples,
+                    TargetTrajectory.ExtrapolationMode.LINEAR,
+                    TargetTrajectory.PlatformType.AIR);
+        }
+
+        public TargetData(
+                List<GeodeticPoint> path,
+                List<Double> velocitySamples,
+                List<Double> altitudeSamples,
+                TargetTrajectory.ExtrapolationMode extrapolationMode) {
+            this(
+                    path,
+                    velocitySamples,
+                    altitudeSamples,
+                    extrapolationMode,
+                    TargetTrajectory.PlatformType.AIR);
         }
 
         public TargetData {
@@ -51,6 +70,9 @@ public record SavedScenarioDefinition(
             extrapolationMode = extrapolationMode == null
                     ? TargetTrajectory.ExtrapolationMode.LINEAR
                     : extrapolationMode;
+            platformType = platformType == null
+                    ? TargetTrajectory.PlatformType.AIR
+                    : platformType;
         }
     }
 }

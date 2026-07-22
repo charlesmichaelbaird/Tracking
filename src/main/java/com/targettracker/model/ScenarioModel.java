@@ -139,11 +139,10 @@ public final class ScenarioModel {
     }
 
     public double durationSeconds() {
-        double targetDurationSeconds = targetDefinedDurationSeconds();
         if (scenarioLengthSeconds != null) {
-            return Math.max(scenarioLengthSeconds, targetDurationSeconds);
+            return scenarioLengthSeconds;
         }
-        return targetDurationSeconds;
+        return targetDefinedDurationSeconds();
     }
 
     public boolean canExtrapolateTargetsToScenarioDuration() {

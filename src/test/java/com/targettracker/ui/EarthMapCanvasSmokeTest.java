@@ -153,6 +153,23 @@ public final class EarthMapCanvasSmokeTest {
                 > 1.0e-9) {
             throw new AssertionError("Target path should not move when the move tool is disabled");
         }
+        double lengthBeforeRotate = target.surfaceLengthMeters();
+        GeodeticPoint firstBeforeRotate = Wgs84.toGeodetic(target.path().get(0));
+        canvas.setRotateToolEnabled(true);
+        press(canvas, 470, 280);
+        drag(canvas, 530, 280);
+        release(canvas, 530, 280);
+        canvas.setRotateToolEnabled(false);
+        GeodeticPoint firstAfterRotate = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(firstAfterRotate.latitudeDegrees() - firstBeforeRotate.latitudeDegrees())
+                < 1.0e-4
+                && Math.abs(firstAfterRotate.longitudeDegrees()
+                - firstBeforeRotate.longitudeDegrees()) < 1.0e-4) {
+            throw new AssertionError("Rotate tool should spin the selected target path");
+        }
+        if (Math.abs(target.surfaceLengthMeters() - lengthBeforeRotate) > 5.0) {
+            throw new AssertionError("Rotate tool should preserve trajectory path length");
+        }
         canvas.setTargetDrawingEnabled(true);
         target.clearPath();
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.CIRCLE);
