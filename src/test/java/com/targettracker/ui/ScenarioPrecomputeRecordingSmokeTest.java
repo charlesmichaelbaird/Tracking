@@ -120,6 +120,7 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
             if (accelerationMagnitude > 1.0) {
                 throw new AssertionError("Terminal truth acceleration should stay physically small");
             }
+            verifyTargetTrajectoryExportDoesNotNeedPrecompute(parent);
             verifyExplicitScenarioLengthCapsRecording(parent);
             System.out.println("ScenarioPrecomputeRecordingSmokeTest passed");
         } finally {
@@ -133,6 +134,85 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
                 });
             }
         }
+    }
+
+    private static void verifyTargetTrajectoryExportDoesNotNeedPrecompute(Path parent)
+            throws Exception {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory target = model.addTarget();
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(20.0, 13.0, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(20.005, 13.0, 0.0)));
+        double wantedDuration = 5.55;
+        double speed = target.surfaceLengthMeters() / wantedDuration;
+        for (int index = 0; index < target.velocityProfile().sampleCount(); index++) {
+            target.velocityProfile().setSample(index, speed);
+        }
+        double runStart = 1.25;
+        double runStop = 2.35;
+        model.setRunWindowSeconds(runStart, runStop);
+
+        SensorSettings sensorSettings = new SensorSettings();
+        sensorSettings.setParameters(new SensorParameters(
+                1.0, 0.0, 1.0, 1.0, 1.0, 10));
+        TrackCsvRecorder targetOnlyRecorder = new TrackCsvRecorder();
+        targetOnlyRecorder.setOutputParent(parent);
+        ScenarioPlayback targetOnlyPlayback = new ScenarioPlayback(
+                model,
+                () -> {
+                },
+                new MeasurementEngine(model, sensorSettings, new Random(30)),
+                new ImmTracker(new ImmSettings()),
+                targetOnlyRecorder);
+
+        if (!targetOnlyPlayback.canSaveTargetTrajectories()
+                || !targetOnlyPlayback.saveTargetTrajectories("target only")) {
+            throw new AssertionError(
+                    "Target trajectories should save without a full pre-compute");
+        }
+        if (targetOnlyPlayback.isReplayReady()) {
+            throw new AssertionError("Target-only export should not prepare replay data");
+        }
+        if (containsCsv(targetOnlyRecorder.runDirectory()
+                .resolve(TrackCsvRecorder.TRACK_DIRECTORY))) {
+            throw new AssertionError("Target-only export should not write track CSV files");
+        }
+        if (containsCsv(targetOnlyRecorder.runDirectory()
+                .resolve(TrackCsvRecorder.MEASUREMENT_DIRECTORY))) {
+            throw new AssertionError(
+                    "Target-only export should not write measurement CSV files");
+        }
+        List<String> targetOnlyTruthLines = Files.readAllLines(
+                targetOnlyRecorder.runDirectory()
+                        .resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY)
+                        .resolve("TGT-001.csv"));
+
+        TrackCsvRecorder fullRecorder = new TrackCsvRecorder();
+        fullRecorder.setOutputParent(parent);
+        ScenarioPlayback fullPlayback = new ScenarioPlayback(
+                model,
+                () -> {
+                },
+                new MeasurementEngine(model, sensorSettings, new Random(31)),
+                new ImmTracker(new ImmSettings()),
+                fullRecorder);
+        if (!fullPlayback.precompute("target only comparison")
+                || !fullPlayback.saveRecording("target only comparison")) {
+            throw new AssertionError("Full export should save comparison data");
+        }
+        List<String> fullTruthLines = Files.readAllLines(fullRecorder.runDirectory()
+                .resolve(TrackCsvRecorder.GROUND_TRUTH_DIRECTORY)
+                .resolve("TGT-001.csv"));
+        if (!targetOnlyTruthLines.equals(fullTruthLines)) {
+            throw new AssertionError(
+                    "Target-only truth CSV should match the full export truth subset");
+        }
+        double firstTruthTime = Double.parseDouble(
+                targetOnlyTruthLines.get(1).split(",", -1)[1]);
+        double lastTruthTime = Double.parseDouble(
+                targetOnlyTruthLines.get(targetOnlyTruthLines.size() - 1)
+                        .split(",", -1)[1]);
+        requireClose(runStart, firstTruthTime, 1.0e-9, "target-only truth start");
+        requireClose(runStop, lastTruthTime, 1.0e-9, "target-only truth stop");
     }
 
     private static void verifyExplicitScenarioLengthCapsRecording(Path parent) throws Exception {
@@ -283,6 +363,12 @@ public final class ScenarioPrecomputeRecordingSmokeTest {
                 throw new AssertionError("%s should not include time %.3f before %.3f"
                         .formatted(label, timeSeconds, minimumSeconds));
             }
+        }
+    }
+
+    private static boolean containsCsv(Path directory) throws Exception {
+        try (var paths = Files.list(directory)) {
+            return paths.anyMatch(path -> path.getFileName().toString().endsWith(".csv"));
         }
     }
 

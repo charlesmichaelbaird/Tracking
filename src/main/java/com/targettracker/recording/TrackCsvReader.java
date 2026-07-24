@@ -2,6 +2,8 @@ package com.targettracker.recording;
 
 import com.targettracker.model.BlackoutRegion;
 import com.targettracker.model.GeodeticPoint;
+import com.targettracker.model.SavedScenarioDefinition;
+import com.targettracker.model.SavedScenarioRepository;
 import com.targettracker.tracking.AssociatedMeasurement;
 import com.targettracker.tracking.TrackRecord;
 
@@ -66,9 +68,10 @@ public final class TrackCsvReader {
         String name = metadata.scenarioName().isBlank()
                 ? folder.getFileName().toString()
                 : metadata.scenarioName();
+        SavedScenarioDefinition scenarioDefinition = readScenarioDefinition(folder);
         return new RecordedScenario(
                 folder, name, duration, records,
-                groundTruth, measurements, metadata.blackoutRegions());
+                groundTruth, measurements, metadata.blackoutRegions(), scenarioDefinition);
     }
 
     private static List<Path> csvFiles(Path folder) throws IOException {
@@ -318,6 +321,15 @@ public final class TrackCsvReader {
             }
         }
         return new Metadata(name, duration, parseBlackoutRegions(values));
+    }
+
+    private static SavedScenarioDefinition readScenarioDefinition(Path folder)
+            throws IOException {
+        Path file = folder.resolve(TrackCsvRecorder.SCENARIO_DEFINITION_FILE);
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        return new SavedScenarioRepository(file.getParent()).read(file);
     }
 
     private static List<BlackoutRegion> parseBlackoutRegions(Map<String, String> values)

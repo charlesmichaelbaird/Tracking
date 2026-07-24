@@ -2,6 +2,10 @@ package com.targettracker.recording;
 
 import com.targettracker.model.BlackoutRegion;
 import com.targettracker.model.GeodeticPoint;
+import com.targettracker.model.SavedScenarioRepository;
+import com.targettracker.model.ScenarioModel;
+import com.targettracker.model.TargetTrajectory;
+import com.targettracker.model.Wgs84;
 import com.targettracker.tracking.AssociatedMeasurement;
 import com.targettracker.tracking.TrackRecord;
 
@@ -38,6 +42,7 @@ public final class TrackCsvReaderSmokeTest {
                     new double[]{100, 101, 102, 10, 11, 12, 1, 2, 3},
                     true)));
             recorder.finishRun();
+            writeScenarioDefinition(recorder.runDirectory());
 
             if (!recorder.runDirectory().getFileName().toString()
                     .equals("1_target_hard_left_turn_2026-06-22_15-04-05_123")) {
@@ -51,6 +56,9 @@ public final class TrackCsvReaderSmokeTest {
                     || loaded.measurements().size() != 1
                     || loaded.blackoutRegions().size() != 1
                     || loaded.blackoutRegions().get(0).widthMeters() != 1_000.0
+                    || loaded.scenarioDefinition() == null
+                    || loaded.scenarioDefinition().targets().size() != 1
+                    || loaded.scenarioDefinition().blackoutRegions().size() != 1
                     || !loaded.groundTruth().get(0).inBlackoutRegion()) {
                 throw new AssertionError("Recorded scenario metadata did not round-trip");
             }
@@ -102,6 +110,22 @@ public final class TrackCsvReaderSmokeTest {
                 });
             }
         }
+    }
+
+    private static void writeScenarioDefinition(Path runDirectory) throws Exception {
+        ScenarioModel model = new ScenarioModel();
+        TargetTrajectory target = model.addTarget();
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.0, -75.0, 0.0)));
+        target.addPathPoint(Wgs84.toEcef(new GeodeticPoint(40.1, -74.9, 0.0)));
+        model.addBlackoutRegion(new BlackoutRegion(
+                "BLK-001",
+                new GeodeticPoint(40.0, -75.0, 0.0),
+                1_000.0,
+                2_000.0));
+        new SavedScenarioRepository(runDirectory).saveCopy(
+                runDirectory.resolve(TrackCsvRecorder.SCENARIO_DEFINITION_FILE),
+                "1 target hard left turn",
+                model);
     }
 
     private static TrackRecord record(double time, boolean updated) {

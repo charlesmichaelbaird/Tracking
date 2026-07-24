@@ -44,6 +44,8 @@ public final class AppThemeSmokeTest {
         JToggleButton navButton = new JToggleButton("IMM");
         JToggleButton selectedButton = new JToggleButton("Selected", true);
         JButton actionButton = new JButton("Finish path");
+        JButton disabledButton = new JButton("Pause");
+        disabledButton.setEnabled(false);
         card.add(label);
         card.add(field);
         card.add(normalField);
@@ -52,6 +54,7 @@ public final class AppThemeSmokeTest {
         card.add(navButton);
         card.add(selectedButton);
         card.add(actionButton);
+        card.add(disabledButton);
         root.add(card, BorderLayout.CENTER);
 
         AppTheme.setDarkMode(true);
@@ -85,7 +88,7 @@ public final class AppThemeSmokeTest {
         assertColor("nav button dark background",
                 AppTheme.current().buttonBackground(), navButton.getBackground());
         assertColor("nav button dark foreground",
-                AppTheme.current().buttonText(), navButton.getForeground());
+                Color.WHITE, navButton.getForeground());
         assertPaintedBackground(
                 "nav button painted background",
                 navButton,
@@ -97,6 +100,9 @@ public final class AppThemeSmokeTest {
                 selectedButton,
                 AppTheme.current().selectionBackground());
         assertPressedPaintDiffers(actionButton);
+        assertColor("disabled button dark foreground",
+                Color.WHITE, disabledButton.getForeground());
+        assertPaintedTextContainsLightPixel(disabledButton);
 
         AppTheme.setDarkMode(false);
         AppTheme.applyTo(root);
@@ -168,6 +174,26 @@ public final class AppThemeSmokeTest {
             throw new AssertionError("%s: expected painted dark background near %s but got %s"
                     .formatted(label, expected, sample));
         }
+    }
+
+    private static void assertPaintedTextContainsLightPixel(AbstractButton button) {
+        button.setSize(112, 30);
+        BufferedImage image = new BufferedImage(112, 30, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        button.paint(graphics);
+        graphics.dispose();
+        for (int y = 2; y < image.getHeight() - 2; y++) {
+            for (int x = 2; x < image.getWidth() - 2; x++) {
+                Color pixel = new Color(image.getRGB(x, y));
+                if (pixel.getRed() > 185
+                        && pixel.getGreen() > 185
+                        && pixel.getBlue() > 185) {
+                    return;
+                }
+            }
+        }
+        throw new AssertionError(
+                "Disabled dark-mode button text should paint with light pixels");
     }
 
     private static void assertPressedPaintDiffers(AbstractButton button) {

@@ -92,6 +92,8 @@ public final class TrackerFrame extends JFrame {
     private final JButton precomputeButton = new JButton("Pre-compute scenario");
     private final JButton replayButton = new JButton("Replay scenario");
     private final JButton saveCsvButton = new JButton("Save CSVs");
+    private final JButton saveTargetTrajectoriesButton =
+            new JButton("Save Target Trajectories");
     private final JButton snapshotButton = new JButton("Snapshot");
     private final JToggleButton moveToolButton = new JToggleButton("Move: Off");
     private final JToggleButton rotateToolButton = new JToggleButton("Rotate: Off");
@@ -118,6 +120,7 @@ public final class TrackerFrame extends JFrame {
     private String currentScenarioName = "User generated";
     private RecordedScenario loadedAnalysisScenario;
     private TrackStitchingAnalysisPanel stitchingAnalysisPanel;
+    private boolean fullCsvPrecomputeCurrent;
 
     public TrackerFrame() {
         super("ECEF Target Tracker");
@@ -391,6 +394,11 @@ public final class TrackerFrame extends JFrame {
         saveCsvButton.setToolTipText("Save CSV files from the most recent pre-compute");
         saveCsvButton.addActionListener(event -> savePrecomputedCsvs());
         toolbar.add(saveCsvButton);
+        saveTargetTrajectoriesButton.setEnabled(false);
+        saveTargetTrajectoriesButton.setToolTipText(
+                "Save only target ECEF trajectory CSV files without pre-computing tracks");
+        saveTargetTrajectoriesButton.addActionListener(event -> saveTargetTrajectories());
+        toolbar.add(saveTargetTrajectoriesButton);
         snapshotButton.setToolTipText("Save a PNG snapshot of the map and timeline");
         snapshotButton.addActionListener(event -> saveSnapshot());
         toolbar.add(snapshotButton);
@@ -447,6 +455,7 @@ public final class TrackerFrame extends JFrame {
         refreshModifyToolButton();
         refreshTrajectoryArrowButton();
         refreshDarkModeButton();
+        refreshPlaybackButtonTextColors();
         timelinePanel.refreshTheme();
         earthMapCanvas.repaint();
         revalidate();
@@ -460,7 +469,7 @@ public final class TrackerFrame extends JFrame {
         if (modifyToolButton.isSelected()) {
             setModifyToolActive(false);
         }
-        playback.reset();
+        resetPlaybackAndInvalidatePrecompute();
         TargetTrajectory target = model.addTarget();
         motionTelemetryPanel.targetAdded(target);
         selectTarget(target);
@@ -499,7 +508,7 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         earthMapCanvas.cancelNodeModification();
-        playback.reset();
+        resetPlaybackAndInvalidatePrecompute();
         TargetTrajectory target = model.copyTarget(copiedTarget);
         motionTelemetryPanel.targetAdded(target);
         selectTarget(target);
@@ -729,7 +738,9 @@ public final class TrackerFrame extends JFrame {
         modifyToolButton.setBackground(selected
                 ? palette.modifySelectedBackground()
                 : palette.buttonBackground());
-        modifyToolButton.setForeground(palette.buttonText());
+        modifyToolButton.setForeground(AppTheme.isDarkMode()
+                ? Color.WHITE
+                : palette.buttonText());
         modifyToolButton.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(selected
                         ? palette.success()
@@ -792,6 +803,7 @@ public final class TrackerFrame extends JFrame {
         }
         selectedTarget = target;
         earthMapCanvas.clearPathEditHistory(target);
+        invalidatePrecomputedCsvExport();
         clearPathForTarget(playback, target);
         earthMapCanvas.finishPath();
         reconcileActiveExtrapolations();
@@ -811,6 +823,7 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         selectedTarget = target;
+        resetCompletedPlayback();
         if (earthMapCanvas.removeLastPathSegment()) {
             refreshTimelinePanels();
             statusLabel.setText("Removed last drawn segment for %s".formatted(target.id()));
@@ -926,7 +939,7 @@ public final class TrackerFrame extends JFrame {
         if (target == null) {
             return;
         }
-        playback.reset();
+        resetPlaybackAndInvalidatePrecompute();
         earthMapCanvas.clearPathEditHistory(target);
         model.removeTarget(target);
         reconcileActiveExtrapolations();
@@ -1010,7 +1023,7 @@ public final class TrackerFrame extends JFrame {
         if (analysisMode) {
             return;
         }
-        playback.reset();
+        resetPlaybackAndInvalidatePrecompute();
         PresetScenarioGenerator.generate(model, preset, parameters);
         earthMapCanvas.clearPathEditHistory();
         presetScenarioActive = true;
@@ -1034,7 +1047,7 @@ public final class TrackerFrame extends JFrame {
         if (analysisMode || scenario == null) {
             return;
         }
-        playback.reset();
+        resetPlaybackAndInvalidatePrecompute();
         try {
             savedScenarioRepository.loadInto(scenario, model);
         } catch (RuntimeException exception) {
@@ -1188,7 +1201,7 @@ public final class TrackerFrame extends JFrame {
         if (!presetScenarioActive && "User generated".equals(currentScenarioName)) {
             return;
         }
-        playback.reset();
+        resetPlaybackAndInvalidatePrecompute();
         presetScenarioActive = false;
         currentScenarioName = "User generated";
         selectedTarget = model.replaceTargets(1).get(0);
@@ -1265,6 +1278,7 @@ public final class TrackerFrame extends JFrame {
                         JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
+            fullCsvPrecomputeCurrent = true;
             statusLabel.setText("Pre-compute complete - replay, seek, or save CSVs");
         } finally {
             setCursor(java.awt.Cursor.getDefaultCursor());
@@ -1279,7 +1293,7 @@ public final class TrackerFrame extends JFrame {
     }
 
     private void savePrecomputedCsvs() {
-        if (analysisMode || !playback.canExportRecording()) {
+        if (analysisMode || !fullCsvPrecomputeCurrent || !playback.canExportRecording()) {
             return;
         }
         String scenarioName = scenarioNameForRecording();
@@ -1303,7 +1317,7 @@ public final class TrackerFrame extends JFrame {
                 return;
             }
             savedScenarioRepository.saveCopy(
-                    recorder.runDirectory().resolve("scenario_definition.scenario"),
+                    recorder.runDirectory().resolve(TrackCsvRecorder.SCENARIO_DEFINITION_FILE),
                     scenarioName,
                     model);
             recordingPanel.rememberOutputFolder(recorder.runDirectory());
@@ -1315,6 +1329,52 @@ public final class TrackerFrame extends JFrame {
                     this,
                     exception.getMessage(),
                     "Scenario save failed",
+                    JOptionPane.WARNING_MESSAGE);
+        } finally {
+            setCursor(java.awt.Cursor.getDefaultCursor());
+            recordingPanel.refresh();
+            refreshTimelinePanels();
+            updateStructuralEditingControls();
+        }
+    }
+
+    private void saveTargetTrajectories() {
+        if (analysisMode || !playback.canSaveTargetTrajectories()) {
+            return;
+        }
+        String scenarioName = scenarioNameForRecording();
+        if (!recordingPanel.commitOutputSettings(scenarioName)) {
+            return;
+        }
+        String folderName = recordingPanel.folderName(scenarioName);
+        setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
+        statusLabel.setText("Saving target ECEF trajectory CSV data...");
+        statusLabel.paintImmediately(statusLabel.getBounds());
+        try {
+            if (!playback.saveTargetTrajectories(scenarioName, folderName)) {
+                String message = recorder.lastError() == null
+                        ? "Draw or load at least one runnable target trajectory before saving."
+                        : recorder.lastError();
+                JOptionPane.showMessageDialog(
+                        this,
+                        message,
+                        "Target trajectory save failed",
+                        JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            savedScenarioRepository.saveCopy(
+                    recorder.runDirectory().resolve(TrackCsvRecorder.SCENARIO_DEFINITION_FILE),
+                    scenarioName,
+                    model);
+            recordingPanel.rememberOutputFolder(recorder.runDirectory());
+            analysisLoadPanel.setParentFolder(recorder.outputParent());
+            statusLabel.setText("Saved target trajectories to "
+                    + recorder.runDirectory().getFileName());
+        } catch (IOException | RuntimeException exception) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    exception.getMessage(),
+                    "Target trajectory save failed",
                     JOptionPane.WARNING_MESSAGE);
         } finally {
             setCursor(java.awt.Cursor.getDefaultCursor());
@@ -1345,7 +1405,7 @@ public final class TrackerFrame extends JFrame {
             Path scenarioFolder = recordingPanel.outputFolder(scenarioName);
             Files.createDirectories(scenarioFolder);
             savedScenarioRepository.saveCopy(
-                    scenarioFolder.resolve("scenario_definition.scenario"),
+                    scenarioFolder.resolve(TrackCsvRecorder.SCENARIO_DEFINITION_FILE),
                     scenarioName,
                     model);
             Path snapshotFolder = scenarioFolder.resolve("snapshots");
@@ -1394,7 +1454,7 @@ public final class TrackerFrame extends JFrame {
 
     private void resetScenario() {
         if (!analysisMode) {
-            playback.reset();
+            resetPlaybackAndInvalidatePrecompute();
             earthMapCanvas.setProfileHighlightNormalizedTime(Double.NaN);
             updateStructuralEditingControls();
             refreshTelemetry();
@@ -1484,6 +1544,7 @@ public final class TrackerFrame extends JFrame {
                 && !playback.isComputing() && !playback.isRunning());
         replayButton.setEnabled(!analysisMode && playback.isReplayReady()
                 && !playback.isComputing() && !playback.isRunning());
+        refreshPlaybackButtonTextColors();
         updateStructuralEditingControls();
         recordingPanel.refresh();
         refreshTimelinePanels();
@@ -1516,14 +1577,38 @@ public final class TrackerFrame extends JFrame {
 
     private void refreshTimelinePanels() {
         timelinePanel.refresh();
-        saveCsvButton.setEnabled(!analysisMode && playback.canExportRecording());
+        refreshExportButtons();
     }
 
     private void resetCompletedPlayback() {
+        invalidatePrecomputedCsvExport();
         if (!playback.isRunning()
                 && (playback.elapsedSeconds() > 0.0 || playback.isReplayReady())) {
             playback.reset();
         }
+    }
+
+    private void resetPlaybackAndInvalidatePrecompute() {
+        invalidatePrecomputedCsvExport();
+        playback.reset();
+    }
+
+    private void invalidatePrecomputedCsvExport() {
+        fullCsvPrecomputeCurrent = false;
+        refreshExportButtons();
+    }
+
+    private void refreshExportButtons() {
+        saveCsvButton.setEnabled(!analysisMode
+                && fullCsvPrecomputeCurrent
+                && playback.canExportRecording());
+        saveTargetTrajectoriesButton.setEnabled(!analysisMode
+                && playback.canSaveTargetTrajectories());
+    }
+
+    private void refreshPlaybackButtonTextColors() {
+        replayButton.setForeground(AppTheme.buttonTextColor(replayButton.isEnabled()));
+        pauseButton.setForeground(AppTheme.buttonTextColor(pauseButton.isEnabled()));
     }
 
     private boolean validateSensorParameters() {
@@ -1543,6 +1628,7 @@ public final class TrackerFrame extends JFrame {
         if (analysisMode) {
             return;
         }
+        invalidatePrecomputedCsvExport();
         if (playback.isReplayReady()) {
             playback.reset();
             return;
@@ -1555,6 +1641,7 @@ public final class TrackerFrame extends JFrame {
         if (analysisMode) {
             return;
         }
+        invalidatePrecomputedCsvExport();
         if (playback.isReplayReady()) {
             playback.reset();
             return;
@@ -1581,7 +1668,7 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         exitTrackStitchingAnalysis();
-        playback.reset();
+        resetPlaybackAndInvalidatePrecompute();
         analysisMode = enabled;
         if (enabled) {
             recorder.setArmed(false);
@@ -1621,6 +1708,8 @@ public final class TrackerFrame extends JFrame {
         snapshotButton.setEnabled(!analysisMode && !playback.isComputing());
         replayButton.setEnabled(!analysisMode && playback.isReplayReady()
                 && !playback.isComputing() && !playback.isRunning());
+        refreshPlaybackButtonTextColors();
+        refreshExportButtons();
         presetScenarioPanel.setGenerationEnabled(!analysisMode);
         updateStructuralEditingControls();
     }
@@ -1636,8 +1725,17 @@ public final class TrackerFrame extends JFrame {
         try {
             RecordedScenario scenario = TrackCsvReader.read(scenarioFolder);
             loadedAnalysisScenario = scenario;
-            model.clearBlackoutRegions();
-            scenario.blackoutRegions().forEach(model::addBlackoutRegion);
+            if (scenario.scenarioDefinition() != null) {
+                savedScenarioRepository.loadInto(scenario.scenarioDefinition(), model);
+                currentScenarioName = scenario.scenarioDefinition().name();
+                selectedTarget = model.targets().isEmpty() ? null : model.targets().get(0);
+                earthMapCanvas.clearPathEditHistory();
+                motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
+            } else {
+                currentScenarioName = scenario.scenarioName();
+                model.clearBlackoutRegions();
+                scenario.blackoutRegions().forEach(model::addBlackoutRegion);
+            }
             selectedBlackoutRegion = model.blackoutRegions().isEmpty()
                     ? null
                     : model.blackoutRegions().get(0);
@@ -1655,7 +1753,7 @@ public final class TrackerFrame extends JFrame {
             statusLabel.setText("Loaded %s — %d track(s), %s"
                     .formatted(scenario.scenarioName(), trackCount,
                             formatClockTime(scenario.durationSeconds())));
-            analysisLoadPanel.setStitchingEnabled(true);
+            analysisLoadPanel.setStitchingEnabled(trackCount > 0);
         } catch (IOException | IllegalArgumentException exception) {
             JOptionPane.showMessageDialog(
                     this,

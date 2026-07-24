@@ -101,10 +101,10 @@ final class ScenarioPlayback {
         double startSeconds = model.runStartSeconds();
         double stopSeconds = model.runStopSeconds();
         double runDuration = stopSeconds - startSeconds;
-        boolean hasRunnableTarget = model.targets().stream()
-                .anyMatch(target -> target.isRunnable()
-                        && target.durationSeconds() >= startSeconds - TIME_EPSILON_SECONDS);
-        if (duration <= 0.0 || runDuration <= 0.0 || !hasRunnableTarget || computing) {
+        if (duration <= 0.0
+                || runDuration <= 0.0
+                || !hasRunnableTargetAt(startSeconds)
+                || computing) {
             return false;
         }
 
@@ -356,6 +356,10 @@ final class ScenarioPlayback {
         return replayReady && !computing && !recorder.isActive();
     }
 
+    boolean canSaveTargetTrajectories() {
+        return canGenerateTargetTrajectoryRecords();
+    }
+
     int replayFrameCount() {
         return replayFrames.size();
     }
@@ -424,6 +428,41 @@ final class ScenarioPlayback {
         return recorder.lastError() == null;
     }
 
+    boolean saveTargetTrajectories(String scenarioName) {
+        return saveTargetTrajectories(scenarioName, null);
+    }
+
+    boolean saveTargetTrajectories(String scenarioName, String folderName) {
+        if (!canSaveTargetTrajectories()) {
+            return false;
+        }
+        double startSeconds = model.runStartSeconds();
+        double stopSeconds = model.runStopSeconds();
+        double sampleStopSeconds = targetTrajectorySampleStopSeconds(startSeconds, stopSeconds);
+        if (!recorder.beginExportRun(
+                scenarioName,
+                folderName,
+                stopSeconds,
+                model.blackoutRegions())) {
+            onUpdate.run();
+            return false;
+        }
+        try {
+            double time = startSeconds;
+            while (true) {
+                recorder.recordGroundTruth(groundTruthRecordsAt(time));
+                if (time >= sampleStopSeconds - TIME_EPSILON_SECONDS) {
+                    break;
+                }
+                time = nextPrecomputeTime(time, sampleStopSeconds);
+            }
+        } finally {
+            recorder.finishRun();
+        }
+        onUpdate.run();
+        return recorder.lastError() == null;
+    }
+
     private void replayTick() {
         long now = System.nanoTime();
         if (paused) {
@@ -444,13 +483,54 @@ final class ScenarioPlayback {
     }
 
     private double nextPrecomputeTime(double currentTime) {
+        return nextPrecomputeTime(currentTime, runStopSeconds);
+    }
+
+    private static double nextPrecomputeTime(double currentTime, double stopSeconds) {
         double nextGrid = Math.ceil(
                 (currentTime + TIME_EPSILON_SECONDS) / PRECOMPUTE_STEP_SECONDS)
                 * PRECOMPUTE_STEP_SECONDS;
         if (nextGrid <= currentTime + TIME_EPSILON_SECONDS) {
             nextGrid = currentTime + PRECOMPUTE_STEP_SECONDS;
         }
-        return Math.min(runStopSeconds, nextGrid);
+        return Math.min(stopSeconds, nextGrid);
+    }
+
+    private boolean canGenerateTargetTrajectoryRecords() {
+        double duration = model.durationSeconds();
+        double startSeconds = model.runStartSeconds();
+        double stopSeconds = model.runStopSeconds();
+        return !importedReplay
+                && !computing
+                && !recorder.isActive()
+                && duration > 0.0
+                && stopSeconds - startSeconds > TIME_EPSILON_SECONDS
+                && hasRunnableTargetAt(startSeconds);
+    }
+
+    private boolean hasRunnableTargetAt(double startSeconds) {
+        return model.targets().stream()
+                .anyMatch(target -> target.isRunnable()
+                        && target.durationSeconds() >= startSeconds - TIME_EPSILON_SECONDS);
+    }
+
+    private double targetTrajectorySampleStopSeconds(
+            double startSeconds,
+            double stopSeconds) {
+        double latestSampleSeconds = startSeconds;
+        for (TargetTrajectory target : model.targets()) {
+            if (!target.isRunnable()) {
+                continue;
+            }
+            double targetEndSeconds = groundTruthEndTime(target.durationSeconds());
+            if (targetEndSeconds < startSeconds - TIME_EPSILON_SECONDS) {
+                continue;
+            }
+            latestSampleSeconds = Math.max(
+                    latestSampleSeconds,
+                    Math.min(stopSeconds, targetEndSeconds));
+        }
+        return Math.min(stopSeconds, latestSampleSeconds);
     }
 
     private void cacheIntegerSecond(double time, List<TrackRecord> measurementUpdates) {

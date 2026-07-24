@@ -159,7 +159,7 @@ final class TargetInspectorPanel extends JPanel {
         button.setBackground(button.isSelected()
                 ? palette.selectionBackground()
                 : palette.buttonBackground());
-        button.setForeground(button.isEnabled() ? palette.buttonText() : palette.mutedText());
+        button.setForeground(AppTheme.buttonTextColor(button.isEnabled()));
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(button.isSelected()
                         ? palette.selectionBackground()

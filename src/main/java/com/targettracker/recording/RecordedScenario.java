@@ -1,6 +1,7 @@
 package com.targettracker.recording;
 
 import com.targettracker.model.BlackoutRegion;
+import com.targettracker.model.SavedScenarioDefinition;
 import com.targettracker.tracking.TrackRecord;
 
 import java.nio.file.Path;
@@ -14,7 +15,8 @@ public record RecordedScenario(
         List<TrackRecord> records,
         List<GroundTruthRecord> groundTruth,
         List<RecordedMeasurement> measurements,
-        List<BlackoutRegion> blackoutRegions) {
+        List<BlackoutRegion> blackoutRegions,
+        SavedScenarioDefinition scenarioDefinition) {
     public RecordedScenario {
         if (folder == null) {
             throw new IllegalArgumentException("A recorded scenario folder is required");
@@ -43,7 +45,19 @@ public record RecordedScenario(
             List<GroundTruthRecord> groundTruth,
             List<RecordedMeasurement> measurements) {
         this(folder, scenarioName, durationSeconds, records,
-                groundTruth, measurements, List.of());
+                groundTruth, measurements, List.of(), null);
+    }
+
+    public RecordedScenario(
+            Path folder,
+            String scenarioName,
+            double durationSeconds,
+            List<TrackRecord> records,
+            List<GroundTruthRecord> groundTruth,
+            List<RecordedMeasurement> measurements,
+            List<BlackoutRegion> blackoutRegions) {
+        this(folder, scenarioName, durationSeconds, records,
+                groundTruth, measurements, blackoutRegions, null);
     }
 
     public RecordedScenario(
@@ -51,6 +65,7 @@ public record RecordedScenario(
             String scenarioName,
             double durationSeconds,
             List<TrackRecord> records) {
-        this(folder, scenarioName, durationSeconds, records, List.of(), List.of(), List.of());
+        this(folder, scenarioName, durationSeconds, records,
+                List.of(), List.of(), List.of(), null);
     }
 }

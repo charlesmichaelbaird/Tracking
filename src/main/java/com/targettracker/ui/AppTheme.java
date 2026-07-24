@@ -28,12 +28,15 @@ import javax.swing.border.TitledBorder;
 import javax.swing.plaf.basic.BasicArrowButton;
 import javax.swing.plaf.basic.BasicButtonUI;
 import javax.swing.plaf.basic.BasicComboBoxUI;
+import javax.swing.plaf.basic.BasicGraphicsUtils;
 import javax.swing.text.JTextComponent;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Insets;
+import java.awt.Rectangle;
 
 /** Shared application palette and recursive Swing theming helper. */
 public final class AppTheme {
@@ -117,8 +120,12 @@ public final class AppTheme {
         UIManager.put("Label.foreground", palette.text());
         UIManager.put("Button.background", palette.buttonBackground());
         UIManager.put("Button.foreground", palette.buttonText());
+        UIManager.put("Button.disabledText", buttonTextColor(false));
+        UIManager.put("Button.disabledForeground", buttonTextColor(false));
         UIManager.put("ToggleButton.background", palette.buttonBackground());
         UIManager.put("ToggleButton.foreground", palette.buttonText());
+        UIManager.put("ToggleButton.disabledText", buttonTextColor(false));
+        UIManager.put("ToggleButton.disabledForeground", buttonTextColor(false));
         UIManager.put("TextField.background", palette.inputBackground());
         UIManager.put("TextField.foreground", palette.inputText());
         UIManager.put("TextField.caretForeground", palette.inputText());
@@ -259,10 +266,18 @@ public final class AppTheme {
         button.setBorderPainted(true);
         button.setRolloverEnabled(true);
         button.setBackground(background);
-        button.setForeground(button.isEnabled() ? palette.buttonText() : palette.mutedText());
+        button.setForeground(buttonTextColor(button.isEnabled()));
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(border),
                 BorderFactory.createEmptyBorder(4, 9, 4, 9)));
+    }
+
+    static Color buttonTextColor(boolean enabled) {
+        Palette palette = current();
+        if (darkMode) {
+            return Color.WHITE;
+        }
+        return enabled ? palette.buttonText() : palette.mutedText();
     }
 
     private static Color buttonPaintBackground(AbstractButton button) {
@@ -315,6 +330,26 @@ public final class AppTheme {
         @Override
         protected void paintButtonPressed(Graphics graphics, AbstractButton button) {
             // The pressed fill is painted in update() so text/icon layout remains unchanged.
+        }
+
+        @Override
+        protected void paintText(
+                Graphics graphics,
+                JComponent component,
+                Rectangle textRect,
+                String text) {
+            if (component instanceof AbstractButton button) {
+                FontMetrics metrics = graphics.getFontMetrics();
+                graphics.setColor(buttonTextColor(button.isEnabled()));
+                BasicGraphicsUtils.drawStringUnderlineCharAt(
+                        graphics,
+                        text,
+                        button.getDisplayedMnemonicIndex(),
+                        textRect.x,
+                        textRect.y + metrics.getAscent());
+                return;
+            }
+            super.paintText(graphics, component, textRect, text);
         }
     }
 

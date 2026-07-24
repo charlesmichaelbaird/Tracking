@@ -372,9 +372,7 @@ final class MotionTelemetryPanel extends JPanel {
         editPathButton.setBackground(selected
                 ? palette.selectionBackground()
                 : palette.buttonBackground());
-        editPathButton.setForeground(editPathButton.isEnabled()
-                ? palette.buttonText()
-                : palette.mutedText());
+        editPathButton.setForeground(AppTheme.buttonTextColor(editPathButton.isEnabled()));
         editPathButton.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(selected
                         ? palette.selectionBackground()

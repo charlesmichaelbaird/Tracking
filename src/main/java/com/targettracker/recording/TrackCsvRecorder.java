@@ -24,6 +24,7 @@ public final class TrackCsvRecorder implements AutoCloseable {
     public static final String TRACK_DIRECTORY = "track_data";
     public static final String MEASUREMENT_DIRECTORY = "measurement_data";
     public static final String MEASUREMENT_FILE = "measurements.csv";
+    public static final String SCENARIO_DEFINITION_FILE = "scenario_definition.scenario";
 
     private static final String SENSOR_ID = "GOD-SENSOR-001";
     private static final int STATE_SIZE = 9;
