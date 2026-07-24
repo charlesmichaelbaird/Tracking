@@ -5,12 +5,15 @@ import javax.swing.ButtonGroup;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.Scrollable;
 import javax.swing.JToggleButton;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Dimension;
 import java.awt.GridLayout;
+import java.awt.Rectangle;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -86,11 +89,52 @@ final class ControlSidebar extends JPanel {
     }
 
     private static JScrollPane scroll(JComponent component) {
-        JScrollPane scrollPane = new JScrollPane(component,
+        JScrollPane scrollPane = new JScrollPane(new WidthTrackingPanel(component),
                 ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
                 ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.getVerticalScrollBar().setUnitIncrement(18);
         return scrollPane;
+    }
+
+    private static final class WidthTrackingPanel extends JPanel implements Scrollable {
+        private WidthTrackingPanel(JComponent component) {
+            super(new BorderLayout());
+            setOpaque(false);
+            add(component, BorderLayout.CENTER);
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(
+                Rectangle visibleRect,
+                int orientation,
+                int direction) {
+            return 18;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(
+                Rectangle visibleRect,
+                int orientation,
+                int direction) {
+            return orientation == SwingConstants.VERTICAL
+                    ? Math.max(18, visibleRect.height - 18)
+                    : Math.max(18, visibleRect.width - 18);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 }

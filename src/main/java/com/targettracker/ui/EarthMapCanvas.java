@@ -38,8 +38,10 @@ import java.awt.geom.Line2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -108,6 +110,14 @@ final class EarthMapCanvas extends JPanel {
             double screenDistancePixels) {
     }
 
+    private record PathEdit(
+            List<EcefPoint> prefix,
+            boolean prefixAlreadySmoothed) {
+        private PathEdit {
+            prefix = List.copyOf(prefix);
+        }
+    }
+
     private static final int HORIZONTAL_MARGIN = 48;
     private static final int VERTICAL_MARGIN = 48;
     private static final int MAP_RIGHT_NUDGE_PIXELS = 24;
@@ -140,6 +150,7 @@ final class EarthMapCanvas extends JPanel {
     private final BufferedImage earthImage;
     private final NaturalEarthDetailLayer detailLayer;
     private final List<Rectangle> labelReservations = new ArrayList<>();
+    private final Map<TargetTrajectory, Deque<PathEdit>> pathEdits = new IdentityHashMap<>();
 
     private DrawingMode drawingMode = DrawingMode.FREE_HAND;
     private boolean freeHandDrawing;
@@ -151,9 +162,12 @@ final class EarthMapCanvas extends JPanel {
     private boolean moveToolEnabled;
     private boolean rotateToolEnabled;
     private boolean modifyToolEnabled;
+    private boolean pathEditEnabled = true;
     private boolean trajectoryArrowsVisible = true;
     private boolean panning;
     private TargetTrajectory finishedSegmentedTarget;
+    private TargetTrajectory freeHandEditTarget;
+    private int freeHandEditStartIndex = -1;
     private Point mousePoint;
     private GeodeticPoint blackoutFirstCorner;
     private GeodeticPoint blackoutDragAnchor;
@@ -287,16 +301,26 @@ final class EarthMapCanvas extends JPanel {
                 }
 
                 if (drawingMode == DrawingMode.FREE_HAND) {
-                    target.clearPath();
+                    if (!pathEditEnabled) {
+                        clearPathEditHistory(target);
+                        target.clearPath();
+                    }
+                    freeHandEditTarget = target;
+                    freeHandEditStartIndex = target.path().size();
                     finishedSegmentedTarget = null;
                     addMapPoint(target, event.getPoint());
                     freeHandDrawing = true;
                 } else {
-                    if (target == finishedSegmentedTarget && !target.path().isEmpty()) {
+                    if (!pathEditEnabled
+                            && target == finishedSegmentedTarget
+                            && !target.path().isEmpty()) {
                         return;
                     }
+                    int previousPointCount = target.path().size();
                     finishedSegmentedTarget = null;
-                    addMapPoint(target, event.getPoint());
+                    if (addMapPoint(target, event.getPoint()) && previousPointCount > 0) {
+                        recordPathEdit(target, previousPointCount);
+                    }
                     if (event.getClickCount() >= 2) {
                         finishPath();
                     }
@@ -398,6 +422,7 @@ final class EarthMapCanvas extends JPanel {
                     onPathChanged.run();
                 }
                 if (freeHandDrawing) {
+                    finishFreeHandEdit();
                     freeHandDrawing = false;
                     onPathChanged.run();
                 }
@@ -551,6 +576,67 @@ final class EarthMapCanvas extends JPanel {
         repaint();
     }
 
+    void setPathEditEnabled(boolean enabled) {
+        pathEditEnabled = enabled;
+        if (!enabled) {
+            finishFreeHandEdit();
+            freeHandDrawing = false;
+        }
+        repaint();
+    }
+
+    boolean pathEditEnabled() {
+        return pathEditEnabled;
+    }
+
+    boolean canRemoveLastPathSegment() {
+        TargetTrajectory target = selectedTarget.get();
+        return target != null && lastValidPathEdit(target) != null;
+    }
+
+    boolean removeLastPathSegment() {
+        cancelNodeModification();
+        TargetTrajectory target = selectedTarget.get();
+        PathEdit edit = target == null ? null : lastValidPathEdit(target);
+        if (target == null || edit == null) {
+            return false;
+        }
+        Deque<PathEdit> edits = pathEdits.get(target);
+        if (edits != null) {
+            edits.pop();
+        }
+        boolean preserveSmoothing = target.canUndoSmoothing() && !edit.prefixAlreadySmoothed();
+        target.replacePath(edit.prefix());
+        if (preserveSmoothing && target.path().size() >= 3) {
+            target.smoothPath();
+        }
+        if (target.path().isEmpty()) {
+            finishedSegmentedTarget = null;
+        }
+        freeHandDrawing = false;
+        freeHandEditTarget = null;
+        freeHandEditStartIndex = -1;
+        onPathChanged.run();
+        repaint();
+        return true;
+    }
+
+    void clearPathEditHistory() {
+        pathEdits.clear();
+        freeHandEditTarget = null;
+        freeHandEditStartIndex = -1;
+    }
+
+    void clearPathEditHistory(TargetTrajectory target) {
+        if (target != null) {
+            pathEdits.remove(target);
+        }
+        if (target == freeHandEditTarget) {
+            freeHandEditTarget = null;
+            freeHandEditStartIndex = -1;
+        }
+    }
+
     void cancelNodeModification() {
         if (modifiedTarget != null && modificationOriginalState != null) {
             modifiedTarget.copyStateFrom(modificationOriginalState);
@@ -568,6 +654,7 @@ final class EarthMapCanvas extends JPanel {
         cancelNodeModification();
         clearDirectionPlacement();
         freeHandDrawing = false;
+        finishFreeHandEdit();
         blackoutDrawing = false;
         blackoutFirstCorner = null;
         clearShapePlacement();
@@ -1457,7 +1544,7 @@ final class EarthMapCanvas extends JPanel {
         if (target == null || target.path().isEmpty() || !mapBounds().contains(mousePoint)) {
             return;
         }
-        if (target == finishedSegmentedTarget) {
+        if (!pathEditEnabled && target == finishedSegmentedTarget) {
             return;
         }
         EcefPoint end = Wgs84.toEcef(toGeodetic(mousePoint).withAltitude(0.0));
@@ -1948,8 +2035,41 @@ final class EarthMapCanvas extends JPanel {
                 Wgs84.toGeodetic(end)).distanceMeters();
     }
 
-    private void addMapPoint(TargetTrajectory target, Point point) {
+    private boolean addMapPoint(TargetTrajectory target, Point point) {
+        int previousPointCount = target.path().size();
         target.addPathPoint(Wgs84.toEcef(toGeodetic(point).withAltitude(0.0)));
+        return target.path().size() > previousPointCount;
+    }
+
+    private void finishFreeHandEdit() {
+        if (freeHandEditTarget != null && freeHandEditStartIndex >= 0
+                && freeHandEditTarget.path().size() > freeHandEditStartIndex) {
+            recordPathEdit(freeHandEditTarget, freeHandEditStartIndex);
+        }
+        freeHandEditTarget = null;
+        freeHandEditStartIndex = -1;
+    }
+
+    private void recordPathEdit(TargetTrajectory target, int startIndex) {
+        if (target == null || startIndex < 0 || target.path().size() <= startIndex) {
+            return;
+        }
+        List<EcefPoint> prefix = new ArrayList<>(
+                target.path().subList(0, Math.min(startIndex, target.path().size())));
+        pathEdits.computeIfAbsent(target, ignored -> new ArrayDeque<>())
+                .push(new PathEdit(prefix, target.canUndoSmoothing()));
+    }
+
+    private PathEdit lastValidPathEdit(TargetTrajectory target) {
+        Deque<PathEdit> edits = pathEdits.get(target);
+        while (edits != null && !edits.isEmpty()) {
+            PathEdit edit = edits.peek();
+            if (edit.prefix().size() < target.path().size()) {
+                return edit;
+            }
+            edits.pop();
+        }
+        return null;
     }
 
     private void handleShapeClick(TargetTrajectory target, Point point) {
@@ -1967,6 +2087,7 @@ final class EarthMapCanvas extends JPanel {
         }
         List<EcefPoint> shape = buildShapePath(shapeAnchor, geodetic, drawingMode);
         if (shape.size() >= 2) {
+            clearPathEditHistory(target);
             target.replacePath(shape, TargetTrajectory.ExtrapolationMode.REPEAT_LOOP);
             if (drawingMode == DrawingMode.CIRCLE || drawingMode == DrawingMode.RACETRACK) {
                 beginDirectionPlacement(target);
@@ -2005,6 +2126,7 @@ final class EarthMapCanvas extends JPanel {
         }
         List<EcefPoint> shape = buildRacetrackPath(shapeAnchor, racetrackLengthAnchor, geodetic);
         if (shape.size() >= 2) {
+            clearPathEditHistory(target);
             target.replacePath(shape, TargetTrajectory.ExtrapolationMode.REPEAT_LOOP);
             beginDirectionPlacement(target);
             finishedSegmentedTarget = null;
@@ -2060,6 +2182,7 @@ final class EarthMapCanvas extends JPanel {
         boolean forward = directionStartSnap == null || isForwardDirection(directionStartSnap, snap);
         List<EcefPoint> oriented = orderedLoop(loop, directionStartSnap, forward);
         if (oriented.size() >= 2) {
+            clearPathEditHistory(directionPlacementTarget);
             directionPlacementTarget.replacePath(
                     oriented, TargetTrajectory.ExtrapolationMode.REPEAT_LOOP);
             onPathChanged.run();

@@ -84,6 +84,72 @@ public final class EarthMapCanvasSmokeTest {
         if (!"1.0×".equals(canvas.viewDescription())) {
             throw new AssertionError("World-view reset should restore 1.0× zoom");
         }
+        if (!canvas.pathEditEnabled()) {
+            throw new AssertionError("Edit Path should be enabled by default");
+        }
+        if (canvas.canRemoveLastPathSegment()) {
+            throw new AssertionError("No path segment should be removable before drawing");
+        }
+        target.clearPath();
+        canvas.setDrawingMode(EarthMapCanvas.DrawingMode.FREE_HAND);
+        canvas.setPathEditEnabled(false);
+        press(canvas, 420, 280);
+        drag(canvas, 450, 300);
+        release(canvas, 450, 300);
+        int firstFreeHandStrokeCount = target.path().size();
+        if (firstFreeHandStrokeCount < 2) {
+            throw new AssertionError("Free-hand drawing should create a dragged path");
+        }
+        GeodeticPoint firstFreeHandStart = Wgs84.toGeodetic(target.path().get(0));
+        press(canvas, 500, 330);
+        drag(canvas, 530, 350);
+        release(canvas, 530, 350);
+        GeodeticPoint replacedFreeHandStart = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(replacedFreeHandStart.longitudeDegrees()
+                - firstFreeHandStart.longitudeDegrees()) < 0.001) {
+            throw new AssertionError(
+                    "Free-hand drawing should replace the previous stroke when Edit Path is off");
+        }
+
+        target.clearPath();
+        canvas.setPathEditEnabled(true);
+        press(canvas, 420, 280);
+        drag(canvas, 450, 300);
+        release(canvas, 450, 300);
+        int appendStartCount = target.path().size();
+        GeodeticPoint appendedFreeHandStart = Wgs84.toGeodetic(target.path().get(0));
+        press(canvas, 500, 330);
+        drag(canvas, 530, 350);
+        release(canvas, 530, 350);
+        if (target.path().size() <= appendStartCount) {
+            throw new AssertionError(
+                    "Edit Path should append a second free-hand stroke to the existing path");
+        }
+        GeodeticPoint appendedFreeHandStartAfter = Wgs84.toGeodetic(target.path().get(0));
+        if (Math.abs(appendedFreeHandStartAfter.longitudeDegrees()
+                - appendedFreeHandStart.longitudeDegrees()) > 1.0e-9
+                || Math.abs(appendedFreeHandStartAfter.latitudeDegrees()
+                - appendedFreeHandStart.latitudeDegrees()) > 1.0e-9) {
+            throw new AssertionError(
+                    "Appending a free-hand stroke should preserve the original path start");
+        }
+        if (!canvas.canRemoveLastPathSegment()) {
+            throw new AssertionError("A completed free-hand stroke should be removable");
+        }
+        if (!canvas.removeLastPathSegment() || target.path().size() != appendStartCount) {
+            throw new AssertionError(
+                    "Remove Last Segment should remove the latest free-hand stroke as one unit");
+        }
+        if (!canvas.removeLastPathSegment() || !target.path().isEmpty()) {
+            throw new AssertionError(
+                    "Remove Last Segment should remove the first free-hand stroke as one unit");
+        }
+        if (canvas.canRemoveLastPathSegment()) {
+            throw new AssertionError(
+                    "No free-hand segment should be removable after all strokes are removed");
+        }
+        canvas.setPathEditEnabled(false);
+
         target.clearPath();
         canvas.setDrawingMode(EarthMapCanvas.DrawingMode.SEGMENTED);
         canvas.setTargetDrawingEnabled(false);
@@ -103,6 +169,73 @@ public final class EarthMapCanvasSmokeTest {
             throw new AssertionError(
                     "Finish Path should stop segmented clicks from extending the target");
         }
+        canvas.setPathEditEnabled(true);
+        click(canvas, 520, 360);
+        if (target.path().size() != 3) {
+            throw new AssertionError(
+                    "Edit Path should append line vertices after a segmented path is finished");
+        }
+        canvas.finishPath();
+        click(canvas, 560, 380);
+        if (target.path().size() != 4) {
+            throw new AssertionError(
+                    "Edit Path should keep segmented append mode active after Finish Path");
+        }
+        canvas.setPathEditEnabled(false);
+        canvas.finishPath();
+        click(canvas, 590, 400);
+        if (target.path().size() != 4) {
+            throw new AssertionError(
+                    "Segmented clicks should stop appending again after Edit Path is disabled");
+        }
+        if (!canvas.canRemoveLastPathSegment()) {
+            throw new AssertionError("Segmented line segments should be removable");
+        }
+        if (!canvas.removeLastPathSegment() || target.path().size() != 3) {
+            throw new AssertionError("Remove Last Segment should remove the last segmented node");
+        }
+        if (!canvas.removeLastPathSegment() || target.path().size() != 2) {
+            throw new AssertionError("Repeated Remove Last Segment clicks should keep trimming nodes");
+        }
+        if (!canvas.removeLastPathSegment() || target.path().size() != 1) {
+            throw new AssertionError("The last segmented line should leave the starting node");
+        }
+        if (canvas.canRemoveLastPathSegment()) {
+            throw new AssertionError("A single segmented node has no line segment to remove");
+        }
+
+        target.clearPath();
+        canvas.clearPathEditHistory(target);
+        canvas.setPathEditEnabled(true);
+        canvas.setDrawingMode(EarthMapCanvas.DrawingMode.SEGMENTED);
+        click(canvas, 420, 280);
+        click(canvas, 480, 335);
+        click(canvas, 520, 360);
+        click(canvas, 560, 380);
+        if (!target.smoothPath()) {
+            throw new AssertionError("A multi-segment path should smooth before removal");
+        }
+        int smoothedCount = target.path().size();
+        if (!canvas.canRemoveLastPathSegment()) {
+            throw new AssertionError("Smoothing should preserve removable drawn segment history");
+        }
+        if (!canvas.removeLastPathSegment()
+                || target.path().size() >= smoothedCount
+                || target.path().size() < 3) {
+            throw new AssertionError(
+                    "Remove Last Segment should trim the latest drawn segment after smoothing");
+        }
+        if (!canvas.removeLastPathSegment() || target.path().size() != 2) {
+            throw new AssertionError(
+                    "Repeated removal after smoothing should keep trimming drawn segments");
+        }
+
+        target.clearPath();
+        canvas.clearPathEditHistory(target);
+        canvas.setDrawingMode(EarthMapCanvas.DrawingMode.SEGMENTED);
+        click(canvas, 420, 280);
+        click(canvas, 480, 335);
+        int segmentedEditPathCount = target.path().size();
         GeodeticPoint firstBeforeModify = Wgs84.toGeodetic(target.path().get(0));
         canvas.setModifyToolEnabled(true);
         click(canvas, 420, 280);
@@ -113,7 +246,7 @@ public final class EarthMapCanvasSmokeTest {
             throw new AssertionError("Picked trajectory nodes should follow the cursor");
         }
         click(canvas, 390, 250);
-        if (target.path().size() != 2) {
+        if (target.path().size() != segmentedEditPathCount) {
             throw new AssertionError("Placing a modified node should preserve the path points");
         }
 

@@ -33,6 +33,8 @@ final class MotionTelemetryPanel extends JPanel {
     private final JComboBox<String> drawingMode =
             new JComboBox<>(new String[]{"Free-hand", "Segmented line", "Circle", "Racetrack"});
     private final JButton finishPathButton = fullWidthButton("Finish path");
+    private final JToggleButton editPathButton = fullWidthToggleButton("Edit path", true);
+    private final JButton removeLastSegmentButton = fullWidthButton("Remove last");
     private final JButton clearPathButton = fullWidthButton("Clear path");
     private final JButton smoothPathButton = fullWidthButton("Smooth");
     private final JButton undoSmoothButton = fullWidthButton("Undo smooth");
@@ -42,6 +44,9 @@ final class MotionTelemetryPanel extends JPanel {
     private final ProfileEditor velocityEditor;
     private final ProfileEditor altitudeEditor;
     private final BooleanSupplier editingLocked;
+    private boolean editingEnabled = true;
+    private boolean presetScenarioActive;
+    private boolean canRemoveLastSegment;
 
     MotionTelemetryPanel(
             ScenarioModel model,
@@ -56,6 +61,8 @@ final class MotionTelemetryPanel extends JPanel {
             Runnable onCopyTarget,
             Consumer<EarthMapCanvas.DrawingMode> onDrawingModeChanged,
             Runnable onFinishPath,
+            Consumer<Boolean> onPathEditChanged,
+            Runnable onRemoveLastSegment,
             Runnable onClearPath,
             Runnable onSmoothPath,
             Runnable onUndoSmoothPath,
@@ -77,6 +84,8 @@ final class MotionTelemetryPanel extends JPanel {
                 onCopyTarget,
                 onDrawingModeChanged,
                 onFinishPath,
+                onPathEditChanged,
+                onRemoveLastSegment,
                 onClearPath,
                 onSmoothPath,
                 onUndoSmoothPath,
@@ -118,6 +127,8 @@ final class MotionTelemetryPanel extends JPanel {
             Runnable onCopyTarget,
             Consumer<EarthMapCanvas.DrawingMode> onDrawingModeChanged,
             Runnable onFinishPath,
+            Consumer<Boolean> onPathEditChanged,
+            Runnable onRemoveLastSegment,
             Runnable onClearPath,
             Runnable onSmoothPath,
             Runnable onUndoSmoothPath,
@@ -167,15 +178,30 @@ final class MotionTelemetryPanel extends JPanel {
                 default -> EarthMapCanvas.DrawingMode.FREE_HAND;
             });
         });
-        inner.add(drawingMode);
+
+        JPanel drawingRow = new JPanel(new GridLayout(1, 2, 8, 0));
+        drawingRow.setOpaque(false);
+        drawingRow.setAlignmentX(LEFT_ALIGNMENT);
+        drawingRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, CONTROL_BUTTON_HEIGHT));
+        finishPathButton.addActionListener(event -> onFinishPath.run());
+        drawingRow.add(drawingMode);
+        drawingRow.add(finishPathButton);
+        inner.add(drawingRow);
         inner.add(Box.createVerticalStrut(10));
 
-        JPanel pathGrid = new JPanel(new GridLayout(1, 2, 8, 0));
+        JPanel pathGrid = new JPanel(new GridLayout(1, 3, 8, 0));
         pathGrid.setOpaque(false);
         pathGrid.setMaximumSize(new Dimension(Integer.MAX_VALUE, CONTROL_BUTTON_HEIGHT));
-        finishPathButton.addActionListener(event -> onFinishPath.run());
+        editPathButton.setToolTipText(
+                "Continue the selected free-hand or segmented path when drawing again");
+        editPathButton.addActionListener(event ->
+                setPathEditSelected(editPathButton.isSelected(), onPathEditChanged));
+        removeLastSegmentButton.setToolTipText(
+                "Remove the most recent free-hand stroke or segmented line segment");
+        removeLastSegmentButton.addActionListener(event -> onRemoveLastSegment.run());
         clearPathButton.addActionListener(event -> onClearPath.run());
-        pathGrid.add(finishPathButton);
+        pathGrid.add(editPathButton);
+        pathGrid.add(removeLastSegmentButton);
         pathGrid.add(clearPathButton);
         inner.add(pathGrid);
         inner.add(Box.createVerticalStrut(10));
@@ -228,19 +254,21 @@ final class MotionTelemetryPanel extends JPanel {
     }
 
     void setEditingState(boolean editingLocked, boolean presetScenarioActive) {
-        boolean enabled = !editingLocked;
-        newTargetButton.setEnabled(enabled && !presetScenarioActive);
-        copyTargetButton.setEnabled(enabled && !presetScenarioActive && canCopySelectedTarget());
-        removeTargetButton.setEnabled(enabled && !presetScenarioActive);
-        drawingMode.setEnabled(enabled);
-        finishPathButton.setEnabled(enabled);
-        clearPathButton.setEnabled(enabled && !presetScenarioActive);
-        smoothPathButton.setEnabled(enabled && !presetScenarioActive);
-        undoSmoothButton.setEnabled(enabled && !presetScenarioActive
+        editingEnabled = !editingLocked;
+        this.presetScenarioActive = presetScenarioActive;
+        newTargetButton.setEnabled(editingEnabled && !presetScenarioActive);
+        copyTargetButton.setEnabled(editingEnabled && !presetScenarioActive && canCopySelectedTarget());
+        removeTargetButton.setEnabled(editingEnabled && !presetScenarioActive);
+        drawingMode.setEnabled(editingEnabled);
+        finishPathButton.setEnabled(editingEnabled);
+        clearPathButton.setEnabled(editingEnabled && !presetScenarioActive);
+        smoothPathButton.setEnabled(editingEnabled && !presetScenarioActive);
+        undoSmoothButton.setEnabled(editingEnabled && !presetScenarioActive
                 && selectedTarget() != null
                 && selectedTarget().canUndoSmoothing());
-        inspector.setPlatformControlsEnabled(enabled && !presetScenarioActive);
-        refreshExtrapolateControls(enabled && !presetScenarioActive);
+        inspector.setPlatformControlsEnabled(editingEnabled && !presetScenarioActive);
+        refreshPathActionControls();
+        refreshExtrapolateControls(editingEnabled && !presetScenarioActive);
         if (presetScenarioActive) {
             lockLabel.setText("Target structure locked by preset scenario");
             lockLabel.setForeground(AppTheme.statusColor(AppTheme.Status.WARNING));
@@ -269,7 +297,17 @@ final class MotionTelemetryPanel extends JPanel {
                 && canCopySelectedTarget());
         inspector.setPlatformControlsEnabled(!editingLocked.getAsBoolean()
                 && target != null);
+        refreshPathActionControls();
         refreshExtrapolateControls(!editingLocked.getAsBoolean());
+    }
+
+    void setPathEditSelected(boolean selected) {
+        setPathEditSelected(selected, null);
+    }
+
+    void setRemoveLastSegmentAvailable(boolean available) {
+        canRemoveLastSegment = available;
+        refreshPathActionControls();
     }
 
     private boolean canCopySelectedTarget() {
@@ -309,8 +347,48 @@ final class MotionTelemetryPanel extends JPanel {
         return button;
     }
 
+    private void setPathEditSelected(
+            boolean selected,
+            Consumer<Boolean> onPathEditChanged) {
+        if (editPathButton.isSelected() != selected) {
+            editPathButton.setSelected(selected);
+        }
+        styleEditPathButton();
+        if (onPathEditChanged != null) {
+            onPathEditChanged.accept(selected);
+        }
+    }
+
+    private void refreshPathActionControls() {
+        boolean pathEditingAvailable = editingEnabled && !presetScenarioActive;
+        editPathButton.setEnabled(pathEditingAvailable);
+        removeLastSegmentButton.setEnabled(pathEditingAvailable && canRemoveLastSegment);
+        styleEditPathButton();
+    }
+
+    private void styleEditPathButton() {
+        AppTheme.Palette palette = AppTheme.current();
+        boolean selected = editPathButton.isSelected();
+        editPathButton.setBackground(selected
+                ? palette.selectionBackground()
+                : palette.buttonBackground());
+        editPathButton.setForeground(editPathButton.isEnabled()
+                ? palette.buttonText()
+                : palette.mutedText());
+        editPathButton.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(selected
+                        ? palette.selectionBackground()
+                        : palette.border()),
+                BorderFactory.createEmptyBorder(4, 9, 4, 9)));
+        editPathButton.repaint();
+    }
+
     private static JToggleButton fullWidthToggleButton(String text) {
-        JToggleButton button = new JToggleButton(text);
+        return fullWidthToggleButton(text, false);
+    }
+
+    private static JToggleButton fullWidthToggleButton(String text, boolean selected) {
+        JToggleButton button = new JToggleButton(text, selected);
         sizeControlButton(button);
         return button;
     }

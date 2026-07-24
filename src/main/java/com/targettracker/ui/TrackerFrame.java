@@ -201,7 +201,9 @@ public final class TrackerFrame extends JFrame {
                 this::addTarget,
                 this::copySelectedTarget,
                 this::setDrawingMode,
-                earthMapCanvas::finishPath,
+                this::finishSelectedPath,
+                this::setPathEditActive,
+                this::removeLastPathSegment,
                 this::clearSelectedPath,
                 this::smoothSelectedPath,
                 this::undoSmoothSelectedPath,
@@ -233,6 +235,7 @@ public final class TrackerFrame extends JFrame {
         add(createStatusBar(), BorderLayout.SOUTH);
 
         motionTelemetryPanel.setSelectedTarget(selectedTarget);
+        motionTelemetryPanel.setPathEditSelected(earthMapCanvas.pathEditEnabled());
         updateStructuralEditingControls();
         refreshTelemetry();
         refreshTheme();
@@ -569,6 +572,31 @@ public final class TrackerFrame extends JFrame {
         updateModifyToolAvailability();
     }
 
+    private void setPathEditActive(boolean active) {
+        boolean enabled = active && !isScenarioEditingLocked();
+        if (enabled && moveToolButton.isSelected()) {
+            setMoveToolActive(false);
+        }
+        if (enabled && rotateToolButton.isSelected()) {
+            setRotateToolActive(false);
+        }
+        if (enabled && modifyToolButton.isSelected()) {
+            setModifyToolActive(false);
+        }
+        motionTelemetryPanel.setPathEditSelected(enabled);
+        earthMapCanvas.setPathEditEnabled(enabled);
+        statusLabel.setText(enabled
+                ? "Edit Path enabled - new free-hand strokes and line clicks extend the selected path"
+                : "Edit Path disabled");
+    }
+
+    private void finishSelectedPath() {
+        earthMapCanvas.finishPath();
+        motionTelemetryPanel.setPathEditSelected(false);
+        earthMapCanvas.setPathEditEnabled(false);
+        statusLabel.setText("Finished path - Edit Path disabled");
+    }
+
     private void onSidebarCardChanged(String cardName) {
         boolean targetCard = ControlSidebar.TARGETS.equals(cardName);
         boolean sensorCard = ControlSidebar.SENSOR.equals(cardName);
@@ -763,6 +791,7 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         selectedTarget = target;
+        earthMapCanvas.clearPathEditHistory(target);
         clearPathForTarget(playback, target);
         earthMapCanvas.finishPath();
         reconcileActiveExtrapolations();
@@ -771,6 +800,21 @@ public final class TrackerFrame extends JFrame {
         refreshTelemetry();
         refreshTimelinePanels();
         earthMapCanvas.repaint();
+    }
+
+    private void removeLastPathSegment() {
+        if (presetScenarioActive || isScenarioEditingLocked()) {
+            return;
+        }
+        TargetTrajectory target = motionTelemetryPanel.selectedTarget();
+        if (target == null) {
+            return;
+        }
+        selectedTarget = target;
+        if (earthMapCanvas.removeLastPathSegment()) {
+            refreshTimelinePanels();
+            statusLabel.setText("Removed last drawn segment for %s".formatted(target.id()));
+        }
     }
 
     private void smoothSelectedPath() {
@@ -830,11 +874,13 @@ public final class TrackerFrame extends JFrame {
         resetCompletedPlayback();
         if (target.extrapolatedToScenarioLength()) {
             if (target.removeExtrapolation()) {
+                earthMapCanvas.clearPathEditHistory(target);
                 statusLabel.setText("Removed extrapolation for %s".formatted(target.id()));
             }
         } else if (model.durationSeconds() <= 0.0) {
             statusLabel.setText("Draw a runnable target trajectory before extrapolating");
         } else if (target.extrapolateToDuration(model.durationSeconds())) {
+            earthMapCanvas.clearPathEditHistory(target);
             statusLabel.setText("%s extrapolated to %s".formatted(
                     target.id(), formatClockTime(model.durationSeconds())));
         } else {
@@ -858,6 +904,7 @@ public final class TrackerFrame extends JFrame {
         resetCompletedPlayback();
         int extrapolated = model.extrapolateTargetsToScenarioDuration();
         if (extrapolated > 0) {
+            earthMapCanvas.clearPathEditHistory();
             String noun = extrapolated == 1 ? "target" : "targets";
             statusLabel.setText("Extrapolated %d %s to %s".formatted(
                     extrapolated, noun, formatClockTime(durationSeconds)));
@@ -880,6 +927,7 @@ public final class TrackerFrame extends JFrame {
             return;
         }
         playback.reset();
+        earthMapCanvas.clearPathEditHistory(target);
         model.removeTarget(target);
         reconcileActiveExtrapolations();
         selectedTarget = model.targets().isEmpty() ? null : model.targets().get(0);
@@ -964,6 +1012,7 @@ public final class TrackerFrame extends JFrame {
         }
         playback.reset();
         PresetScenarioGenerator.generate(model, preset, parameters);
+        earthMapCanvas.clearPathEditHistory();
         presetScenarioActive = true;
         currentScenarioName = preset.toString();
         selectedTarget = model.targets().get(0);
@@ -996,6 +1045,7 @@ public final class TrackerFrame extends JFrame {
                     JOptionPane.WARNING_MESSAGE);
             return;
         }
+        earthMapCanvas.clearPathEditHistory();
         presetScenarioActive = false;
         currentScenarioName = scenario.name();
         selectedTarget = model.targets().isEmpty() ? null : model.targets().get(0);
@@ -1075,9 +1125,11 @@ public final class TrackerFrame extends JFrame {
                 continue;
             }
             if (durationSeconds > 0.0) {
-                target.extrapolateToDuration(durationSeconds);
-            } else {
-                target.removeExtrapolation();
+                if (target.extrapolateToDuration(durationSeconds)) {
+                    earthMapCanvas.clearPathEditHistory(target);
+                }
+            } else if (target.removeExtrapolation()) {
+                earthMapCanvas.clearPathEditHistory(target);
             }
         }
     }
@@ -1140,6 +1192,7 @@ public final class TrackerFrame extends JFrame {
         presetScenarioActive = false;
         currentScenarioName = "User generated";
         selectedTarget = model.replaceTargets(1).get(0);
+        earthMapCanvas.clearPathEditHistory();
         selectedBlackoutRegion = null;
         motionTelemetryPanel.replaceTargets(model.targets(), selectedTarget);
         sensorParametersPanel.refreshBlackoutRegions();
@@ -1166,6 +1219,7 @@ public final class TrackerFrame extends JFrame {
 
     private void updateStructuralEditingControls() {
         motionTelemetryPanel.setEditingState(isScenarioEditingLocked(), presetScenarioActive);
+        updatePathActionAvailability();
         boolean canMove = !isScenarioEditingLocked();
         moveToolButton.setEnabled(canMove);
         if (!canMove && moveToolButton.isSelected()) {
@@ -1450,6 +1504,14 @@ public final class TrackerFrame extends JFrame {
 
     private void refreshTelemetry() {
         motionTelemetryPanel.refresh(selectedTarget, playback);
+        updatePathActionAvailability();
+    }
+
+    private void updatePathActionAvailability() {
+        motionTelemetryPanel.setRemoveLastSegmentAvailable(
+                !isScenarioEditingLocked()
+                        && !presetScenarioActive
+                        && earthMapCanvas.canRemoveLastPathSegment());
     }
 
     private void refreshTimelinePanels() {
